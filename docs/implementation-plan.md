@@ -181,20 +181,23 @@ release `v0.9.0`.
 
 ### WP-0.5 RAUC PKI in Cloud KMS and `docs/signing.md` (2 days, GCP + flockos)
 
-- Scope: per [ADR-0006](adr/0006-rauc-pki-in-cloud-kms.md). Keys `flockos-rauc-ca`
-  (one-shot use, then disabled, 20-year CA certificate) and `flockos-rauc-signer`
-  (3-year certificate) in key ring `ironflock-release`, `europe-west1`, project
-  `record-1283`; service account `flockos-release@record-1283` with
-  `roles/cloudkms.signer` on the signer key only; WIF binding of pool `github-pool` for
-  `IronFlock/flockos` on `main` and `v*` tags. CA certificate committed as
-  `targets/common/rauc/keyring.pem`; signer certificate committed next to it.
+- Scope: per [ADR-0006](adr/0006-rauc-pki-in-cloud-kms.md) and its implementation
+  note. HSM keys `flockos-rauc-ca/root` (disabled after use, 20-year CA certificate)
+  and `flockos-rauc/bundle-signer` (3-year certificate), RSA 4096 PKCS#1 SHA-256, in
+  two dedicated key rings in `europe-west1`, project `record-1283`; service account
+  `flockos-release@record-1283` with `roles/cloudkms.signerVerifier` on the signer key
+  and `roles/cloudkms.viewer` on its ring only; workload identity binding of pool
+  `github-pool` for release runs of `IronFlock/flockos`. Certificates committed in
+  `pki/`. Done by `tools/rauc-pki/ceremony.sh`, run by a project owner.
 - Deliverables: the keys, the two certificates, `docs/signing.md` (the exact `libkmsp11`
   configuration, `RAUC_PKCS11_MODULE`, the `pkcs11:` URI, the rotation procedure for the
   signer, what a dry run uses instead), and a `workflow_dispatch` job that proves
   `rauc bundle --key 'pkcs11:...'` from a runner against a trivial bundle.
-- Acceptance: the proof job produces a bundle that `rauc info --keyring keyring.pem`
-  verifies; no key material appears in the repository, in logs or in artefacts; the CA key
-  is disabled after signing the signer certificate.
+- Acceptance: `openssl verify` chains the signer certificate to the CA; the CA key
+  version is disabled; no key material appears in the repository, in logs or in
+  artefacts. The workload identity grants the signer only to release runs on `main` or
+  a `v*` tag, so the PKCS#11 path is proven by the first release after WP-1.6, not by a
+  manual run.
 
 ### WP-0.6 Security scan switches to blocking (half a day, due 2026-11-18)
 
@@ -220,9 +223,11 @@ Milestones M1 (WP-1.2) and M2 (WP-1.5, WP-1.6).
 - Deliverables: a rootfs tar per target and variant, the `trivy rootfs` CycloneDX SBOM of
   it, unit tests, `docs/build.md` (how to run the build locally in a container for
   debugging, although CI is the build of record).
-- Acceptance: `just build amd64-efi base` in CI produces the tar in under 10 minutes;
-  two builds of the same commit produce the same tar hash; the SBOM lists Docker CE and
-  the kernel package at the pinned versions.
+- Acceptance: `just build amd64-efi base` in CI produces the rootfs in under 10 minutes;
+  timestamps, filesystem UUIDs and seeds are derived from the commit, and the package
+  manifest (`packages.tsv`) lists Docker CE at the pinned versions and the kernel. Bit
+  identity across days is not a goal while the Debian archive is not pinned to a
+  snapshot (`docs/build.md`).
 
 ### WP-1.2 `amd64-efi` target: GRUB, partitions, disk image (3 days)
 
@@ -231,7 +236,9 @@ Milestones M1 (WP-1.2) and M2 (WP-1.5, WP-1.6).
   `genimage`, sparse output, `gzip -k`); GRUB EFI binary with the RAUC A/B `grub.cfg`
   reading `ORDER`, `A_OK/A_TRY`, `B_OK/B_TRY` from `grubenv` on the ESP; kernel and
   initrd inside the slot; partition layout and labels of section 3.2 (`FLOCKOS`,
-  `rootfs-a`, `rootfs-b`, `data`); `systemd-repart` growth of `data` on first boot.
+  `rootfs-a`, `rootfs-b`, `data`). The image holds `FLOCKOS` and `rootfs-a` only;
+  `systemd-repart` creates `rootfs-b` and `data` on the first boot, which keeps the
+  image at 4.3 GB instead of 8.3 GB.
 - Deliverables: `flockos-amd64-efi-base-<v>.img.gz` from `just build amd64-efi base`,
   a `just qemu` recipe that boots the image with OVMF for manual inspection.
 - Acceptance (M1): the CI-built image boots in QEMU/OVMF to `multi-user.target`; `lsblk`
@@ -241,8 +248,10 @@ Milestones M1 (WP-1.2) and M2 (WP-1.5, WP-1.6).
 ### WP-1.3 Shared overlay: `/data` redirections, os-release, enroll placeholder (2 days)
 
 - Scope: `overlay/` with the units and symlinks that implement the redirection table of
-  section 3.2 (`/opt/ironflock`, `/home`, NetworkManager connections, SSH host keys,
-  `machine-id`, journal, `/var/cache/flockos`, `/var/lib/fwupd`, `/etc/flockos/rt.conf`),
+  section 3.2 as bind mounts (`/opt/ironflock`, `/home`, NetworkManager connections,
+  journal, `/var/cache/flockos`, `/var/lib/fwupd`), SSH host keys on `/data`, and the
+  machine-id and hostname carried into each new slot by a RAUC post-install handler
+  (a machine-id on `/data` would be needed before `/data` is mounted),
   `/etc/os-release` written by the build from `VERSION`, target, variant and commit in the
   contract of section 3.1, `flockos-enroll.service` that for now runs the public
   device-init installer with the newest `*.flock` from `FLOCKOS` (full enroll is WP-2.3),
@@ -273,7 +282,9 @@ Milestones M1 (WP-1.2) and M2 (WP-1.5, WP-1.6).
 
 ### WP-1.5 QEMU test harness and `image-test` job (3 days)
 
-- Scope: `test/qemu/` (bats): boot to multi-user, redirection checks of WP-1.3, Docker
+- Scope: `test/qemu/run.py` (Python standard library, driving a root debug shell on
+  the second serial port that the test copy's grubenv enables): boot to multi-user,
+  redirection checks of WP-1.3, Docker
   runs a preloaded `hello-world` image, the A/B and fallback sequence of WP-1.4, fwupd
   inventory (WP-1.7); serial console capture as artefact on failure; KVM on the
   GitHub-hosted runner; `ci.yml` job `image-test` after `gate`, required by `ci-ok`.
