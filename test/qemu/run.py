@@ -495,7 +495,8 @@ def install_test(args, conf, arch, version, kvm, boot_timeout, port):
 
         # Boot the NVMe alone, with the UEFI variables the installer wrote.
         set_test_cmdline(nvme, workdir, DEBUG_CMDLINE)
-        os.remove(vm.sock_path)
+        if os.path.exists(vm.sock_path):
+            os.remove(vm.sock_path)
         vm2 = VM(arch, nvme, workdir, kvm, nvme=True)
         runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1")
         try:

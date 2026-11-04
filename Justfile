@@ -21,7 +21,9 @@ lint:
     set -euo pipefail
     echo "==> just --fmt --check"
     just --fmt --check --unstable
-    scripts=$(git ls-files | xargs -r grep -lE '^#!/(usr/)?bin/(env )?(ba)?sh' 2>/dev/null || true)
+    # Shell scripts: a sh or bash shebang on the first line (a shebang in a
+    # test's heredoc does not count).
+    scripts=$(git ls-files | while read -r f; do [ -f "$f" ] && head -n 1 "$f" | grep -qE '^#!/(usr/)?bin/(env )?(ba)?sh$' && echo "$f"; done || true)
     if [ -n "$scripts" ]; then
         if command -v shellcheck >/dev/null; then
             echo "==> shellcheck"
