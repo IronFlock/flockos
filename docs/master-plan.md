@@ -3,7 +3,7 @@
 Status: draft v1.1, 2026-11-04 (v1.1 adds firmware updates and the real-time kernel option). Owner: Marko Petzold. Scope: this repository and the
 cross-repo changes it needs in device-init, device-agent, flasher, workflows and
 the GCP project.
-
+****
 This document is the plan of record for turning the ReswarmOS repository into the
 FlockOS image pipeline. The evidence behind every "today" statement is in
 [current-state-audit.md](current-state-audit.md). The decisions that shape the plan
@@ -567,6 +567,8 @@ the hardware checklist.
 
 Effort is in engineer-weeks for one engineer who knows the stack; treat as ±50%.
 Phases 3, 4 and 4b can run in parallel with 5; 6 is independent after 2.
+The phases are cut into work packages with acceptance criteria, estimates and
+dependencies in [implementation-plan.md](implementation-plan.md); that is the list to work from.
 
 ### Phase 0: Foundations and hygiene (1 to 2 weeks)
 
