@@ -48,6 +48,7 @@ Nothing is built, signed or published from a laptop.
 ## Documentation
 
 - [docs/master-plan.md](docs/master-plan.md): goals, architecture, roadmap, cross-repo changes
+- [docs/implementation-plan.md](docs/implementation-plan.md): the work packages to follow, with milestones and acceptance criteria
 - [docs/current-state-audit.md](docs/current-state-audit.md): what the previous trees did and why they were replaced
 - [docs/adr/](docs/adr/): architecture decision records
 
