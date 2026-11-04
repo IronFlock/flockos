@@ -72,11 +72,19 @@ jobs:
       - name: just test
         run: just test
 
+  # Both kernels of the base variant (master plan, section 3.11).
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [std, rt]
+    env:
+      KERNEL: ${{ matrix.kernel }}
+      SUFFIX: ${{ matrix.kernel == 'rt' && '-rt' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -101,15 +109,15 @@ jobs:
         run: |
           sudo mkdir -p /mnt/flockos-work
           df -h / /mnt
-      - name: just build ${{ env.TARGET }} ${{ env.VARIANT }}
+      - name: just build ${{ env.TARGET }} ${{ env.VARIANT }} ${{ matrix.kernel }}
         env:
           FLOCKOS_WORK: /mnt/flockos-work
-        run: just build "$TARGET" "$VARIANT"
+        run: just build "$TARGET" "$VARIANT" "$KERNEL"
       - name: upload the image and bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: image-${{ env.TARGET }}-${{ env.VARIANT }}
-          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}/
+          name: image-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
+          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}/
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
@@ -123,14 +131,21 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [std, rt]
+    env:
+      KERNEL: ${{ matrix.kernel }}
+      SUFFIX: ${{ matrix.kernel == 'rt' && '-rt' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: image-${{ env.TARGET }}-${{ env.VARIANT }}
-          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}
+          name: image-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
+          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
       - name: install QEMU, OVMF and mtools
         run: |
           sudo apt-get update -qq
@@ -150,13 +165,13 @@ jobs:
         run: |
           sudo mkdir -p /mnt/flockos-qemu
           sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
-          python3 -I test/qemu/run.py --target "$TARGET" --variant "$VARIANT" \
+          python3 -I test/qemu/run.py --target "$TARGET" --variant "$VARIANT" --kernel "$KERNEL" \
             --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: qemu-logs-${{ env.TARGET }}-${{ env.VARIANT }}
+          name: qemu-logs-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
           path: |
             /mnt/flockos-qemu/console.log
             /mnt/flockos-qemu/shell.log

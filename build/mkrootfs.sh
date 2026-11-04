@@ -7,7 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
-: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}"
+: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}" "${KERNEL:?}"
 require mmdebstrap
 
 profile=$src/profiles/base
@@ -40,6 +40,14 @@ SOURCES
 } >"$sources/docker.sources"
 
 mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH")
+# The rt kernel axis (section 3.11): Debian's PREEMPT_RT kernel instead of the
+# standard one, plus profiles/kernel-rt.
+if [ "$KERNEL" = rt ]; then
+  rt=$src/profiles/kernel-rt
+  mapfile -t packages < <(printf '%s\n' "${packages[@]}" | grep -v '^linux-image-')
+  mapfile -t -O "${#packages[@]}" packages < <(read_list "$rt/packages" "$rt/packages.$ARCH")
+  printf '%s\n' "${packages[@]}" | grep -q '^linux-image-rt-' || die "no rt kernel for $ARCH in profiles/kernel-rt"
+fi
 pin() { # pin PACKAGE VERSION: replace PACKAGE with PACKAGE=VERSION
   local i found=0
   for i in "${!packages[@]}"; do

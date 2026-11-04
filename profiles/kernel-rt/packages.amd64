@@ -1,0 +1,3 @@
+# The PREEMPT_RT kernel axis on amd64 (master plan, section 3.11; WP-4b.1):
+# replaces linux-image-amd64 of profiles/base.
+linux-image-rt-amd64

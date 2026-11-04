@@ -42,7 +42,10 @@ Sequence:
    root and passwords; no account has a password; RAUC reports slot A booted with
    the right compatible; Docker's data-root is on `/data` and, with
    `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers.
-2. **Reboot.** machine-id, SSH host key and the persistent journal survive.
+2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
+   an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
+   `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
+   `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked
    good, and keeps machine-id, host key and `/data`.

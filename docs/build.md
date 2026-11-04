@@ -86,6 +86,33 @@ installer USB uses its own names.
 - `flockos-mark-good.service` marks a slot good once Docker runs; the real
   health gate (the agent reached the platform) comes with WP-2.4.
 
+## The rt kernel
+
+`just build amd64-efi base rt` builds the `-rt` image (master plan, section
+3.11): Debian's PREEMPT_RT kernel (`linux-image-rt-amd64`) instead of the
+standard one, `rt-tests` (`cyclictest`, `hwlatdetect`), and
+`flockos-rt-tuning`. Its RAUC compatible is `flockos-amd64-efi-base-rt`, so an
+`-rt` device only takes `-rt` bundles; switching kernels is a reflash in 1.x.
+The rt kernel is offered for `base` only (NVIDIA's modules do not support
+PREEMPT_RT on x86).
+
+`/etc/flockos/rt.conf` (on `/data`, written by the platform) sets the tuning:
+
+```ini
+isolate=2-3      # CPUs for real-time work: isolcpus, nohz_full, rcu_nocbs
+irq=0-1          # CPUs that take interrupts: irqaffinity
+cstates=limit    # limit deep C-states (default); on: leave them
+thp=never        # transparent huge pages (default never)
+governor=performance
+```
+
+`flockos-rt-tuning` runs at boot and whenever the file changes. It writes the
+kernel parameters into `FLOCKOS_RT_CMDLINE` in grubenv, which GRUB adds on both
+slots, so they survive updates; a change applies at the next boot, and
+`/run/flockos/rt-reboot-required` says so. THP and the governor apply at once.
+Real-time containers run with `--cap-add SYS_NICE --ulimit rtprio=99
+--cpuset-cpus <isolated CPUs>`.
+
 ## Building locally
 
 Docker is the only requirement. On an arm64 Mac an amd64 image builds under

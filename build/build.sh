@@ -23,7 +23,9 @@ case "$VARIANT" in
   nvidia) die "the nvidia variant arrives with Phase 4 (WP-4.1)" ;;
   installer) die "the installer variant arrives with Phase 3 (WP-3.2)" ;;
 esac
-[ "$KERNEL" = std ] || die "the rt kernel arrives with Phase 4b (WP-4b.1)"
+# The rt kernel is offered for base only: NVIDIA's modules do not support
+# PREEMPT_RT on x86 (section 3.11).
+[ "$KERNEL" = std ] || [ "$VARIANT" = base ] || die "the rt kernel is built for the base variant only"
 
 : "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
 FLOCKOS_DIRTY=${FLOCKOS_DIRTY:-}
