@@ -29,14 +29,19 @@ setup() {
   [[ "$output" == *"use-bundle-signing-time=true"* ]]
 }
 
-@test "slot B has slot A's size on every variant" {
+@test "both slots have the variant's fixed size, the ESP its own; only /data grows" {
   for v in BASE NVIDIA; do
     var=SLOT_SIZE_$v
-    SLOT_SIZE=${!var} run render "$repo/targets/amd64-efi/repart.d/30-rootfs-b.conf"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"SizeMinBytes=${!var}"* ]]
-    [[ "$output" == *"SizeMaxBytes=${!var}"* ]]
+    for f in 20-rootfs-a 30-rootfs-b; do
+      SLOT_SIZE=${!var} run render "$repo/targets/amd64-efi/repart.d/$f.conf"
+      [ "$status" -eq 0 ]
+      [[ "$output" == *"SizeMinBytes=${!var}"* ]]
+      [[ "$output" == *"SizeMaxBytes=${!var}"* ]]
+    done
   done
+  run render "$repo/targets/amd64-efi/repart.d/10-esp.conf"
+  [[ "$output" == *"SizeMaxBytes=$ESP_SIZE"* ]]
+  ! grep -q SizeMaxBytes "$repo/targets/amd64-efi/repart.d/40-data.conf"
 }
 
 @test "the genimage layout gives slot A the slot size" {

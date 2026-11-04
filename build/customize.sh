@@ -78,8 +78,15 @@ systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service flockos-mark-good.s
 # rauc-mark-good would mark every slot good at boot: the health gate is
 # flockos-mark-good (Phase 1) and the device-agent (Phase 2). sshd-keygen
 # would make host keys in /etc/ssh on every slot; they live on /data.
+# NetworkManager owns the network: systemd-networkd and its wait unit would
+# hold network-online.target for two minutes and fail.
 systemctl --root="$ROOT" mask apt-daily.timer apt-daily-upgrade.timer fwupd-refresh.timer \
-  systemd-firstboot.service rauc-mark-good.service sshd-keygen.service
+  systemd-firstboot.service rauc-mark-good.service sshd-keygen.service \
+  systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service
+# sshd listens on the network only; systemd's SSH generator (vsock, AF_UNIX)
+# fails on machines without vsock.
+mkdir -p "$ROOT/etc/systemd/system-generators"
+ln -sfn /dev/null "$ROOT/etc/systemd/system-generators/systemd-ssh-generator"
 for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enroll.service; do
   systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
 done
