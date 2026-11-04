@@ -1,0 +1,64 @@
+# Packages of every FlockOS image (master plan, sections 3.1, 3.4, 3.7, 3.9).
+# One per line; Recommends are not installed, so everything needed is listed.
+
+# system
+systemd
+systemd-sysv
+systemd-repart
+systemd-timesyncd
+udev
+dbus
+kmod
+initramfs-tools
+zstd
+e2fsprogs
+dosfstools
+util-linux
+procps
+less
+vim-tiny
+sudo
+tzdata
+
+# the package set device-init installs (ironflock-init bake does it from
+# Phase 2 on; listed here so the image is complete before that)
+jq
+ca-certificates
+curl
+gnupg
+lsb-release
+net-tools
+iproute2
+bind9-dnsutils
+network-manager
+openssh-server
+
+# networking
+iputils-ping
+wpasupplicant
+iw
+wireless-regdb
+nftables
+
+# updates: RAUC, its GRUB environment tool, and firmware (lane 3)
+rauc
+# the D-Bus service the CLI and the device-agent talk to
+rauc-service
+squashfs-tools
+fwupd
+
+# firmware loaded by the kernel (lane 1)
+firmware-linux-free
+firmware-misc-nonfree
+firmware-realtek
+firmware-iwlwifi
+firmware-atheros
+firmware-brcm80211
+firmware-mediatek
+
+# Docker CE from download.docker.com, versions pinned in profiles/base/versions
+docker-ce
+docker-ce-cli
+containerd.io
+docker-buildx-plugin
+docker-compose-plugin

@@ -1,0 +1,14 @@
+# FlockOS mounts (master plan, section 3.2). The root slot is mounted by the
+# kernel (root=PARTUUID=… from GRUB). Partition names are GPT names.
+PARTLABEL=FLOCKOS  /boot/efi  vfat  umask=0077,shortname=winnt  0  2
+# /data is created by systemd-repart on the first boot.
+PARTLABEL=data     /data      ext4  defaults,x-systemd.requires=systemd-repart.service,x-systemd.after=systemd-repart.service  0  2
+
+# State that survives an A/B switch: bind mounts from /data, after
+# flockos-data-layout.service has created the directories.
+/data/ironflock            /opt/ironflock                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+/data/home                 /home                                   none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+/data/network/connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+/data/log/journal          /var/log/journal                        none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+/data/cache                /var/cache/flockos                      none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+/data/fwupd                /var/lib/fwupd                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0

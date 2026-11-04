@@ -1,0 +1,18 @@
+# Phase 1 placeholder (master plan, section 3.5 step 6): from Phase 2 on the
+# device-agent marks the slot good after it has reached the platform, and this
+# unit is removed. Until then the slot counts as good once Docker is up.
+# `flockos.no-mark-good` on the kernel command line keeps the slot untested,
+# so the next boot falls back (used by the QEMU tests).
+[Unit]
+Description=FlockOS: mark the booted RAUC slot good
+After=docker.service
+Requires=docker.service
+ConditionKernelCommandLine=rauc.slot
+ConditionKernelCommandLine=!flockos.no-mark-good
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rauc status mark-good
+
+[Install]
+WantedBy=multi-user.target

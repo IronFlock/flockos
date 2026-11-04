@@ -1,0 +1,17 @@
+#!/bin/sh
+# Create the directories of /data that FlockOS bind-mounts or uses
+# (master plan, section 3.2). Idempotent; runs on every boot before the bind
+# mounts of /etc/fstab.
+set -eu
+# FLOCKOS_DATA: for the unit tests only.
+d=${FLOCKOS_DATA:-/data}
+mkdir -p "$d/ironflock" "$d/home" "$d/cache" "$d/fwupd" "$d/flockos" "$d/rauc" "$d/etc/ssh"
+mkdir -p "$d/network/connections"
+chmod 0700 "$d/network/connections"
+# journald writes here once the journal is flushed; same ownership and mode
+# as a fresh /var/log/journal.
+if [ ! -d "$d/log/journal" ]; then
+  mkdir -p "$d/log/journal"
+  chgrp systemd-journal "$d/log/journal" 2>/dev/null || true
+  chmod 2755 "$d/log/journal"
+fi

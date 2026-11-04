@@ -1,0 +1,36 @@
+#!/bin/sh
+# RAUC post-install handler (system.conf [handlers]): carries the device's
+# identity into the root slot RAUC has just written, so the new slot boots as
+# the same machine. machine-id keeps the journal and the DHCP client id;
+# hostname is what device-init or the platform set.
+set -eu
+
+files="/etc/machine-id /etc/hostname"
+prefix=${RAUC_MOUNT_PREFIX:-/run/rauc}
+
+for i in ${RAUC_TARGET_SLOTS:-}; do
+  eval "class=\${RAUC_SLOT_CLASS_$i:-}"
+  eval "device=\${RAUC_SLOT_DEVICE_$i:-}"
+  # shellcheck disable=SC2154 # assigned by the eval above
+  [ "$class" = rootfs ] || continue
+  # shellcheck disable=SC2154
+  [ -b "$device" ] || {
+    echo "rauc-post-install: $device is not a block device" >&2
+    exit 1
+  }
+  mnt="$prefix/flockos-post-install-$i"
+  mkdir -p "$mnt"
+  mount -t ext4 "$device" "$mnt"
+  # shellcheck disable=SC2064 # expand now: the mount point of this slot
+  trap "umount '$mnt'; rmdir '$mnt'" EXIT
+  for f in $files; do
+    if [ -s "$f" ]; then
+      cp -p "$f" "$mnt$f"
+    fi
+  done
+  sync -f "$mnt" 2>/dev/null || sync
+  umount "$mnt"
+  rmdir "$mnt"
+  trap - EXIT
+  echo "rauc-post-install: copied machine-id and hostname to slot $i ($device)"
+done

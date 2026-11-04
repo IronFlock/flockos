@@ -1,0 +1,5 @@
+# amd64 additions to profiles/base/packages.
+linux-image-amd64
+grub-common
+amd64-microcode
+intel-microcode

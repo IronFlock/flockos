@@ -1,0 +1,15 @@
+# Packages of the build container (build/in-builder.sh installs them).
+mmdebstrap
+debian-archive-keyring
+ca-certificates
+genimage
+rauc
+squashfs-tools
+e2fsprogs
+dosfstools
+mtools
+grub-common
+openssl
+pigz
+zstd
+xz-utils
