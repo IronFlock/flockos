@@ -39,3 +39,12 @@ repos already sign releases with Cloud KMS through Workload Identity Federation.
   reflashed, which the different partition layout requires anyway.
 - Certificate expiry becomes an operational calendar item (signer rotation every 3
   years) rather than a yearly surprise.
+
+## Implementation note (2026-11-04, WP-0.5)
+
+The keys live in two dedicated key rings, `flockos-rauc-ca/root` and
+`flockos-rauc/bundle-signer`, instead of `ironflock-release`: Google's PKCS#11
+library needs list rights on the whole ring it signs from, and the release
+identity must not see other products' release keys or the CA. Both keys are
+HSM-protected RSA 4096 with PKCS#1 SHA-256 (RAUC signs SHA-256 digests; an
+EC P-384 KMS key would accept only SHA-384). Details in `docs/signing.md`.

@@ -1,0 +1,96 @@
+# Signing FlockOS update bundles
+
+How RAUC bundles are signed and verified (ADR-0006). No private key exists on
+a runner, a laptop or in this repository.
+
+## The PKI
+
+| Object | Where | Used by |
+|--------|-------|---------|
+| Root CA key | Cloud KMS `record-1283/europe-west1/flockos-rauc-ca/root`, HSM, RSA 4096 PKCS#1 SHA-256 | a project owner, once, and every three years to issue a signer certificate; its key version stays disabled in between |
+| Root CA certificate | [`pki/flockos-root-ca.pem`](../pki/), 20 years | every release image as `/etc/rauc/keyring.pem` |
+| Bundle signer key | Cloud KMS `record-1283/europe-west1/flockos-rauc/bundle-signer`, HSM, RSA 4096 PKCS#1 SHA-256 | release runs of `release.yml`, through PKCS#11 |
+| Bundle signer certificate | `pki/flockos-bundle-signer-<year>.pem`, 3 years, code signing only | embedded in every release bundle |
+| Release identity | service account `flockos-release@record-1283` | only `release.yml` on a push to `main` or a `v*` tag of IronFlock/flockos (workload identity attribute `release=<repo id>:release`, the mapping device-init's signer uses) |
+
+RSA 4096 with SHA-256 rather than EC P-384: RAUC signs SHA-256 digests, and a
+Cloud KMS key accepts only the digest of its own algorithm. HSM protection:
+the root CA is in the keyring of every device for twenty years.
+
+The two keys sit in two key rings because Google's PKCS#11 library lists every
+key of the ring it is pointed at: the release identity can list and use the
+signer ring and nothing else, so it can never sign with the CA, whatever a
+later IAM change on the CA ring looks like.
+
+Devices trust the CA, not the signer: a new signer certificate needs no device
+update. RAUC checks the chain with `check-purpose=codesign` and at the bundle's
+signing time (`use-bundle-signing-time=true`), because Raspberry Pis have no
+real-time clock.
+
+## Creating the PKI (once, WP-0.5)
+
+A project owner runs, on a branch of this repository:
+
+```sh
+gcloud auth application-default login     # rauc-pki signs as these credentials
+tools/rauc-pki/ceremony.sh                # shows every step, changes nothing
+tools/rauc-pki/ceremony.sh --yes          # creates rings, keys, identity; issues both certificates
+```
+
+The script is idempotent. It creates the two HSM keys, the `flockos-release`
+service account with `roles/cloudkms.signerVerifier` on the signer key and
+`roles/cloudkms.viewer` on its ring, binds the workload identity, issues the
+root CA certificate and the signer certificate with `tools/rauc-pki` (a small Go
+program that has KMS sign the certificates; only SHA-256 digests leave the
+machine), disables the CA key version, and verifies the chain with `openssl`.
+The two certificates then go into `pki/` with a pull request.
+
+## How a release run signs (WP-1.6)
+
+`release.yml` authenticates with workload identity as `flockos-release`, then
+signs through Google's PKCS#11 library `libkmsp11.so`:
+
+```yaml
+# $KMS_PKCS11_CONFIG, written by the job (file mode 0600, owner only)
+tokens:
+  - key_ring: projects/record-1283/locations/europe-west1/keyRings/flockos-rauc
+    label: flockos-rauc
+```
+
+```sh
+export RAUC_PKCS11_MODULE=/path/to/libkmsp11.so
+rauc bundle --cert pki/flockos-bundle-signer-<year>.pem \
+  --key 'pkcs11:token=flockos-rauc;object=bundle-signer' content/ bundle.raucb
+```
+
+The object is addressed by label (the key's name), not by id: OpenSC's libp11
+limits ids to 100 characters, which a KMS key version name exceeds. The library
+version and checksum are pinned in `tools.lock`.
+
+## Pull requests and local builds
+
+Every other build signs with a throwaway CA and signer made by
+`build/signing.sh` and discarded with the build. Its image trusts only that
+throwaway CA, so a pull-request image never installs a release bundle and a
+release image never a pull-request bundle. Dry runs of `release.yml` on release
+pull requests sign the same way; the workload identity is not available to
+them.
+
+## Renewing the signer certificate (every three years)
+
+1. Enable the CA key version:
+   `gcloud kms keys versions enable 1 --key root --keyring flockos-rauc-ca --location europe-west1 --project record-1283`.
+2. Add a key version to `bundle-signer` if the old key is to be retired as
+   well, or reuse version 1.
+3. Issue `pki/flockos-bundle-signer-<year>.pem` with
+   `go -C tools/rauc-pki run . issue …` (see `ceremony.sh` for the flags).
+4. Disable the CA key version again; open a pull request with the new
+   certificate; `release.yml` uses the newest `pki/flockos-bundle-signer-*.pem`.
+
+Devices need nothing: the CA in their keyring verifies the new signer.
+
+## Retired keys
+
+The 2021 and 2025 ReswarmOS certificates and the key committed to the archived
+`IronFlock/flockos-buildroot-legacy` are never used again; `gs://reswarmos-certs`
+is empty. FlockOS devices do not trust them.
