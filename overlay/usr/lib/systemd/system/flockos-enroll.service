@@ -1,16 +1,18 @@
+# Enrolls the slot: on its first boot (no /var/lib/flockos/enrolled in this
+# slot) and whenever a .flock lies on the FLOCKOS partition. No network
+# needed; NetworkManager must run for the WiFi profile.
 [Unit]
-Description=FlockOS: enroll the device from a .flock file
+Description=FlockOS: enroll the device from its .flock
 Documentation=https://github.com/IronFlock/flockos/blob/main/docs/master-plan.md
-After=docker.service network-online.target boot-efi.mount local-fs.target
-Wants=network-online.target
-ConditionPathExists=!/data/ironflock/enrolled
+After=docker.service NetworkManager.service boot-efi.mount local-fs.target
+Wants=NetworkManager.service
+ConditionPathExists=|!/var/lib/flockos/enrolled
+ConditionPathExistsGlob=|/boot/efi/*.flock
 
 [Service]
 Type=oneshot
 ExecStart=/usr/lib/flockos/enroll
-TimeoutStartSec=30min
-Restart=on-failure
-RestartSec=60s
+TimeoutStartSec=10min
 
 [Install]
 WantedBy=multi-user.target
