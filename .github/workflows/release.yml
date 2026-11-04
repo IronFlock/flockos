@@ -1,0 +1,91 @@
+# Release of FlockOS: the merge of a release pull request (`just
+# release-patch`: version bump, title `release flockos v<version>`) builds
+# every image, signs the RAUC bundles in Cloud KMS, publishes images, bundles
+# and the signed catalog, and sets the tag last (a tag means "devices can get
+# it"). Nothing is built, signed or published from a laptop.
+#
+# Phase 0 (docs/master-plan.md): only `verify` and `tag` exist. The build,
+# sign, stage, e2e and promote jobs arrive with Phases 1 and 2 and slot in
+# between them, each `needs` the one before, and `tag` needs the last.
+#
+# A no-release merge starts nothing: `paths` holds only VERSION, and when a
+# no-release pull request touches it anyway the jobs are skipped by its merge
+# title. ci.yml calls this workflow on release pull requests (workflow_call)
+# as a dry run; a manual run (workflow_dispatch) is a dry run too.
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    # A no-release merge that touches the version file anyway: no runner.
+    if: github.event_name != 'push' || startsWith(github.event.head_commit.message, 'release ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      # release: publish and tag; released: a re-run after the tag (nothing
+      # left to do); dry-run: build, publish nothing.
+      mode: ${{ steps.mode.outputs.mode }}
+      tag: ${{ steps.mode.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: v1
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+      - name: what this run releases
+        id: mode
+        env:
+          VERSION_FILE: VERSION
+          TAG_PREFIX: v
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_BRANCH: main
+          COMMIT_TITLE: ${{ github.event.head_commit.message }}
+          SHA: ${{ github.sha }}
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          "$RUNNER_TEMP/harness/scripts/release.sh" mode
+
+  # Phase 1 adds here: build (matrix target x variant x kernel) with SBOM and
+  # provenance, sign (Cloud KMS via PKCS#11, throwaway key on dry runs),
+  # stage, e2e, promote.
+
+  tag:
+    needs: [verify]
+    if: needs.verify.outputs.mode == 'release'
+    uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
+    permissions:
+      contents: read
+    # The App key is a secret of the `release` environment; environment
+    # secrets reach a reusable workflow only through `secrets: inherit`.
+    secrets: inherit # zizmor: ignore[secrets-inherit] # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
+    with:
+      version-file: VERSION

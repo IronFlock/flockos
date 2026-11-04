@@ -1,0 +1,5 @@
+NAME=ReswarmOS-image
+VERSION=v0.5.7-gef5be0b-20250202T180629
+ID=reswarmos
+VERSION_ID=gef5be0bafa4c8f702d45f12c44a959d74f097700
+PRETTY_NAME="ReswarmOS-0.5.7"
