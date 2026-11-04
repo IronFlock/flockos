@@ -1,6 +1,0 @@
-config BR2_PACKAGE_SHADOW
-        bool "shadow"
-        help
-          Password and account management tool suite with support for shadow files and PAM.
-          
-          https://github.com/shadow-maint/shadow
