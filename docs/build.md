@@ -76,6 +76,16 @@ Known limit of 1.x: slots are found by GPT partition name (`rootfs-a`,
 A second FlockOS disk attached to a running device is therefore ambiguous; the
 installer USB uses its own names.
 
+## Limits of the Phase 1 image
+
+- Enrollment runs once per device, through the public device-init installer.
+  The SSH user, its sudo rule and the agent's systemd unit live in the root
+  slot, so after an A/B update the new slot has none of them until
+  `ironflock-init enroll` re-applies them on the first boot of every slot
+  (WP-2.2, WP-2.3). Phase 1 images are for testing the image, not for the field.
+- `flockos-mark-good.service` marks a slot good once Docker runs; the real
+  health gate (the agent reached the platform) comes with WP-2.4.
+
 ## Building locally
 
 Docker is the only requirement. On an arm64 Mac an amd64 image builds under
