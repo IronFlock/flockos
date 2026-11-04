@@ -229,7 +229,8 @@ class VM:
             # line never matches the output.
             self._send(f"\recho __PI''NG_{tag}\r")
             if self._read_until(rb"__PING_" + tag.encode(), 5):
-                self.run("stty -echo; PS1=; PS2=; export PS1 PS2", timeout=10, check=False)
+                self.run("stty -echo; PS1=; PS2=; export PS1 PS2 SYSTEMD_PAGER= PAGER=cat SYSTEMD_COLORS=0 "
+                         "COLUMNS=1000 TERM=dumb", timeout=10, check=False)
                 return self.run("cat /proc/sys/kernel/random/boot_id").strip()
         raise TestFailure(f"no shell on the second serial port after {timeout}s (see console.log)")
 
@@ -296,7 +297,7 @@ class Runner:
     def wait_running(self):
         state = self.vm.run("systemctl is-system-running --wait", timeout=self.boot_timeout, check=False).strip()
         if state != "running":
-            failed = self.vm.run("systemctl --failed --no-legend --plain", check=False)
+            failed = self.vm.run("systemctl --failed --no-legend --plain --no-pager --full", check=False)
             raise TestFailure(f"system state {state!r}; failed units:\n{failed}")
 
     def rauc_status(self):
