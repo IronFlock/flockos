@@ -50,6 +50,12 @@ Sequence:
    primary; A boots once with `A_TRY=1` and is never marked good; the next boot
    falls back to B.
 
+**Install test** (`--variant installer`, the `install-test` job): the installer
+image is attached as a USB stick with `installer.conf` set to `confirm=no`, next
+to a blank 20 GiB NVMe. The stick must install to `/dev/nvme0n1` on its own and
+power off; its log must say so. The NVMe then boots alone, with the UEFI
+variables the installer wrote, and passes the first-boot checks above.
+
 Locally (Linux with KVM, or slowly under emulation elsewhere) after a build:
 
 ```sh

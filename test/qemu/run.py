@@ -129,8 +129,11 @@ def set_test_cmdline(disk, workdir, cmdline):
 
 
 class VM:
-    def __init__(self, arch, disk, workdir, kvm):
+    def __init__(self, arch, disk, workdir, kvm, stick=None, nvme=False):
         self.arch, self.disk, self.workdir, self.kvm = arch, disk, workdir, kvm
+        # stick: an image attached as a USB stick (booted first); nvme: the
+        # disk is an NVMe drive instead of virtio.
+        self.stick, self.nvme = stick, nvme
         self.sock_path = os.path.join(workdir, "shell.sock")
         self.console = os.path.join(workdir, "console.log")
         self.proc = None
@@ -158,8 +161,15 @@ class VM:
         cmd += ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}"]
         if vars_template:
             cmd += ["-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}"]
+        if self.nvme:
+            cmd += ["-drive", f"if=none,id=nvm,file={self.disk},format=raw,cache=unsafe",
+                    "-device", "nvme,drive=nvm,serial=FLOCKOSCI,bootindex=1"]
+        else:
+            cmd += ["-drive", f"file={self.disk},format=raw,if=virtio,cache=unsafe"]
+        if self.stick:
+            cmd += ["-device", "qemu-xhci", "-drive", f"if=none,id=stick,file={self.stick},format=raw,cache=unsafe",
+                    "-device", "usb-storage,drive=stick,bootindex=0"]
         cmd += [
-            "-drive", f"file={self.disk},format=raw,if=virtio,cache=unsafe",
             "-nic", "user,model=virtio-net-pci",
             "-serial", f"file:{self.console}",
             "-serial", f"unix:{self.sock_path},server=on,wait=off",
@@ -177,6 +187,13 @@ class VM:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(self.sock_path)
         self.sock.setblocking(False)
+
+    def wait_exit(self, timeout):
+        """Wait for the guest to power off (QEMU exits)."""
+        try:
+            return self.proc.wait(timeout)
+        except subprocess.TimeoutExpired:
+            raise TestFailure(f"the VM did not power off within {timeout}s") from None
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -275,8 +292,9 @@ def serve(directory):
 
 
 class Runner:
-    def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout):
+    def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout, disk_dev="/dev/vda"):
         self.vm, self.conf, self.image_id = vm, conf, image_id
+        self.disk_dev = disk_dev
         self.http = f"http://10.0.2.2:{http_port}"
         self.docker_tar = docker_tar
         self.boot_timeout = boot_timeout
@@ -314,7 +332,7 @@ class Runner:
         osr = self.vm.run("cat /etc/os-release")
         if f"IMAGE_ID={self.image_id}" not in osr or "ID=flockos" not in osr:
             raise TestFailure(f"unexpected os-release:\n{osr}")
-        parts = self.vm.run("lsblk -bnro PARTLABEL,SIZE /dev/vda | sed '/^ /d'")
+        parts = self.vm.run(f"lsblk -bnro PARTLABEL,SIZE {self.disk_dev} | sed '/^ /d'")
         sizes = dict(line.split() for line in parts.splitlines() if len(line.split()) == 2)
         for label in ("FLOCKOS", "rootfs-a", "rootfs-b", "data"):
             if label not in sizes:
@@ -427,6 +445,80 @@ class Runner:
         self.vm.run("rauc status mark-good")
 
 
+INSTALLER_CONF = "confirm=no\nafter=poweroff\n"
+
+
+def install_test(args, conf, arch, version, kvm, boot_timeout, port):
+    """WP-3.2: the installer stick (USB) writes the base image to a blank
+    NVMe unattended and powers off; the NVMe then boots alone like a flashed
+    disk."""
+    installer_id = f"flockos-{args.target}-installer"
+    base_id = f"flockos-{args.target}-base"
+    img_gz = os.path.join(args.out, installer_id, f"{installer_id}-{version}.img.gz")
+    if not os.path.exists(img_gz):
+        sys.exit(f"{img_gz} not found: run `just build {args.target} installer` first")
+    workdir = args.work or tempfile.mkdtemp(prefix="flockos-install-")
+    os.makedirs(workdir, exist_ok=True)
+    stick = os.path.join(workdir, "stick.img")
+    nvme = os.path.join(workdir, "nvme.img")
+    with gzip.open(img_gz, "rb") as src, open(stick, "wb") as dst:
+        shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
+    with open(nvme, "wb") as fh:
+        fh.truncate(20 * 1024**3)
+    offset = esp_offset(stick)
+    conf_file = os.path.join(workdir, "installer.conf")
+    with open(conf_file, "w") as fh:
+        fh.write(INSTALLER_CONF)
+    subprocess.run(["mcopy", "-n", "-o", "-i", f"{stick}@@{offset}", conf_file, "::/installer.conf"], check=True)
+    set_test_cmdline(stick, workdir, DEBUG_CMDLINE)
+    log(f"stick: {installer_id}-{version}, installer.conf {INSTALLER_CONF!r}; blank 20 GiB NVMe")
+
+    results = []
+    ok = False
+    vm = VM(arch, nvme, workdir, kvm, stick=stick, nvme=True)
+    try:
+        log("--- install from the stick")
+        start = time.time()
+        vm.start(conf["QEMU_SYSTEM"], port)
+        vm.wait_exit(boot_timeout * 3)
+        vm.sock.close()
+        vm.sock = None
+        os.replace(vm.console, os.path.join(workdir, "console-installer.log"))
+        logfile = os.path.join(workdir, "flockos-installer.log")
+        subprocess.run(["mcopy", "-n", "-o", "-i", f"{stick}@@{offset}", "::/flockos-installer.log", logfile], check=True)
+        text = open(logfile, encoding="utf-8", errors="replace").read()
+        print(text)
+        if "FlockOS is installed on /dev/nvme0n1" not in text:
+            raise TestFailure("the installer did not report an installation on /dev/nvme0n1")
+        results.append(("install from the stick", True, time.time() - start))
+        log(f"ok   install from the stick ({time.time() - start:.0f}s)")
+
+        # Boot the NVMe alone, with the UEFI variables the installer wrote.
+        set_test_cmdline(nvme, workdir, DEBUG_CMDLINE)
+        os.remove(vm.sock_path)
+        vm2 = VM(arch, nvme, workdir, kvm, nvme=True)
+        runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1")
+        try:
+            vm2.start(conf["QEMU_SYSTEM"], port)
+            runner.step("the installed NVMe boots alone like a flashed disk", runner.first_boot)
+        finally:
+            vm2.stop()
+            results.extend(runner.results)
+        ok = True
+    except TestFailure as e:
+        log(f"FAIL {e}")
+    finally:
+        vm.stop()
+        print("\nresults:")
+        for name, passed, secs in results:
+            print(f"  {'ok  ' if passed else 'FAIL'} {name} ({secs:.0f}s)")
+        print(f"consoles: {os.path.join(workdir, 'console-installer.log')}, {vm.console}\n"
+              f"shell transcript: {os.path.join(workdir, 'shell.log')}")
+        if not args.keep and ok:
+            shutil.rmtree(workdir, ignore_errors=True)
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--target", default="amd64-efi")
@@ -445,6 +537,13 @@ def main():
     image_id = f"flockos-{args.target}-{args.variant}" + ("-rt" if args.kernel == "rt" else "")
     with open(os.path.join(REPO, "VERSION")) as fh:
         version = fh.read().strip()
+    if args.variant == "installer":
+        kvm = os.access("/dev/kvm", os.R_OK | os.W_OK) and arch == {"x86_64": "amd64", "aarch64": "arm64"}.get(os.uname().machine)
+        server, port = serve(tempfile.mkdtemp(prefix="flockos-http-"))
+        try:
+            sys.exit(0 if install_test(args, conf, arch, version, kvm, 300 if kvm else 1500, port) else 1)
+        finally:
+            server.shutdown()
     artefacts = os.path.join(args.out, image_id)
     img_gz = os.path.join(artefacts, f"{image_id}-{version}.img.gz")
     bundle = os.path.join(artefacts, f"{image_id}-{version}.raucb")

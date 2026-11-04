@@ -1,0 +1,3 @@
+# The FlockOS installer stick: its FLOCKOS partition (installer.conf, the
+# .flock, the log) and nothing else; no /data, no slots.
+PARTLABEL=flockos-installer-esp  /boot/efi  vfat  umask=0077,shortname=winnt  0  2

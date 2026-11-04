@@ -28,3 +28,21 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
   is needed; on boards that hide USB boot, enable it in the firmware setup.
 - Some IPC firmware enables a hardware watchdog in setup; FlockOS feeds it from
   systemd once booted.
+
+## Installer stick
+
+For sealed IPCs that cannot boot a USB-flashed system disk: flash the
+`installer` image with FlockFlasher, put `installer.conf` and the `.flock` on
+its FLOCKOS partition, boot the IPC from the stick. Example for a box with one
+NVMe and no keyboard:
+
+```ini
+# installer.conf
+disk=largest
+confirm=no
+after=poweroff
+```
+
+The installer leaves out the stick itself, read-only, loop and too-small disks,
+and USB disks unless `allow-usb=yes`. When it is done the box powers off; remove
+the stick and power on. Hardware acceptance is WP-3.3.

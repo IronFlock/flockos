@@ -86,6 +86,26 @@ installer USB uses its own names.
 - `flockos-mark-good.service` marks a slot good once Docker runs; the real
   health gate (the agent reached the platform) comes with WP-2.4.
 
+## The installer variant
+
+`just build amd64-efi installer` builds the FlockOS installer stick (master plan,
+section 3.6) from the base image built before it (`just build amd64-efi base`;
+`FLOCKOS_INSTALLER_PAYLOADS` names more variants). It is the base system plus
+`profiles/installer` (the installer program, `efibootmgr`, its own `fstab`),
+with the base image embedded as `/usr/share/flockos/payload/<image>.img.zst`
+and its raw size next to it. It has no RAUC bundle, no slot B, no `/data`, no
+SSH and no device services, and its GPT names differ (`flockos-installer-esp`,
+`flockos-installer`), so a disk it installed and the stick never collide; its
+FAT label is `FLOCKOS` as on every image, for FlockFlasher.
+
+On boot `flockos-installer.service` runs on the console: it reads
+`installer.conf` and the `.flock` from the stick's FLOCKOS partition, picks the
+target disk (`disk=largest`, `/dev/<name>` or `by-id:<id>`; never the stick,
+read-only, loop or too small disks; USB disks only with `allow-usb=yes`), asks
+unless `confirm=no`, writes the image, copies the `.flock` to the new FLOCKOS
+partition, adds a UEFI boot entry, and powers off (`after=reboot` reboots). The
+log is `flockos-installer.log` on the stick.
+
 ## Building locally
 
 Docker is the only requirement. On an arm64 Mac an amd64 image builds under

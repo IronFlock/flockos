@@ -39,7 +39,9 @@ SOURCES
   sed -e 's/^$/./' -e 's/^/ /' "$profile/apt/docker.asc"
 } >"$sources/docker.sources"
 
-mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH")
+variant_profile=$src/profiles/$VARIANT
+mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH" \
+  "$variant_profile/packages" "$variant_profile/packages.$ARCH")
 pin() { # pin PACKAGE VERSION: replace PACKAGE with PACKAGE=VERSION
   local i found=0
   for i in "${!packages[@]}"; do

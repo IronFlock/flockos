@@ -45,8 +45,9 @@ say "FlockOS installer $(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null 
 
 installer_conf "$esp/installer.conf" || fail "installer.conf is not valid (see above)"
 payload=$(installer_payload "$payload_dir" "$CONF_PAYLOAD") || fail "no image to install"
-payload_bytes=$(zstd -lv "$payload" 2>/dev/null | awk '/Decompressed Size/ { gsub(/[(),]/, ""); for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/ && $(i + 1) == "B") print $i }' | tail -n 1)
-payload_bytes=${payload_bytes:-0}
+# The build stores the image size next to it.
+payload_bytes=$(cat "$payload.size" 2>/dev/null || echo 0)
+[[ "$payload_bytes" =~ ^[0-9]+$ ]] || payload_bytes=0
 
 flock=""
 for f in "$esp"/*.flock; do

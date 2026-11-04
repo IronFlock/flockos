@@ -111,9 +111,9 @@ case "\$*" in
 esac
 SH
   printf '#!/bin/bash\necho /dev/sdb2\n' >"$tmp/bin/findmnt"
-  printf '#!/bin/bash\necho "Decompressed Size: 4.30 GiB (4617000000 B)"\n' >"$tmp/bin/zstd"
   chmod +x "$tmp/bin"/*
   touch "$tmp/payload/flockos-amd64-efi-base-1.0.0.img.zst"
+  echo 4617000000 >"$tmp/payload/flockos-amd64-efi-base-1.0.0.img.zst.size"
   echo '{}' >"$tmp/esp/device.flock"
 }
 
