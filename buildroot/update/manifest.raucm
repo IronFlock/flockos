@@ -1,7 +1,0 @@
-[update]
-compatible=ReswarmOS
-version=0.5.7
-description=RAUC update bundle for ReswarmOS
-
-[image.rootfs]
-filename=rootfs.ext4

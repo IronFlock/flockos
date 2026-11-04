@@ -1,0 +1,38 @@
+# Security screening from the shared IronFlock CI harness: secrets (gitleaks),
+# semgrep, configuration and licences. No language dependency scan yet (the
+# repository holds shell, YAML and docs; `languages: none`) and no Dockerfile
+# image. The scan of the built root filesystem (trivy rootfs, SBOM) comes with
+# the first image in Phase 1 (docs/master-plan.md, section 3.8).
+#
+# Report-only for the first two weeks, as the harness README asks; then set
+#   fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
+# Accepted findings go into .trivyignore.yaml / security/vex.openvex.json /
+# .gitleaks.toml with a reason and an expiry date.
+name: security
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 06:41 UTC: catch findings against unchanged code.
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  security:
+    uses: IronFlock/workflows/.github/workflows/security.yml@v1
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: none
+      fail-on: ""
+      # Public repository: findings also go to the Security tab.
+      code-scanning: true

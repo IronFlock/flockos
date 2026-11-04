@@ -1,23 +1,18 @@
-
-output-build/
-custom-disk/
-custom-root/
-source-disk/
+# Build outputs (just build): images, bundles, intermediate filesystems
+/out/
 *.img
-*.iso
-*.md5
-*.img.zip
 *.img.gz
-*.iso.gz
-*.tar.gz
-buildroot/rootfs/etc/os-release
-buildroot/rootfs/etc/rauc/cert.pem
-buildroot/rootfs/etc/setup.yaml
-*.log
-cfg*
-git-credentials
-builds
-builds/*
-*.pem
+*.img.xz
+*.img.zst
+*.raucb
 *.ext4
-!reagent/
+*.vfat
+*.log
+
+# Key material never lives in the tree (signing runs in CI against Cloud KMS)
+*.pem
+*.key
+*.p12
+
+# Editor and OS noise
+.DS_Store

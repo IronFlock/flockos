@@ -1,0 +1,106 @@
+# Gate (just lint / test / build), workflow lint, the release intent and, on
+# release pull requests, release.yml as a dry run. `ci-ok` is the required
+# check of the main-branch ruleset.
+#
+# The gate is repository-local for now: IronFlock/workflows has no gate for
+# shell/just repositories yet (docs/master-plan.md, section 3.8 asks for
+# shell-gate.yml). It installs its tools from the harness's tools.lock and runs
+# the same three recipes the shared gates run, so the switch is a few lines
+# once that workflow exists at v1.
+#
+# Pull requests into main only: the ruleset lets nothing reach main without
+# ci-ok. The release intent decides whether the merge releases.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: v1
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just and shellcheck (tools.lock)
+        run: '"$HARNESS/scripts/install-tool.sh" just shellcheck'
+      - name: install yamllint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends yamllint
+      - name: just lint
+        run: just lint
+      - name: just test
+        run: just test
+      - name: just build
+        run: just build amd64-efi base
+
+  workflows:
+    uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1
+
+  # The version decides: a bump makes a release PR (`just release-patch`,
+  # title `release flockos v<version>`), an unchanged version a no-release PR
+  # (`just merge`) whose merge releases nothing.
+  intent:
+    uses: IronFlock/workflows/.github/workflows/release-intent.yml@v1
+    with:
+      version-file: VERSION
+
+  # Release pull requests only: release.yml as a dry run, so a broken release
+  # workflow never reaches main.
+  release-build:
+    needs: [intent]
+    if: needs.intent.outputs.kind == 'release'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: read
+      id-token: write
+
+  # The required check of the main-branch ruleset: green only when every job
+  # above succeeded (skipped or cancelled counts as failed; release-build may
+  # be skipped, on a no-release pull request).
+  ci-ok:
+    if: ${{ always() }}
+    needs: [gate, workflows, intent, release-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: all ci jobs succeeded
+        env:
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          RELEASE_BUILD: ${{ needs.release-build.result }}
+          KIND: ${{ needs.intent.outputs.kind }}
+        run: |
+          echo "required: $REQUIRED, release-build: $RELEASE_BUILD ($KIND)"
+          for r in $REQUIRED; do [ "$r" = success ] || exit 1; done
+          if [ "$KIND" = release ]; then [ "$RELEASE_BUILD" = success ]; else [ "$RELEASE_BUILD" = skipped ]; fi
