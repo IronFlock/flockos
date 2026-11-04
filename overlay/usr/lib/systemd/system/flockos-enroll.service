@@ -1,0 +1,16 @@
+[Unit]
+Description=FlockOS: enroll the device from a .flock file
+Documentation=https://github.com/IronFlock/flockos/blob/main/docs/master-plan.md
+After=docker.service network-online.target boot-efi.mount local-fs.target
+Wants=network-online.target
+ConditionPathExists=!/data/ironflock/enrolled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/flockos/enroll
+TimeoutStartSec=30min
+Restart=on-failure
+RestartSec=60s
+
+[Install]
+WantedBy=multi-user.target

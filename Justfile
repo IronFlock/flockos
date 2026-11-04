@@ -1,6 +1,7 @@
 # FlockOS: the IronFlock device OS, built as disk images and RAUC bundles in
-# CI only (docs/master-plan.md). Phase 0 skeleton: the recipes the harness
-# gates on exist and pass; the image build arrives with Phase 1.
+# CI (docs/master-plan.md, docs/build.md). The build runs in a Debian 13
+# container (build/builder.conf), so a local build with Docker produces the
+# same image as CI; CI stays the build of record.
 
 VERSION := `cat VERSION | tr -d '[:space:]'`
 RELEASE_NAME := "flockos"
@@ -29,35 +30,48 @@ lint:
             echo "==> shellcheck not installed, skipped"
         fi
     fi
+    if [ -n "$scripts" ]; then
+        if command -v shfmt >/dev/null; then
+            echo "==> shfmt"
+            echo "$scripts" | xargs shfmt -d -i 2 -ci
+        else
+            echo "==> shfmt not installed, skipped"
+        fi
+    fi
+    if command -v go >/dev/null; then
+        echo "==> gofmt, go vet (tools/rauc-pki)"
+        unformatted=$(gofmt -l tools/rauc-pki)
+        [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
+        go -C tools/rauc-pki vet ./...
+    else
+        echo "==> go not installed, tools/rauc-pki skipped"
+    fi
+    echo "==> python syntax"
+    git ls-files '*.py' | xargs -r python3 -I -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]'
     if command -v yamllint >/dev/null; then
         echo "==> yamllint"
         yamllint -d '{extends: default, rules: {line-length: disable, document-start: disable, truthy: disable}}' .github/workflows
     fi
     echo "==> lint OK"
 
-# Unit tests (bats) of the build and RAUC backend scripts; none yet
+# Unit tests: bats for the build and image scripts, go test for tools/rauc-pki
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -d test/unit ]; then
-        bats test/unit
+    bats test/unit
+    if command -v go >/dev/null; then
+        go -C tools/rauc-pki test -count=1 ./...
     else
-        echo "no unit tests yet (Phase 1 adds test/unit)"
+        echo "go not installed: tools/rauc-pki tests skipped"
     fi
 
-# Build one image: just build TARGET VARIANT (placeholder until Phase 1)
-build TARGET="amd64-efi" VARIANT="base":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "{{ TARGET }}" in
-        amd64-efi | arm64-efi | rpi-arm64 | jetson-orin) ;;
-        *) echo "unknown target {{ TARGET }}" >&2; exit 2 ;;
-    esac
-    case "{{ VARIANT }}" in
-        base | nvidia | installer) ;;
-        *) echo "unknown variant {{ VARIANT }}" >&2; exit 2 ;;
-    esac
-    echo "flockos {{ VERSION }}: build {{ TARGET }}/{{ VARIANT }} is not implemented yet (Phase 1)"
+# Build one image into out/<image-id>/: just build TARGET VARIANT [KERNEL]
+build TARGET="amd64-efi" VARIANT="base" KERNEL="std":
+    build/run-in-builder.sh {{ TARGET }} {{ VARIANT }} {{ KERNEL }}
+
+# Boot a built image in QEMU and run the image tests (KVM where available)
+qemu-test TARGET="amd64-efi" VARIANT="base" *ARGS:
+    python3 -I test/qemu/run.py --target {{ TARGET }} --variant {{ VARIANT }} {{ ARGS }}
 
 # ------------------------------------------------------------------ release --
 # Pull requests into main, from IronFlock/workflows (scripts/pr.sh at v1):

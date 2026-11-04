@@ -1,0 +1,12 @@
+{
+  "data-root": "/opt/ironflock/device-agent/docker-apps",
+  "features": {
+    "buildkit": true,
+    "containerd-snapshotter": false
+  },
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-file": "3",
+    "max-size": "10m"
+  }
+}

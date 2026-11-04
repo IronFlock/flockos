@@ -1,8 +1,7 @@
 # Security screening from the shared IronFlock CI harness: secrets (gitleaks),
-# semgrep, configuration and licences. No language dependency scan yet (the
-# repository holds shell, YAML and docs; `languages: none`) and no Dockerfile
-# image. The scan of the built root filesystem (trivy rootfs, SBOM) comes with
-# the first image in Phase 1 (docs/master-plan.md, section 3.8).
+# semgrep, configuration, licences, and the Go module of tools/rauc-pki
+# (govulncheck, SBOM). The scan of the built root filesystem runs in ci.yml
+# (`rootfs-scan`), where the image is built; master plan, section 3.8.
 #
 # Report-only for the first two weeks, as the harness README asks; then set
 #   fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
@@ -32,7 +31,9 @@ jobs:
       contents: read
       security-events: write
     with:
-      languages: none
+      languages: go
+      working-directory: tools/rauc-pki
+      go-version-file: tools/rauc-pki/go.mod
       fail-on: ""
       # Public repository: findings also go to the Security tab.
       code-scanning: true

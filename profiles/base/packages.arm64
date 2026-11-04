@@ -1,0 +1,4 @@
+# arm64 additions to profiles/base/packages (arm64-efi; the Raspberry Pi and
+# Jetson targets bring their own kernels).
+linux-image-arm64
+grub-common

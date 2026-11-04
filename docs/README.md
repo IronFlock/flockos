@@ -4,6 +4,10 @@
 |----------|---------|
 | [master-plan.md](master-plan.md) | The plan of record: goals, target architecture, phased roadmap, cross-repo changes, risks |
 | [implementation-plan.md](implementation-plan.md) | The work packages: status board, milestones, dependencies, per-WP scope, deliverables and acceptance; one GitHub issue per WP |
+| [build.md](build.md) | How an image is built: stages, artefacts, disk layout on a device, boot and A/B, local builds |
+| [testing.md](testing.md) | Unit tests, the QEMU image test, the hardware checklist |
+| [signing.md](signing.md) | The RAUC PKI in Cloud KMS: creating it, how releases sign, renewal |
+| [targets/amd64-efi.md](targets/amd64-efi.md) | Target notes and tested hardware |
 | [current-state-audit.md](current-state-audit.md) | Evidence: what the `buildroot/` and `cubic/` trees, the published catalog, and the sibling repos do today |
 | [adr/](adr/) | Architecture decision records |
 
@@ -19,6 +23,5 @@
 | [0006](adr/0006-rauc-pki-in-cloud-kms.md) | RAUC signing with a CA in Cloud KMS via PKCS#11 | accepted |
 | [0007](adr/0007-update-mechanism-rauc-and-firmware-lanes.md) | RAUC stays the OS updater; firmware in three lanes (bundle, RAUC hooks, fwupd); alternatives compared | accepted |
 
-Planned additions as the phases land: `signing.md` (the PKCS#11 recipe), `targets/<target>.md`
-(per-target boot, layout and hardware notes), `testing.md` (QEMU and hardware checklists),
+Planned additions as the phases land: `targets/<target>.md` for the other targets,
 `migration.md` (reflashing ReswarmOS devices).

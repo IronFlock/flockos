@@ -1,0 +1,49 @@
+#!/bin/bash
+# Enroll the device from a .flock file (master plan, section 3.4).
+#
+# Phase 1: runs the public device-init installer, which verifies its own
+# signatures, with the newest *.flock on the FLOCKOS partition. Phase 2
+# replaces this with `ironflock-init enroll` from the image. Without a .flock
+# the device stays unenrolled and is reachable on the console only.
+set -euo pipefail
+
+# FLOCKOS_ESP, FLOCKOS_STATE, FLOCKOS_INSTALLER: for the unit tests only.
+esp=${FLOCKOS_ESP:-/boot/efi}
+state=${FLOCKOS_STATE:-/data/ironflock}
+installer=${FLOCKOS_INSTALLER:-https://instance-registry.ironflock.com/dl/device-init/install.sh}
+
+flock=""
+for f in "$esp"/*.flock; do
+  [ -f "$f" ] || continue
+  if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
+done
+if [ -z "$flock" ]; then
+  echo "enroll: no .flock file on the FLOCKOS partition; the device stays unenrolled"
+  exit 0
+fi
+
+mkdir -p "$state"
+umask 077
+cp "$flock" "$state/enroll.flock"
+
+script=$(mktemp)
+trap 'rm -f "$script"' EXIT
+case "$installer" in
+  https://*) curl -fsSL --proto '=https' --retry 5 --retry-all-errors -o "$script" "$installer" ;;
+  /*) cp "$installer" "$script" ;;
+  *)
+    echo "enroll: installer must be an https URL" >&2
+    exit 1
+    ;;
+esac
+bash "$script" -c "$state/enroll.flock"
+
+# The .flock holds the device's secret: it leaves the FAT partition once the
+# device is enrolled (the copy on /data is 0600).
+if command -v shred >/dev/null 2>&1; then
+  shred -u "$flock"
+else
+  rm -f "$flock"
+fi
+touch "$state/enrolled"
+echo "enroll: device enrolled from $(basename "$flock")"
