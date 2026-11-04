@@ -301,7 +301,9 @@ class Runner:
             raise TestFailure(f"system state {state!r}; failed units:\n{failed}")
 
     def rauc_status(self):
-        return json.loads(self.vm.run("rauc status --output-format=json"))
+        # stdout only: RAUC warns on stderr, e.g. when no slot in ORDER is
+        # bootable after a fallback.
+        return json.loads(self.vm.run("rauc status --output-format=json 2>/dev/null"))
 
     def booted(self):
         return self.rauc_status().get("booted")
