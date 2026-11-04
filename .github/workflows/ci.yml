@@ -1,10 +1,7 @@
-# Gate (just lint / test), the image build, the QEMU image test, workflow
-# lint, the release intent and, on release pull requests, release.yml as a
-# dry run. `ci-ok` is the required check of the main-branch ruleset.
-#
-# The gate is repository-local until IronFlock/workflows publishes
-# shell-gate.yml at v1 (IronFlock/workflows#31); `lint`/`unit`/`build` then
-# become one `uses:` and `image-test` keeps downloading the build artifact.
+# Gate (just lint / test, IronFlock/workflows shell-gate.yml), the image
+# build, the QEMU image test, workflow lint, the release intent and, on
+# release pull requests, release.yml as a dry run. `ci-ok` is the required
+# check of the main-branch ruleset.
 #
 # Pull requests into main only: the ruleset lets nothing reach main without
 # ci-ok. The release intent decides whether the merge releases.
@@ -34,43 +31,35 @@ env:
   HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
 
 jobs:
+  # lint and unit tests through the shared shell gate (tools from the
+  # harness tools.lock). Its build job is skipped: the image build below
+  # hands its output to the image tests.
   gate:
+    uses: IronFlock/workflows/.github/workflows/shell-gate.yml@v1
+    with:
+      skip: build
+
+  # The Go tool of the RAUC PKI (tools/rauc-pki): the shell gate has no Go.
+  pki-tool:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: v1
-          path: .harness
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-            tools.lock
-          sparse-checkout-cone-mode: false
-      - name: move harness out of the workspace
-        run: |
-          mv .harness "$RUNNER_TEMP/harness"
-          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
-      - name: install just and shellcheck (tools.lock)
-        run: '"$HARNESS/scripts/install-tool.sh" just shellcheck'
-      - name: install yamllint, shfmt and bats
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends yamllint shfmt bats
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tools/rauc-pki/go.mod
           cache: false
-      - name: just lint
-        run: just lint
-      - name: just test
-        run: just test
+      - name: gofmt, vet, test
+        working-directory: tools/rauc-pki
+        run: |
+          unformatted=$(gofmt -l .)
+          [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
+          go vet ./...
+          go test -race -count=1 ./...
 
   build:
     runs-on: ubuntu-latest
@@ -254,13 +243,13 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, build, image-test, rootfs-scan, workflows, intent, release-build]
+    needs: [gate, pki-tool, build, image-test, rootfs-scan, workflows, intent, release-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
           RELEASE_BUILD: ${{ needs.release-build.result }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |
