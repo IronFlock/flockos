@@ -47,6 +47,19 @@ do_() {
   if [ "$yes" = 1 ]; then "$@"; fi
 }
 exists() { "$gcloud" "$@" >/dev/null 2>&1; }
+# bind_ COMMAND...: an IAM binding. A service account created a moment ago
+# can be unknown to IAM for a minute ("does not exist"), so it is retried.
+bind_() {
+  printf '+ %s\n' "$*"
+  [ "$yes" = 1 ] || return 0
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    "$@" && return 0
+    [ "$i" = 12 ] && return 1
+    echo "retrying in 10 s: IAM may not know the new service account yet"
+    sleep 10
+  done
+}
 
 kms=(--project "$PROJECT" --location "$LOCATION")
 sa_email=$SA@$PROJECT.iam.gserviceaccount.com
@@ -74,11 +87,11 @@ exists iam service-accounts describe "$sa_email" --project "$PROJECT" ||
     --display-name "FlockOS release" --description "Signs FlockOS RAUC bundles from IronFlock/flockos release runs"
 # Sign and read the public key of bundle-signer; list the keys of its ring
 # (the PKCS#11 library enumerates the ring). Nothing on the CA ring.
-do_ "$gcloud" kms keys add-iam-policy-binding "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" \
+bind_ "$gcloud" kms keys add-iam-policy-binding "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" \
   --member "serviceAccount:$sa_email" --role roles/cloudkms.signerVerifier --condition=None
-do_ "$gcloud" kms keyrings add-iam-policy-binding "$SIGNER_RING" "${kms[@]}" \
+bind_ "$gcloud" kms keyrings add-iam-policy-binding "$SIGNER_RING" "${kms[@]}" \
   --member "serviceAccount:$sa_email" --role roles/cloudkms.viewer --condition=None
-do_ "$gcloud" iam service-accounts add-iam-policy-binding "$sa_email" --project "$PROJECT" \
+bind_ "$gcloud" iam service-accounts add-iam-policy-binding "$sa_email" --project "$PROJECT" \
   --member "$principal" --role roles/iam.workloadIdentityUser --condition=None
 
 echo "== certificates"
