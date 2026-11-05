@@ -110,3 +110,34 @@ uuid_for() {
   h=$(printf 'flockos:%s:%s' "${IMAGE_ID:?}" "$1" | sha256sum | cut -c1-32)
   printf '%s-%s-4%s-8%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}"
 }
+
+# throwaway_signer DIR CN: a CA of its own (DIR/keyring.pem) and a code-signing
+# certificate it issued (DIR/signer.pem, key DIR/signer.key), RSA 3072, valid
+# 30 days. The CA's key is gone when this returns, so nothing else is ever
+# signed under that CA.
+throwaway_signer() {
+  local d=$1 cn=$2 days=30
+  require openssl
+  mkdir -p "$d"
+  chmod 0700 "$d"
+  openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days "$days" \
+    -keyout "$d/ca.key" -out "$d/keyring.pem" \
+    -subj "/O=IronFlock/CN=$cn CA (throwaway)" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -addext "subjectKeyIdentifier=hash" 2>/dev/null
+  openssl req -newkey rsa:3072 -nodes -sha256 \
+    -keyout "$d/signer.key" -out "$d/signer.csr" \
+    -subj "/O=IronFlock/CN=$cn signer (throwaway)" 2>/dev/null
+  printf '%s\n' \
+    "basicConstraints=critical,CA:FALSE" \
+    "keyUsage=critical,digitalSignature" \
+    "extendedKeyUsage=critical,codeSigning" \
+    "subjectKeyIdentifier=hash" \
+    "authorityKeyIdentifier=keyid" >"$d/signer.ext"
+  openssl x509 -req -sha256 -days "$days" -in "$d/signer.csr" \
+    -CA "$d/keyring.pem" -CAkey "$d/ca.key" -CAcreateserial \
+    -extfile "$d/signer.ext" -out "$d/signer.pem" 2>/dev/null
+  rm -f "$d/ca.key" "$d/signer.csr" "$d/signer.ext" "$d/keyring.srl"
+  openssl verify -purpose any -CAfile "$d/keyring.pem" "$d/signer.pem" >/dev/null
+}

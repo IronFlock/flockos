@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Stage 4: the RAUC bundle (master plan, section 3.5; ADR-0006): slot A's
 # filesystem image in a verity bundle, compatible with this image only, signed
-# with the build's signer (throwaway on pull requests, Cloud KMS on releases).
+# with the build's signer: throwaway on pull requests; on releases a sealing
+# key of this build, replaced by the Cloud KMS signature in release.yml's sign
+# job (build/sign-bundles.sh), which the sealing CA next to the bundle lets
+# it check first.
 # On the Raspberry Pi the bundle also carries the boot partition (boot.vfat):
 # RAUC writes both images of a slot group in one install (WP-5.2).
 set -euo pipefail
@@ -56,7 +59,7 @@ compatible=$IMAGE_ID
 bootloader=noop
 
 [keyring]
-path=$KEYRING
+path=$BUNDLE_KEYRING
 use-bundle-signing-time=true
 check-purpose=codesign
 CONF
@@ -65,4 +68,9 @@ grep -q "Compatible:.*'$IMAGE_ID'" "$WORK/bundle-info.txt" || {
   cat "$WORK/bundle-info.txt" >&2
   die "the bundle does not carry compatible $IMAGE_ID"
 }
-log "bundle: $(du -h "$bundle" | cut -f1), signature verified against the image keyring"
+if [ "${SEALED:-0}" = 1 ]; then
+  cp "$BUNDLE_KEYRING" "$OUT/$NAME.seal-ca.pem"
+  log "bundle: $(du -h "$bundle" | cut -f1), sealed for the release signature (build/sign-bundles.sh)"
+else
+  log "bundle: $(du -h "$bundle" | cut -f1), signature verified against the image keyring"
+fi

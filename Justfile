@@ -71,6 +71,10 @@ test:
 build TARGET="amd64-efi" VARIANT="base" KERNEL="std":
     build/run-in-builder.sh {{ TARGET }} {{ VARIANT }} {{ KERNEL }}
 
+# Re-sign a release build's sealed bundles in out/ (dry-run: a throwaway stand-in signer)
+sign-bundles MODE="dry-run":
+    build/sign-in-builder.sh {{ MODE }}
+
 # Boot a built image in QEMU and run the image tests (KVM where available)
 qemu-test TARGET="amd64-efi" VARIANT="base" *ARGS:
     python3 -I test/qemu/run.py --target {{ TARGET }} --variant {{ VARIANT }} {{ ARGS }}
