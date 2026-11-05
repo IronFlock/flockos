@@ -9,19 +9,12 @@ src=$(cd "$here/.." && pwd)
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${SOURCE_DATE_EPOCH:?}"
 : "${GRUB_FORMAT:?}" "${EFI_LOADER:?}" "${ESP_SIZE:?}" "${ROOT_PART_TYPE:?}" "${CONSOLE_CMDLINE:?}" "${GRUB_SERIAL:?}"
+: "${ESP_PART_NAME:?}" "${ROOT_PART_NAME:?}"
 require grub-mkimage grub-editenv mkfs.vfat mmd mcopy mke2fs genimage pigz
 target_dir=$src/targets/$TARGET
 img=$WORK/image
 rm -rf "$img"
 mkdir -p "$img/input" "$img/tmp" "$img/root"
-
-# uuid_for NAME: a UUID derived from the image id and NAME, so every build of
-# a target has the same partition and filesystem ids.
-uuid_for() {
-  local h
-  h=$(printf 'flockos:%s:%s' "$IMAGE_ID" "$1" | sha256sum | cut -c1-32)
-  printf '%s-%s-4%s-8%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}"
-}
 
 # --- GRUB: one EFI binary with its modules, the A/B script, grubenv ---------
 esp_dir=$img/esp

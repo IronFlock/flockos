@@ -1,0 +1,4 @@
+# Packages of the amd64-efi target, on top of profiles/base/packages: Debian's
+# amd64 kernel and GRUB's environment tool (RAUC's grub backend).
+linux-image-amd64
+grub-common

@@ -1,0 +1,4 @@
+# Packages of the arm64-efi target, on top of profiles/base/packages: Debian's
+# generic arm64 kernel and GRUB's environment tool (RAUC's grub backend).
+linux-image-arm64
+grub-common
