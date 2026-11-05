@@ -70,9 +70,13 @@ CI runs both on every pull request (`jetson-rootfs` in `ci.yml`).
 ## Open points
 
 - The root device in `extlinux.conf`. NVIDIA's initrd mounts the last `root=`
-  on the command line (`/dev/…`, `PARTUUID=` or `UUID=`). How L4TLauncher picks
-  the slot under rootfs A/B decides between fixed partition UUIDs in the layout
-  and a per-slot command line (the layout part of WP-6.2, then WP-6.3).
+  on the command line (`/dev/…`, `PARTUUID=` or `UUID=`). Under rootfs A/B,
+  NVIDIA's `flash.sh` gives each slot its own command line: `APP`'s
+  `extlinux.conf` says `root=PARTUUID=<APP>` and `APP_b`'s says
+  `root=PARTUUID=<APP_b>`; L4TLauncher does not rewrite it. As RAUC writes one
+  image into either slot, `rauc-post-install` points the new slot's
+  `extlinux.conf` at its own PARTUUID, as it does for the Pi's `cmdline.txt`
+  (the layout part of WP-6.2, then WP-6.3).
 - `/etc/nv_boot_control.conf`, which `nvbootctrl` needs. NVIDIA's flash tools
   write it for the module (WP-6.4).
 - The licence review of what the image redistributes, before the first
