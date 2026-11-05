@@ -206,3 +206,15 @@ print(app_b.find("size").text.strip(), app_b.get("id"))
   grep -q 's|^PARTLABEL=FLOCKOS  /boot/efi |PARTLABEL=esp      /boot/efi |' "$repo/build/customize.sh"
   grep -q '^PARTLABEL=FLOCKOS  /boot/efi ' "$repo/overlay/etc/fstab"
 }
+
+@test "tegra-flash-package checks its arguments before it touches anything" {
+  run bash "$repo/build/tegra-flash-package.sh"
+  [ "$status" -ne 0 ] && [[ "$output" == *"usage: tegra-flash-package.sh L4T_DIR SLOT_IMAGE BOARD BOARDID BOARDSKU"* ]]
+  if [ "$(id -u)" != 0 ]; then
+    run bash "$repo/build/tegra-flash-package.sh" "$BATS_TEST_TMPDIR" x.rootfs.ext4.zst jetson-orin-nano-devkit 3767 0003
+    [ "$status" -ne 0 ] && [[ "$output" == *"needs root"* ]]
+  fi
+  # NVIDIA's -r fix knows the BSP's exact getopts strings
+  grep -q 'fix_reuse_option l4t_initrd_flash.func "u:p:P:v:c:r:-:S:k:i:" "u:p:P:v:c:r-:S:k:i:"' "$repo/build/tegra-flash-package.sh"
+  grep -q 'fix_reuse_option l4t_create_images_for_kernel_flash.sh "k:u:p:v:c:r:-:S:i:" "k:u:p:v:c:r-:S:i:"' "$repo/build/tegra-flash-package.sh"
+}

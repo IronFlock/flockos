@@ -340,6 +340,7 @@ jobs:
         run: |
           sudo find /mnt/l4t/Linux_for_Tegra/tools/kernel_flash/images -maxdepth 2 -printf '%M %10s %p\n' | sort -k3 | head -80 || true
           sudo cat /mnt/l4t/Linux_for_Tegra/tools/kernel_flash/images/external/flash.cfg 2>/dev/null || true
+          sudo cat /mnt/l4t/Linux_for_Tegra/tools/kernel_flash/images/external/flash.idx 2>/dev/null || true
 
   workflows:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1

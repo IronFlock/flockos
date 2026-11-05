@@ -102,7 +102,7 @@ something unexpected. The partitions:
 | `A_kernel`, `B_kernel`, `A_kernel-dtb`, `B_kernel-dtb`, recovery | NVIDIA's, from the BSP (the fallback when the root slot does not boot) |
 | `esp` | the EFI system partition with L4TLauncher; `/boot/efi`, where the `.flock` to enroll with goes |
 | `APP`, `APP_b` | root slots A and B (`SLOT_SIZE_BASE`) |
-| `data` | `/data`, to the end of the disk |
+| `data` | `/data`, to the end of the disk; GPT entry 17 (explicit: counted on from `APP_b`'s 2, it would take `A_kernel`'s 3) |
 
 The ESP keeps NVIDIA's name `esp`, because `flash.sh` makes its image only
 under that name. On the other targets that role belongs to `FLOCKOS`, so the
@@ -115,6 +115,42 @@ flash package takes it for `APP`, and a copy pointed at slot B for `APP_b`
 so `flash.sh` does not rebuild them from a tree with its own kernel and
 command line.
 
+## Flash package
+
+`build/tegra-flash-package.sh` makes the flash package of an Orin on NVMe on
+the flashing host (x86_64 Ubuntu with the BSP's
+`tools/l4t_flash_prerequisites.sh`), offline: no Jetson needs to be attached,
+the module is named by its board ID and SKU. It runs NVIDIA's
+`ROOTFS_AB=1 l4t_initrd_flash.sh --no-flash -r --external-device nvme0n1 -c <layout> --external-only <board> external`
+after preparing the unpacked BSP:
+
+- the layout from `build/tegra-layout.py`;
+- `bootloader/system.img` (APP) from the slot image, and `system.img_b`
+  (APP_b), the same pointed at slot B through `debugfs` (no mount);
+- the slots' PARTUUIDs, the ones their `extlinux.conf` names (`uuid_for
+  rootfs-a`/`rootfs-b`), in `flash.sh`'s UUID files `l4t-rootfs-uuid.txt_ext`
+  and `_b_ext`;
+- `rootfs/`: slot A's tree, which NVIDIA's tools read (the board's
+  compatible spec), plus what the flashing initrd and the recovery ramdisk
+  take from it and the image does not carry: `mtd-utils`, `file`, `parted`,
+  `nvidia-l4t-optee`, `busybox`, `fdisk`, `gdisk`, `libnsl2`, `libpcre3`,
+  `isc-dhcp-client`, installed into that copy (a chroot through qemu-user)
+  from the image's own sources and pins;
+- a fix of NVIDIA's `-r` option: `l4t_initrd_flash.func` and
+  `l4t_create_images_for_kernel_flash.sh` declare it with an argument in
+  their getopts strings, though it takes none, so it swallows the next option
+  and every later option is lost. The script makes it a flag, and fails where
+  the BSP's string is not the known one.
+
+The package lands in the BSP's `tools/kernel_flash/images`: the external
+device's GPT and flash index, ESP, boot and recovery images, and APP/APP_b as
+NVIDIA's tarballs. `l4t_initrd_flash.sh --flash-only` writes it to a module in
+recovery mode (WP-6.4). CI makes it for an Orin Nano 8GB (`3767`/`0003`) on
+`jetson-orin-nano-devkit` on every pull request (`jetson-flash`), with the
+BSP tarball cached by its pin; there `l4t_initrd_flash.sh` gets an empty USB
+bus in a mount namespace of its own, as it fails where there is none even
+with `--no-flash`.
+
 ## Tests
 
 `just build jetson-orin base` builds the image and leaves the tree in
@@ -124,14 +160,18 @@ checks it: the versions, the sources and pins, kernel, initrd and `nvgpu`,
 units and masks, the baked agent and the `nvidia` runtime. It also runs the
 tree's binaries in a chroot: dpkg and apt consistency, systemd, Docker,
 containerd, RAUC, `ironflock-init`, `nvidia-ctk` and `nvidia-container-cli`.
-CI runs both on every pull request (`jetson-rootfs` in `ci.yml`).
+CI runs both on every pull request (`jetson-rootfs` in `ci.yml`), and makes
+the flash package from the image (`jetson-flash`, above).
 
 ## Open points
 
-- The flash dry run: NVIDIA's `l4t_initrd_flash.sh --no-flash` with this
-  layout and the slot images, on an x86_64 runner with the BSP cached
-  (WP-6.2's last part).
-- `/etc/nv_boot_control.conf`, which `nvbootctrl` needs. NVIDIA's flash tools
-  write it for the module (WP-6.4).
+- `/etc/nv_boot_control.conf`, which `nvbootctrl` needs: `flash.sh` writes
+  it for the module into the BSP's `rootfs/`, and with `-r` it does not reach
+  the slot images. The flash package has to put it into APP and APP_b
+  (WP-6.4).
+- The internal storage (QSPI) images: `--external-only` leaves them out. A
+  module needs them once (r39 bootloader; NVIDIA's two-step `--no-flash
+  --reuse ... internal`, then `--external-only --append`) (WP-6.4).
+- The `.flock` on the ESP for enrollment (WP-6.4).
 - The licence review of what the image redistributes, before the first
   published Jetson image (ADR-0008).
