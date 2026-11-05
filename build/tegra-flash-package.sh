@@ -49,7 +49,7 @@ uuid_b=$(uuid_for rootfs-b)
 bl=$l4t/bootloader
 kf=$l4t/tools/kernel_flash
 work=$(mktemp -d)
-trap 'umount "$work/mnt" 2>/dev/null; rm -rf "$work"' EXIT
+trap 'umount "$work/mnt" 2>/dev/null || true; rm -rf "$work"' EXIT
 
 # --- NVIDIA's -r option ----------------------------------------------------
 # l4t_initrd_flash.func and l4t_create_images_for_kernel_flash.sh declare
@@ -98,7 +98,7 @@ rm -rf "$l4t/rootfs"
 mkdir -p "$l4t/rootfs"
 cp -a "$work/mnt/." "$l4t/rootfs/"
 umount "$work/mnt"
-[ -x "$l4t/rootfs/opt/nvidia/l4t-bootloader-config/nv-l4t-board-config.sh" ] ||
+[ -f "$l4t/rootfs/opt/nvidia/l4t-bootloader-config/nv-l4t-board-config.sh" ] ||
   die "slot A's tree has no nv-l4t-board-config.sh (nvidia-l4t-bootloader-utils)"
 
 # --- the slots' PARTUUIDs, as extlinux.conf names them --------------------
