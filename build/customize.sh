@@ -6,7 +6,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
-: "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${VARIANT:?}" "${KERNEL:?}"
+: "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${VARIANT:?}" "${KERNEL:?}" "${BOOTLOADER:?}"
 : "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
 target_dir=$src/targets/$TARGET
 [ -d "$ROOT/usr" ] || die "$ROOT is not a root filesystem"
@@ -56,14 +56,52 @@ if awk -F: '$1 != "root" && $3 >= 1000 && $3 < 60000 { found=1 } END { exit !fou
   die "the image has a login account besides root"
 fi
 
-# --- kernel at a fixed path inside the slot (GRUB loads /vmlinuz) ----------
 mapfile -t kernels < <(cd "$ROOT/boot" && ls vmlinuz-* 2>/dev/null)
-[ "${#kernels[@]}" -eq 1 ] || die "expected one kernel in /boot, found ${#kernels[@]}"
-kver=${kernels[0]#vmlinuz-}
-[ -f "$ROOT/boot/initrd.img-$kver" ] || die "no initramfs for kernel $kver"
-ln -sfn "boot/vmlinuz-$kver" "$ROOT/vmlinuz"
-ln -sfn "boot/initrd.img-$kver" "$ROOT/initrd.img"
-rm -f "$ROOT/vmlinuz.old" "$ROOT/initrd.img.old"
+case "$BOOTLOADER" in
+  grub-efi)
+    # --- kernel at a fixed path inside the slot (GRUB loads /vmlinuz) ------
+    [ "${#kernels[@]}" -eq 1 ] || die "expected one kernel in /boot, found ${#kernels[@]}"
+    kver=${kernels[0]#vmlinuz-}
+    [ -f "$ROOT/boot/initrd.img-$kver" ] || die "no initramfs for kernel $kver"
+    ln -sfn "boot/vmlinuz-$kver" "$ROOT/vmlinuz"
+    ln -sfn "boot/initrd.img-$kver" "$ROOT/initrd.img"
+    rm -f "$ROOT/vmlinuz.old" "$ROOT/initrd.img.old"
+    ;;
+  rpi)
+    # --- the Pi firmware's boot files (build/mkimage-rpi.sh makes boot-a) --
+    # What raspi-firmware's kernel and initramfs hooks put into
+    # /boot/firmware, made here from the packages' files, so it does not
+    # depend on the order dpkg configured them in: the firmware, both
+    # kernels with their initramfs (kernel8.img for rpi-v8, kernel_2712.img
+    # for rpi-2712), the device trees and the overlays.
+    [ "${#kernels[@]}" -eq 2 ] || die "expected the rpi-v8 and rpi-2712 kernels in /boot, found ${#kernels[@]}"
+    kver="${kernels[*]#vmlinuz-}"
+    fw=$ROOT/boot/firmware
+    rm -rf "$fw"
+    mkdir -p "$fw/overlays"
+    cp -r "$ROOT/usr/lib/raspi-firmware/." "$fw/"
+    for k in "${kernels[@]}"; do
+      v=${k#vmlinuz-}
+      case "$v" in
+        *-rpi-v8) suffix=8 ;;
+        *-rpi-2712) suffix=_2712 ;;
+        *) die "unexpected Pi kernel $v" ;;
+      esac
+      [ -f "$ROOT/boot/initrd.img-$v" ] || die "no initramfs for kernel $v"
+      cp "$ROOT/boot/vmlinuz-$v" "$fw/kernel$suffix.img"
+      cp "$ROOT/boot/initrd.img-$v" "$fw/initramfs$suffix"
+      dtb=$ROOT/usr/lib/linux-image-$v
+      cp "$dtb/broadcom/"bcm27*.dtb "$fw/"
+      cp "$dtb/overlays/"*.dtb* "$dtb/overlays/README" "$fw/overlays/"
+    done
+    for f in start4.elf fixup4.dat kernel8.img kernel_2712.img initramfs8 initramfs_2712 \
+      bcm2711-rpi-4-b.dtb bcm2711-rpi-400.dtb bcm2711-rpi-cm4.dtb bcm2712-rpi-5-b.dtb bcm2712-rpi-cm5-cm5io.dtb \
+      overlays/vc4-kms-v3d.dtbo; do
+      [ -s "$fw/$f" ] || die "the Pi boot files lack $f (/boot/firmware)"
+    done
+    ;;
+  *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
+esac
 
 # --- mount points of /etc/fstab --------------------------------------------
 mkdir -p "$ROOT/boot/efi" "$ROOT/data" "$ROOT/opt/ironflock" "$ROOT/var/cache/flockos" \

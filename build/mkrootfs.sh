@@ -7,7 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
-: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}" "${TARGET:?}"
+: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}" "${TARGET:?}" "${BOOTLOADER:?}"
 require mmdebstrap
 
 profile=$src/profiles/base
@@ -56,6 +56,37 @@ pin containerd.io "$CONTAINERD_VERSION"
 pin docker-buildx-plugin "$BUILDX_VERSION"
 pin docker-compose-plugin "$COMPOSE_VERSION"
 
+hooks=()
+if [ "$BOOTLOADER" = rpi ]; then
+  # The Raspberry Pi archive, below Debian: it also carries rebuilds of
+  # Debian packages, and Debian's win, except for the two both have that
+  # must be the Pi's: its raspi-firmware (Debian's is older and ships NVRAM
+  # files of its own) and the WiFi firmware with the Pi boards' NVRAM files.
+  # What only the archive has (kernels, EEPROM tools) comes from it anyway.
+  : "${RPI_MIRROR:?}"
+  {
+    echo "Types: deb"
+    echo "URIs: $RPI_MIRROR"
+    echo "Suites: $DEBIAN_SUITE"
+    echo "Components: main"
+    echo "Architectures: $ARCH"
+    echo "Signed-By:"
+    sed -e 's/^$/./' -e 's/^/ /' "$src/targets/$TARGET/apt/raspberrypi.asc"
+  } >"$sources/raspberrypi.sources"
+  rpi_host=${RPI_MIRROR#*://}
+  rpi_host=${rpi_host%%/*}
+  pref=$WORK/flockos-raspberrypi.pref
+  printf 'Package: *\nPin: origin %s\nPin-Priority: 100\n\nPackage: raspi-firmware firmware-brcm80211\nPin: origin %s\nPin-Priority: 990\n' \
+    "$rpi_host" "$rpi_host" >"$pref"
+  # shellcheck disable=SC2016 # "$1" is mmdebstrap's, the tree's path
+  hooks+=(
+    --setup-hook='mkdir -p "$1/etc/apt/preferences.d"'
+    --setup-hook="copy-in $pref /etc/apt/preferences.d"
+  )
+fi
+
+# Debian first, then the others (Docker, and the Pi's archive on rpi-arm64).
+mapfile -t other_sources < <(find "$sources" -name '*.sources' ! -name debian.sources | sort)
 rm -rf "$ROOT"
 mmdebstrap \
   --mode=root \
@@ -66,12 +97,13 @@ mmdebstrap \
   --aptopt='Acquire::Retries "5"' \
   --include="$(join_by , "${packages[@]}")" \
   --skip=check/empty \
+  "${hooks[@]}" \
   "$DEBIAN_SUITE" "$ROOT" \
-  "$sources/debian.sources" "$sources/docker.sources"
+  "$sources/debian.sources" "${other_sources[@]}"
 
 # The sources the device keeps (mmdebstrap writes its own file).
 rm -f "$ROOT/etc/apt/sources.list"
 rm -f "$ROOT"/etc/apt/sources.list.d/*
-cp "$sources/debian.sources" "$sources/docker.sources" "$ROOT/etc/apt/sources.list.d/"
+cp "$sources"/*.sources "$ROOT/etc/apt/sources.list.d/"
 chmod 0644 "$ROOT"/etc/apt/sources.list.d/*.sources
 log "rootfs: $(du -sh --apparent-size "$ROOT" | cut -f1), ${#packages[@]} packages requested"

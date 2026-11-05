@@ -1,0 +1,1 @@
+@CONSOLE_CMDLINE@ root=PARTUUID=@ROOT_PARTUUID@ rootfstype=ext4 rootwait rw panic=10 systemd.gpt_auto=0 rauc.slot=@SLOT@

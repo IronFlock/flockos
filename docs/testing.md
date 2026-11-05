@@ -71,6 +71,15 @@ reboot, `--only update` after the update. On failure the work directory with
 `console.log` and `shell.log` is kept; in CI both are uploaded as the
 `qemu-logs-*` artifact.
 
+## Raspberry Pi image checks
+
+QEMU cannot boot the Pi firmware, so `rpi-arm64` has no image test. CI runs
+`sudo test/image/rpi-check.sh <image>.img.gz` on the arm64 runner instead: GPT
+layout, `autoboot.txt`, the boot files and `cmdline.txt` of boot-a, slot A's
+tree (os-release, units, RAUC, the baked agent, no passwords) and the image's
+own binaries in a chroot. It needs root and an arm64 host. The boot itself is
+the hardware checklist below (WP-5.4).
+
 ## Hardware checklist
 
 Per target, recorded in `docs/targets/<target>.md` with the board model and its
