@@ -54,49 +54,49 @@ decision), in progress.
 | 0.1 | Repository home, rulesets, release environment | flockos, GitHub | 1 | | done |
 | 0.2 | Secrets hygiene | flockos, legacy repo, GCS | 1 | | done (VM password rotation is an owner action) |
 | 0.3 | Harness skeleton, docs, legacy tag, v0.9.0 | flockos | 2 | 0.1 | done |
-| 0.4 | `shell-gate.yml` in the harness | workflows | 2 | | open |
-| 0.5 | RAUC PKI in Cloud KMS and `docs/signing.md` | GCP, flockos | 2 | | open |
+| 0.4 | `shell-gate.yml` in the harness | workflows | 2 | | done (#158) |
+| 0.5 | RAUC PKI in Cloud KMS and `docs/signing.md` | GCP, flockos | 2 | | open: the owner runs the ceremony |
 | 0.6 | Security scan switches from report-only to blocking | flockos | 0.5 | 0.3 | open (due 2026-11-18) |
-| 1.1 | Build framework and `base` rootfs | flockos | 3 | 0.3 | open |
-| 1.2 | `amd64-efi` target: GRUB, partitions, disk image | flockos | 3 | 1.1 | open |
-| 1.3 | Shared overlay: `/data` redirections, os-release, enroll placeholder | flockos | 2 | 1.1 | open |
-| 1.4 | RAUC integration and bundle build | flockos | 3 | 1.2, 1.3 | open |
-| 1.5 | QEMU test harness and `image-test` job | flockos | 3 | 1.4 | open |
+| 1.1 | Build framework and `base` rootfs | flockos | 3 | 0.3 | done (#155) |
+| 1.2 | `amd64-efi` target: GRUB, partitions, disk image | flockos | 3 | 1.1 | done (#155) |
+| 1.3 | Shared overlay: `/data` redirections, os-release, enroll placeholder | flockos | 2 | 1.1 | done (#155) |
+| 1.4 | RAUC integration and bundle build | flockos | 3 | 1.2, 1.3 | done (#155) |
+| 1.5 | QEMU test harness and `image-test` job | flockos | 3 | 1.4 | done (#155) |
 | 1.6 | Release signing through KMS/PKCS#11; `build` and `sign` jobs | flockos | 2 | 0.5, 1.4 | blocked on 0.5 |
-| 1.7 | fwupd in the image | flockos | 1 | 1.3 | open |
+| 1.7 | fwupd in the image | flockos | 1 | 1.3 | done (#155) |
 | 1.8 | Rootfs vulnerability scan and SBOM in `security.yml` | flockos, workflows | 1 | 1.1 | open |
-| 1.9 | Hardware acceptance on an x86 IPC; target and testing docs | flockos, hardware | 2 | 1.5 | open |
-| 2.0 | Decisions before Phase 2 (hostname, channels, first firmware lane) | all | 0.5 | | open |
-| 2.1 | `ironflock-init bake` | device-init | 2 | 2.0 | open |
-| 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | open |
-| 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | open |
+| 1.9 | Hardware acceptance on an x86 IPC; target and testing docs | flockos, hardware | 2 | 1.5 | open: needs an x86 IPC |
+| 2.0 | Decisions before Phase 2 (hostname, channels, first firmware lane) | all | 0.5 | | done (ADR-0009) |
+| 2.1 | `ironflock-init bake` | device-init | 2 | 2.0 | done (device-init 1.4.9) |
+| 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e |
+| 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
 | 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | open |
 | 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | open |
-| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | open |
-| 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | open |
-| 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | open |
-| 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | open |
-| 2.10 | Phase 2 acceptance: `v1.0.0` end to end | all | 2 | 2.6, 2.7, 2.8 | open |
-| 3.1 | `flockos-installer` program | flockos | 4 | 1.5 | open |
-| 3.2 | `installer` variant image with embedded payload; QEMU install test | flockos | 3 | 3.1 | open |
-| 3.3 | Installer in FlockFlasher; hardware acceptance on a sealed IPC | flasher, hardware | 2 | 3.2, 2.7 | open |
-| 4.1 | `nvidia` profile: open kernel modules built in the chroot, container toolkit | flockos | 4 | 1.5 | open |
-| 4.2 | GPU host acceptance, installer payload option, GPU docs | flockos, hardware | 2 | 4.1, 3.2 | open |
-| 4b.1 | `kernel-rt` profile, `-rt` images, tuning unit | flockos | 3 | 1.5 | open |
-| 4b.2 | RT acceptance on hardware; platform CPU-set setting; app template | flockos, platform, ironflock-templates, hardware | 3 | 4b.1 | open |
-| 5.1 | `rpi-arm64` rootfs, kernels, boot partitions, disk image | flockos | 4 | 1.5 | open |
-| 5.2 | tryboot A/B: RAUC `custom` backend, boot+rootfs slot groups, `cmdline.txt` hook | flockos | 5 | 5.1 | open |
-| 5.3 | Pi EEPROM lane and boot configuration | flockos | 2 | 5.2 | open |
-| 5.4 | Pi hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 4 | 5.2, 5.3 | open |
+| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | blocked on 1.6 |
+| 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | blocked on 2.6 |
+| 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | blocked on 2.4 |
+| 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | blocked on 2.5 |
+| 2.10 | Phase 2 acceptance: `v1.0.0` end to end | all | 2 | 2.6, 2.7, 2.8 | blocked on 2.6, 2.7, 2.8 |
+| 3.1 | `flockos-installer` program | flockos | 4 | 1.5 | done (#156) |
+| 3.2 | `installer` variant image with embedded payload; QEMU install test | flockos | 3 | 3.1 | done (#156) |
+| 3.3 | Installer in FlockFlasher; hardware acceptance on a sealed IPC | flasher, hardware | 2 | 3.2, 2.7 | blocked on 2.7; needs a sealed IPC |
+| 4.1 | `nvidia` profile: open kernel modules built in the chroot, container toolkit | flockos | 4 | 1.5 | done (#160) |
+| 4.2 | GPU host acceptance, installer payload option, GPU docs | flockos, hardware | 2 | 4.1, 3.2 | open: needs a GPU host |
+| 4b.1 | `kernel-rt` profile, `-rt` images, tuning unit | flockos | 3 | 1.5 | done (#157) |
+| 4b.2 | RT acceptance on hardware; platform CPU-set setting; app template | flockos, platform, ironflock-templates, hardware | 3 | 4b.1 | open: needs RT hardware |
+| 5.1 | `rpi-arm64` rootfs, kernels, boot partitions, disk image | flockos | 4 | 1.5 | done (#162) |
+| 5.2 | tryboot A/B: RAUC `custom` backend, boot+rootfs slot groups, `cmdline.txt` hook | flockos | 5 | 5.1 | done (#163); on hardware in 5.4 |
+| 5.3 | Pi EEPROM lane and boot configuration | flockos | 2 | 5.2 | open: needs a Pi 4 and a Pi 5 |
+| 5.4 | Pi hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 4 | 5.2, 5.3 | open: needs a Pi 4 and a Pi 5 |
 | 5.5 | Follow-up: Raspberry Pi RT kernel built in CI | flockos | 8 | 5.4, 4b.1 | open |
-| 6.1 | BSP decision, download and cache | flockos | 2 | | open |
+| 6.1 | BSP decision, download and cache | flockos | 2 | | done (#164, ADR-0008 accepted) |
 | 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | open |
 | 6.3 | RAUC `custom` backend over `nvbootctrl`; health gate | flockos | 4 | 6.2 | open |
 | 6.4 | Orin Nano SD image and NX/AGX flash package | flockos | 5 | 6.3 | open |
 | 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |
 | 6.6 | Jetson hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 5 | 6.4, 6.5 | open |
 | 6.7 | Follow-up: Jetson RT kernel | flockos | 5 | 6.6, 4b.1 | open |
-| 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | open |
+| 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | done (#161); open: the arm64-efi installer |
 | 7.2 | ReswarmOS migration guide and sunset | flockos, GCS, flasher, device-agent | 2 | 2.10 | open |
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
 | X.1 | Public install guides per target | website | 1 per target | 2.10, 5.4, 6.6 | open |
@@ -344,6 +344,9 @@ channels in `dl/flockos/manifest.json`; the first firmware lane the platform exp
 Agree the manifest JSON shape between flockos, device-agent and flasher (one schema file
 in flockos, `docs/manifest.schema.json`).
 
+Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmware.md) and
+[`manifest.schema.json`](manifest.schema.json).
+
 ### WP-2.1 `ironflock-init bake` (2 days, `device-init`)
 
 - Scope: chroot-safe subcommand (`--arch`, `--channel`, `--yes`, no `systemctl start`,
@@ -391,9 +394,10 @@ in flockos, `docs/manifest.schema.json`).
 
 ### WP-2.5 Firmware RPCs in the device-agent (3 days, `device-agent`)
 
-- Scope: `get_firmware_inventory`, `get_firmware_updates`, `install_firmware_update`
-  (offline where the plugin needs a reboot), `get_firmware_history` over fwupd's D-Bus
-  API; inventory and boot-firmware versions in device info.
+- Scope: `get_firmware_inventory` over fwupd's D-Bus API; inventory and boot-firmware
+  versions in device info. Read-only first (ADR-0009): `get_firmware_updates`,
+  `install_firmware_update` (offline where the plugin needs a reboot) and
+  `get_firmware_history` follow in a later work package.
 - Acceptance: unit tests against a fake fwupd D-Bus service; on the image in QEMU the
   inventory RPC returns the virtual devices fwupd sees.
 
@@ -431,8 +435,9 @@ in flockos, `docs/manifest.schema.json`).
 
 ### WP-2.9 Platform: firmware inventory and update actions (3 days, platform)
 
-- Scope: firmware inventory per device from device info; available updates; install
-  action inside a maintenance window with staged roll-out; history.
+- Scope: firmware inventory per device from device info. Available updates, the install
+  action inside a maintenance window with staged roll-out, and history follow with the
+  update RPCs (ADR-0009).
 - Acceptance: the inventory of the QEMU e2e device and of the Phase 1 IPC appears; an
   install is refused outside a maintenance window.
 

@@ -280,9 +280,10 @@ file handshake):
 
 1. **Catalog.** The release pipeline publishes `dl/flockos/manifest.json`, signed with
    the same detached-signature scheme the agent already verifies for
-   `device-agent/manifest-v2.json`. Per `IMAGE_ID` it lists `version`, `build_id`,
-   `image` (url, sha256, size), `bundle` (url, sha256, size, compatible), `min_agent`,
-   `channels` (production, test).
+   `device-agent/manifest-v2.json`. It names the version of each channel (production,
+   test) and, per release and `IMAGE_ID`, `build_id`, `image` (url, sha256, size),
+   `bundle` (url, sha256, size, compatible) and `min_agent`. The shape is
+   [`manifest.schema.json`](manifest.schema.json) ([ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmware.md)).
 2. **Check.** The agent reads `IMAGE_ID`, `IMAGE_VERSION`, `BUILD_ID` from
    `/etc/os-release`, fetches and verifies the manifest on its existing schedule, and
    reports `currentRelease`/`latestRelease` through `get_os_release`.
@@ -330,11 +331,12 @@ FlockOS installer USB that is itself a raw image. See
 [ADR-0004](adr/0004-raw-image-plus-installer-usb.md). This removes the ISO repack path
 and its isolinux assumption from the flasher.
 
-**Catalog contract.** `dl/flockos/manifest.json` keeps the shape FlockFlasher already
-parses (`boards[]` with `latestImages[]`, `ImageInfo` fields `buildtime, download, file,
-osname, osvariant, sha256, size, update, version`) and adds a detached signature. The
-legacy file `dl/reswarmos/supportedBoardsImages.json` is left frozen for old flasher
-versions.
+**Catalog contract.** `dl/flockos/manifest.json` carries, next to the device-agent's
+view, a `boards` view in the shape FlockFlasher already parses (`boards[]` with
+`latestImages[]`, `ImageInfo` fields `buildtime, download, file, osname, osvariant,
+sha256, size, update, version`, plus `image_id`, `variant` and `kernel`), inside a signed
+envelope ([`manifest.schema.json`](manifest.schema.json), ADR-0009). The legacy file
+`dl/reswarmos/supportedBoardsImages.json` is left frozen for old flasher versions.
 
 **Installer USB** (`installer` variant). Boots the same FlockOS base, starts
 `flockos-installer` instead of the agent, and:
@@ -743,17 +745,23 @@ Acceptance: an arm64 VM boots the image and enrolls; all docs reviewed.
 | NVIDIA's x86 modules do not officially support PREEMPT_RT; CUDA on Jetson's RT kernel has open issues | `nvidia-rt` is not offered on x86; Jetson `-rt` only after CUDA is verified on the chosen release; `-rt` has its own `compatible` so it never mixes with `std` |
 | RT latency depends on firmware settings (C-states, SMIs) and on the exact board | Per-hardware-class latency figures published in the target docs; the tuning profile is a device setting, not a global default |
 
-Open questions to settle before Phase 2:
+Open questions to settle before Phase 2 (1, 2, 4 and 5 settled 2026-11-05 in
+[ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmware.md)):
 
 1. Should `enroll` set the hostname from the `.flock` `name` by default on FlockOS (the
    legacy image did) while device-init on third-party OSes leaves it alone?
+   **Settled:** yes, by default; `hostname-from-flock=no` in `enroll.conf` keeps it.
 2. Is there a platform-side notion of OS release channels (production/test) that the
    manifest should mirror, or is a single channel enough for 1.x?
-3. Who owns the GPU acceptance hardware and the Orin modules for Phase 4 and 6?
+   **Settled:** two channels, production and test, as in the device-agent's manifest.
+3. Who owns the GPU acceptance hardware and the Orin modules for Phase 4 and 6? Open.
 4. Which firmware lane does the platform expose first: boot firmware bundled with OS
    releases only, or component firmware through fwupd as well?
+   **Settled:** boot firmware with OS releases, and the fwupd inventory read-only;
+   fwupd updates later.
 5. Who defines the real-time tuning (isolated CPUs, IRQ affinity) per device: an image
    default, a device setting in the platform, or the app that needs it?
+   **Settled by WP-4b.1:** a device setting in the platform (`/data/flockos/rt.conf`).
 
 ## 8. Later hardening (after this program)
 

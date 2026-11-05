@@ -58,8 +58,8 @@ Sequence:
    `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers. With the test
    `.flock` the harness puts on the FLOCKOS partition (a throwaway key, useless to
    the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
-   rule and agent unit exist, the `.flock` has left the FLOCKOS partition and the
-   agent's copy is 0600.
+   rule and agent unit exist, the hostname is the `.flock`'s name, the `.flock` has
+   left the FLOCKOS partition and the agent's copy is 0600.
    For `nvidia`, on a VM without a GPU: the `nvidia` module and the driver
    packages are at the pinned versions and the module is built for the running
    kernel; no compiler, DKMS or kernel headers are left; nouveau is blacklisted

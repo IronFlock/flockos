@@ -138,6 +138,9 @@ if [ "$VARIANT" = installer ]; then
 else
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service flockos-mark-good.service \
     flockos-enroll.service ssh.service docker.service NetworkManager.service systemd-timesyncd.service
+  # The device's own enroll settings live on /data, so they outlive updates.
+  mkdir -p "$ROOT/etc/flockos"
+  ln -sfn /data/flockos/enroll.conf "$ROOT/etc/flockos/enroll.conf"
 fi
 if [ "$KERNEL" = rt ]; then
   systemctl --root="$ROOT" enable flockos-rt-tuning.service

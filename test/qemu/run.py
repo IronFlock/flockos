@@ -134,6 +134,7 @@ def esp_offset(disk):
 
 
 TEST_OWNER = "flockostest"
+TEST_FLOCK_NAME = "flockos-ci"
 
 
 def put_test_flock(disk, workdir):
@@ -142,7 +143,7 @@ def put_test_flock(disk, workdir):
     platform. Returns its file name."""
     key = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519"], check=True,
                          capture_output=True, text=True).stdout
-    flock = {"name": "flockos-ci", "swarm_owner_name": TEST_OWNER, "device_key": "4711",
+    flock = {"name": TEST_FLOCK_NAME, "swarm_owner_name": TEST_OWNER, "device_key": "4711",
              "secret": "not-a-real-secret", "wlanssid": "", "password": "",
              "authentication": {"key": key}}
     path = os.path.join(workdir, "flockos-ci.flock")
@@ -502,6 +503,10 @@ class Runner:
         self.vm.run(f"grep -q ironflock-device- /home/{TEST_OWNER}/.ssh/authorized_keys")
         self.vm.run("systemctl is-enabled ironflock-device-agent.service")
         self.vm.run("test -s /var/lib/flockos/enrolled")
+        hostname = self.vm.run("hostname").strip()
+        if hostname != TEST_FLOCK_NAME:
+            raise TestFailure(f"the hostname is {hostname!r}, not the .flock's name {TEST_FLOCK_NAME!r}")
+        self.vm.run("test -L /etc/flockos/enroll.conf")
         mode = self.vm.run("stat -c %a /opt/ironflock/device-agent/device-config.flock").strip()
         if mode != "600":
             raise TestFailure(f"the agent's .flock copy has mode {mode}")
