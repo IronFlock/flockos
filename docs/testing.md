@@ -113,6 +113,16 @@ backend's logic is covered by `test/unit/rpi-tryboot.bats` against fixture
 on a real Pi is the hardware checklist. It needs root and an arm64 host. The boot itself is
 the hardware checklist below (WP-5.4).
 
+## Jetson root tree checks
+
+`jetson-orin` has no disk image yet (WP-6.2). CI builds its root tree with
+`just rootfs jetson-orin base` on the arm64 runner and runs
+`sudo test/image/jetson-rootfs-check.sh <tree>`. The script checks the L4T
+packages at the pinned versions, the Ubuntu, Docker and NVIDIA sources with
+the pins, kernel, initrd and `nvgpu`, the RAUC slots, units and masks, the
+baked agent and Docker's `nvidia` runtime. It also runs the tree's binaries in
+a chroot (`docs/targets/jetson-orin.md`). It needs root and an arm64 host.
+
 ## Hardware checklist
 
 Per target, recorded in `docs/targets/<target>.md` with the board model and its

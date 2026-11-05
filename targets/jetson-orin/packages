@@ -1,0 +1,37 @@
+# Packages of the jetson-orin target (ADR-0008), on top of profiles/base.
+# The L4T packages of an Orin (the -nvgpu flavour; -openrm is Thor's) from
+# NVIDIA's repositories, at L4T_PACKAGE_VERSION / L4T_KERNEL_VERSION
+# (target.conf). Not here: nvidia-l4t-bootloader (QSPI payloads: lane 2,
+# WP-6.5), nvidia-l4t-extlinux (the build writes extlinux.conf),
+# nvidia-l4t-apt-source (the build writes the sources), nvidia-l4t-configs
+# (desktop and cloud-init settings).
+
+# kernel 6.8 with NVIDIA's out-of-tree modules, device trees, initrd
+nvidia-l4t-kernel
+nvidia-l4t-kernel-nvgpu
+nvidia-l4t-kernel-oot-modules
+nvidia-l4t-kernel-dtbs
+nvidia-l4t-kernel-module-configs
+nvidia-l4t-initrd
+
+# the SoC's userspace drivers, firmware and init
+nvidia-l4t-core
+nvidia-l4t-init
+nvidia-l4t-init-nvgpu
+nvidia-l4t-firmware
+nvidia-l4t-firmware-nvgpu
+nvidia-l4t-cuda
+nvidia-l4t-cuda-nvgpu
+nvidia-l4t-nvml
+
+# nvbootctrl (the RAUC backend, WP-6.3), tegrastats, power modes, fan
+nvidia-l4t-bootloader-utils
+nvidia-l4t-tools
+nvidia-l4t-nvpmodel
+nvidia-l4t-nvfancontrol
+
+# the GPU in containers (nvidia runtime, CDI from nvidia-l4t-init's CSVs)
+nvidia-container-toolkit
+nvidia-container-toolkit-base
+libnvidia-container-tools
+libnvidia-container1

@@ -33,10 +33,13 @@ if [ "$VARIANT" != installer ]; then
   install -m 0644 "$KEYRING" "$ROOT/etc/rauc/keyring.pem"
 
   # --- partitions created on the first boot (systemd-repart) ----------------
-  mkdir -p "$ROOT/usr/lib/repart.d"
-  for f in "$target_dir"/repart.d/*.conf; do
-    render "$f" >"$ROOT/usr/lib/repart.d/$(basename "$f")"
-  done
+  # Not on Jetson: NVIDIA's flash tools write the whole layout.
+  if [ -d "$target_dir/repart.d" ]; then
+    mkdir -p "$ROOT/usr/lib/repart.d"
+    for f in "$target_dir"/repart.d/*.conf; do
+      render "$f" >"$ROOT/usr/lib/repart.d/$(basename "$f")"
+    done
+  fi
 else
   # --- the installer: the images it writes, nothing of a device -------------
   # Each payload with its size (the installer checks the target disk by it).
@@ -117,6 +120,21 @@ case "$BOOTLOADER" in
       [ -s "$fw/$f" ] || die "the Pi boot files lack $f (/boot/firmware)"
     done
     ;;
+  tegra)
+    # --- NVIDIA's kernel and initrd, where L4TLauncher loads them ----------
+    # nvidia-l4t-kernel installs /boot/Image, nvidia-l4t-initrd /boot/initrd;
+    # extlinux.conf comes with the partition layout (WP-6.2).
+    [ -s "$ROOT/boot/Image" ] || die "no /boot/Image (nvidia-l4t-kernel)"
+    [ -s "$ROOT/boot/initrd" ] || die "no /boot/initrd (nvidia-l4t-initrd)"
+    mapfile -t kvers < <(cd "$ROOT/usr/lib/modules" && ls)
+    [ "${#kvers[@]}" -eq 1 ] || die "expected one kernel's modules, found: ${kvers[*]}"
+    kver=${kvers[0]}
+    [[ "$kver" == *-tegra ]] || die "unexpected kernel $kver: not NVIDIA's"
+    compgen -G "$ROOT/usr/lib/modules/$kver/updates/nvgpu.ko*" >/dev/null ||
+      die "no nvgpu module for $kver (nvidia-l4t-kernel-nvgpu)"
+    [ ! -e "$ROOT/opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall" ] ||
+      die "the L4T preinstall marker is still in the tree"
+    ;;
   *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
 esac
 
@@ -177,6 +195,18 @@ if [ "$VARIANT" = nvidia ]; then
   systemctl --root="$ROOT" disable nvidia-persistenced.service nvidia-powerd.service
   compgen -G "$ROOT/usr/lib/modules/$kver/updates/nvidia/nvidia.ko*" >/dev/null ||
     die "no NVIDIA kernel module for $kver in the image"
+  [ -x "$ROOT/usr/bin/nvidia-container-runtime" ] || die "nvidia-container-runtime is missing"
+fi
+if [ "$BOOTLOADER" = tegra ]; then
+  # NVIDIA's boot-time services stay off: nv-l4t-bootloader-config updates
+  # the QSPI firmware on its own (FlockOS's lane 2 does, WP-6.5), and
+  # nv-rootfs-validation-config marks the root slot good (FlockOS's health
+  # gate does, WP-6.3). NVIDIA puts the units into /etc/systemd/system, where
+  # the mask goes: the files make way (/opt/nvidia keeps NVIDIA's copies).
+  for u in nv-l4t-bootloader-config.service nv-rootfs-validation-config.service; do
+    rm -f "$ROOT/etc/systemd/system/$u" "$ROOT/etc/systemd/system/multi-user.target.wants/$u"
+  done
+  systemctl --root="$ROOT" mask nv-l4t-bootloader-config.service nv-rootfs-validation-config.service
   [ -x "$ROOT/usr/bin/nvidia-container-runtime" ] || die "nvidia-container-runtime is missing"
 fi
 

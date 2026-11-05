@@ -1,0 +1,17 @@
+# The Ubuntu 24.04 (noble) userspace of jetson-orin (ADR-0008: NVIDIA's L4T
+# r39.2 is built for it). Plain KEY=value data. arm64 only: Ubuntu serves
+# arm64 from its ports archive, the security updates included.
+DISTRO_ID=ubuntu
+DISTRO_ID_LIKE="ubuntu debian"
+DISTRO_SUITE=noble
+DISTRO_MIRROR=http://ports.ubuntu.com/ubuntu-ports
+DISTRO_SECURITY_MIRROR=http://ports.ubuntu.com/ubuntu-ports
+DISTRO_COMPONENTS="main restricted universe multiverse"
+DISTRO_KEYRING=/usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+# Docker CE (download.docker.com), the versions of the Debian pins.
+DOCKER_MIRROR=https://download.docker.com/linux/ubuntu
+DOCKER_CE_VERSION=5:29.9.2-1~ubuntu.24.04~noble
+CONTAINERD_VERSION=2.4.2-1~ubuntu.24.04~noble
+BUILDX_VERSION=0.38.0-1~ubuntu.24.04~noble
+COMPOSE_VERSION=5.6.1-1~ubuntu.24.04~noble

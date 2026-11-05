@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Stage 1: the root filesystem tree in $ROOT, with mmdebstrap (master plan,
-# section 3.3). Debian 13 minbase plus the profile's packages, Docker CE from
-# download.docker.com at the pinned versions; no Recommends. The nvidia
+# section 3.3). The minbase of the target's distribution (distros/$DISTRO:
+# Debian 13 unless target.conf names another) plus the profile's packages,
+# Docker CE from download.docker.com at the pinned versions; no Recommends. The nvidia
 # variant adds NVIDIA's repositories, its driver and container toolkit at the
 # versions of profiles/nvidia/versions, and builds the open kernel modules in
 # the tree (build/nvidia-modules.sh).
@@ -11,31 +12,35 @@ src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}" "${KERNEL:?}" "${TARGET:?}" "${BOOTLOADER:?}"
+: "${DISTRO_ID:?}" "${DISTRO_SUITE:?}" "${DISTRO_MIRROR:?}" "${DISTRO_SECURITY_MIRROR:?}" "${DISTRO_COMPONENTS:?}" "${DISTRO_KEYRING:?}" "${DOCKER_MIRROR:?}"
 require mmdebstrap
 
 profile=$src/profiles/base
 sources=$WORK/apt
 mkdir -p "$sources"
 
-# Debian and Docker as deb822 sources. Docker's key is embedded in
+# The distribution (debian.sources, ubuntu.sources) and Docker as deb822
+# sources. The distribution's keyring is a file of its archive-keyring
+# package, on the builder and on the device; Docker's key is embedded in
 # Signed-By, so the same file works for the build and on the device.
-cat >"$sources/debian.sources" <<SOURCES
+distro_sources=$sources/$DISTRO_ID.sources
+cat >"$distro_sources" <<SOURCES
 Types: deb
-URIs: $DEBIAN_MIRROR
-Suites: $DEBIAN_SUITE $DEBIAN_SUITE-updates
-Components: $DEBIAN_COMPONENTS
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+URIs: $DISTRO_MIRROR
+Suites: $DISTRO_SUITE $DISTRO_SUITE-updates
+Components: $DISTRO_COMPONENTS
+Signed-By: $DISTRO_KEYRING
 
 Types: deb
-URIs: $DEBIAN_SECURITY_MIRROR
-Suites: $DEBIAN_SUITE-security
-Components: $DEBIAN_COMPONENTS
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+URIs: $DISTRO_SECURITY_MIRROR
+Suites: $DISTRO_SUITE-security
+Components: $DISTRO_COMPONENTS
+Signed-By: $DISTRO_KEYRING
 SOURCES
 {
   echo "Types: deb"
   echo "URIs: $DOCKER_MIRROR"
-  echo "Suites: $DEBIAN_SUITE"
+  echo "Suites: $DISTRO_SUITE"
   echo "Components: stable"
   echo "Architectures: $ARCH"
   echo "Signed-By:"
@@ -43,7 +48,7 @@ SOURCES
 } >"$sources/docker.sources"
 
 variant_profile=$src/profiles/$VARIANT
-mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH" \
+mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$DISTRO_ID" "$profile/packages.$ARCH" \
   "$src/targets/$TARGET/packages" "$variant_profile/packages" "$variant_profile/packages.$ARCH")
 # The rt kernel axis (section 3.11): Debian's PREEMPT_RT kernel instead of the
 # target's standard one, plus profiles/kernel-rt.
@@ -91,7 +96,7 @@ if [ "$BOOTLOADER" = rpi ]; then
   {
     echo "Types: deb"
     echo "URIs: $RPI_MIRROR"
-    echo "Suites: $DEBIAN_SUITE"
+    echo "Suites: $DISTRO_SUITE"
     echo "Components: main"
     echo "Architectures: $ARCH"
     echo "Signed-By:"
@@ -108,8 +113,62 @@ if [ "$BOOTLOADER" = rpi ]; then
     --setup-hook="copy-in $pref /etc/apt/preferences.d"
   )
 fi
+if [ "$BOOTLOADER" = tegra ]; then
+  # NVIDIA's L4T repositories (ADR-0008), below the distribution like the
+  # Pi's archive: what both have comes from Ubuntu. They carry several L4T
+  # releases; the pins hold every L4T binary at the target's versions (the
+  # kernel's own version for the kernel's), and the container toolkit at
+  # its, in the build and on the device. The packages the target lists are
+  # pinned on the command line too, so a version NVIDIA withdrew fails the
+  # build instead of the pin matching nothing.
+  : "${L4T_MIRROR:?}" "${L4T_SUITE:?}" "${L4T_PACKAGE_VERSION:?}" "${L4T_KERNEL_VERSION:?}" "${L4T_CONTAINER_TOOLKIT_VERSION:?}"
+  {
+    echo "Types: deb"
+    echo "URIs: $L4T_MIRROR/common $L4T_MIRROR/som"
+    echo "Suites: $L4T_SUITE"
+    echo "Components: main"
+    echo "Architectures: $ARCH"
+    echo "Signed-By:"
+    # the key block only: NVIDIA's file starts with a licence header
+    sed -n '/^-----BEGIN PGP PUBLIC KEY BLOCK-----$/,/^-----END PGP PUBLIC KEY BLOCK-----$/p' \
+      "$src/targets/$TARGET/apt/jetson-ota-public.asc" | sed -e 's/^$/./' -e 's/^/ /'
+  } >"$sources/nvidia-l4t.sources"
+  l4t_host=${L4T_MIRROR#*://}
+  l4t_host=${l4t_host%%/*}
+  l4t_kernel_pkgs="nvidia-l4t-kernel nvidia-l4t-kernel-* nvidia-l4t-display-kernel"
+  toolkit_pkgs="nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1"
+  pref=$WORK/flockos-l4t.pref
+  {
+    printf 'Package: %s\nPin: version %s\nPin-Priority: 1001\n\n' "$l4t_kernel_pkgs" "$L4T_KERNEL_VERSION"
+    printf 'Package: nvidia-l4t-*\nPin: version %s\nPin-Priority: 1001\n\n' "$L4T_PACKAGE_VERSION"
+    printf 'Package: %s\nPin: version %s\nPin-Priority: 1001\n\n' "$toolkit_pkgs" "$L4T_CONTAINER_TOOLKIT_VERSION"
+    printf 'Package: *\nPin: origin %s\nPin-Priority: 100\n' "$l4t_host"
+  } >"$pref"
+  for name in "${packages[@]}"; do
+    case "$name" in
+      nvidia-l4t-kernel | nvidia-l4t-kernel-* | nvidia-l4t-display-kernel) pin "$name" "$L4T_KERNEL_VERSION" ;;
+      nvidia-l4t-*) pin "$name" "$L4T_PACKAGE_VERSION" ;;
+      nvidia-container-toolkit | nvidia-container-toolkit-base | libnvidia-container-tools | libnvidia-container1)
+        pin "$name" "$L4T_CONTAINER_TOOLKIT_VERSION"
+        ;;
+    esac
+  done
+  # NVIDIA's packages check the board they are installed on (nvidia-l4t-core
+  # refuses anything but a Jetson) and update its boot firmware unless this
+  # marker exists, as in NVIDIA's own image build; it goes again once the
+  # packages are in.
+  l4t_marker=/opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall
+  # shellcheck disable=SC2016 # "$1" is mmdebstrap's, the tree's path
+  hooks+=(
+    --setup-hook='mkdir -p "$1/etc/apt/preferences.d" "$1/opt/nvidia/l4t-packages"'
+    --setup-hook="copy-in $pref /etc/apt/preferences.d"
+    --setup-hook='touch "$1'"$l4t_marker"'"'
+    --customize-hook='rm -f "$1'"$l4t_marker"'"'
+  )
+fi
 if [ "$VARIANT" = nvidia ]; then
   [ "$ARCH" = amd64 ] || die "the nvidia variant is built for amd64 only"
+  [ "$DISTRO_ID" = debian ] || die "the nvidia variant is built on Debian only (NVIDIA's repositories in profiles/nvidia are Debian's)"
   : "${NVIDIA_CUDA_MIRROR:?}" "${NVIDIA_CTK_MIRROR:?}" "${NVIDIA_DRIVER_VERSION:?}" "${NVIDIA_CONTAINER_TOOLKIT_VERSION:?}"
   flat_source cuda "$NVIDIA_CUDA_MIRROR" "$variant_profile/apt/cuda.asc"
   flat_source nvidia-container-toolkit "$NVIDIA_CTK_MIRROR" "$variant_profile/apt/nvidia-container-toolkit.asc"
@@ -142,9 +201,9 @@ if [ "$VARIANT" = nvidia ]; then
   )
 fi
 
-# Debian first, then the others (Docker, the Pi's archive on rpi-arm64,
-# NVIDIA's for nvidia).
-mapfile -t other_sources < <(find "$sources" -name '*.sources' ! -name debian.sources | sort)
+# The distribution first, then the others (Docker, the Pi's archive on
+# rpi-arm64, NVIDIA's for nvidia).
+mapfile -t other_sources < <(find "$sources" -name '*.sources' ! -name "$DISTRO_ID.sources" | sort)
 rm -rf "$ROOT"
 mmdebstrap \
   --mode=root \
@@ -156,8 +215,8 @@ mmdebstrap \
   --include="$(join_by , "${packages[@]}")" \
   --skip=check/empty \
   "${hooks[@]}" \
-  "$DEBIAN_SUITE" "$ROOT" \
-  "$sources/debian.sources" "${other_sources[@]}"
+  "$DISTRO_SUITE" "$ROOT" \
+  "$distro_sources" "${other_sources[@]}"
 
 # The sources the device keeps (mmdebstrap writes its own file).
 rm -f "$ROOT/etc/apt/sources.list"
