@@ -56,15 +56,25 @@ log "$NAME: customisation"
 bash "$here/customize.sh"
 
 log "$NAME: disk image"
-bash "$here/mkimage.sh"
+case "$BOOTLOADER" in
+  grub-efi) bash "$here/mkimage.sh" ;;
+  rpi) bash "$here/mkimage-rpi.sh" ;;
+  *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
+esac
 
-log "$NAME: RAUC bundle"
-bash "$here/mkbundle.sh"
+# The Pi's bundle holds its boot partition as well, with the A/B backend
+# (WP-5.2); until then rpi-arm64 builds the image only.
+if [ "$BOOTLOADER" != rpi ]; then
+  log "$NAME: RAUC bundle"
+  bash "$here/mkbundle.sh"
+fi
 
 log "$NAME: checksums"
 (
   cd "$OUT"
-  sha256sum -- *.img.gz *.raucb >SHA256SUMS
+  files=(*.img.gz)
+  [ "$BOOTLOADER" = rpi ] || files+=(*.raucb)
+  sha256sum -- "${files[@]}" >SHA256SUMS
   cat SHA256SUMS
 )
 chown -R "${FLOCKOS_HOST_UID:-0}:${FLOCKOS_HOST_GID:-0}" "$OUT"

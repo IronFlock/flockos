@@ -84,6 +84,9 @@ jobs:
             variant: base
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
+          - target: rpi-arm64
+            variant: base
+            runner: ubuntu-24.04-arm
     env:
       TARGET: ${{ matrix.target }}
       VARIANT: ${{ matrix.variant }}
@@ -216,15 +219,19 @@ jobs:
           - target: amd64-efi
             variant: base
             runner: ubuntu-latest
-            qemu: qemu-system-x86 ovmf
+            rootfs-part: 2
           - target: amd64-efi
             variant: nvidia
             runner: ubuntu-latest
-            qemu: qemu-system-x86 ovmf
+            rootfs-part: 2
           - target: arm64-efi
             variant: base
             runner: ubuntu-24.04-arm
-            qemu: qemu-system-arm qemu-efi-aarch64
+            rootfs-part: 2
+          - target: rpi-arm64
+            variant: base
+            runner: ubuntu-24.04-arm
+            rootfs-part: 4
     env:
       TARGET: ${{ matrix.target }}
       VARIANT: ${{ matrix.variant }}
@@ -250,11 +257,13 @@ jobs:
       - name: install trivy (tools.lock)
         run: '"$HARNESS/scripts/install-tool.sh" trivy'
       - name: mount slot A read-only
+        env:
+          ROOTFS_PART: ${{ matrix.rootfs-part }}
         run: |
           sudo mkdir -p /mnt/scan /mnt/rootfs
           gunzip -c image/*.img.gz | sudo dd of=/mnt/scan/disk.img bs=16M conv=sparse status=none
           dev=$(sudo losetup --find --show --partscan --read-only /mnt/scan/disk.img)
-          sudo mount -o ro "${dev}p2" /mnt/rootfs
+          sudo mount -o ro "${dev}p${ROOTFS_PART}" /mnt/rootfs
           echo "LOOPDEV=$dev" >> "$GITHUB_ENV"
       - name: trivy rootfs
         run: |
@@ -283,6 +292,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # The Raspberry Pi image without a Pi (no QEMU for its firmware boot):
+  # layout, autoboot.txt, the boot files and cmdline.txt of boot-a, slot A's
+  # tree, and the image's own binaries in a chroot on the arm64 runner. The
+  # boot itself is the hardware checklist (docs/testing.md).
+  rpi-check:
+    needs: [build]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-rpi-arm64-base
+          path: image
+      - name: rpi-check
+        run: sudo test/image/rpi-check.sh image/*.img.gz
+
   workflows:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1
 
@@ -309,13 +339,13 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, pki-tool, build, image-test, rootfs-scan, workflows, intent, release-build]
+    needs: [gate, pki-tool, build, image-test, rootfs-scan, rpi-check, workflows, intent, release-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.rpi-check.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
           RELEASE_BUILD: ${{ needs.release-build.result }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |
