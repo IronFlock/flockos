@@ -67,8 +67,10 @@ publisher_email=$PUBLISHER@$PROJECT.iam.gserviceaccount.com
 repo_id=$(gh api "repos/$REPO" -q .id)
 principal="principalSet://iam.googleapis.com/projects/$POOL_PROVIDER_PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL/attribute.release/$repo_id:release"
 
-exists iam service-accounts describe "$signer_email" --project "$PROJECT" ||
-  { echo "$signer_email does not exist: run tools/rauc-pki/ceremony.sh first" >&2; exit 1; }
+if ! exists iam service-accounts describe "$signer_email" --project "$PROJECT"; then
+  echo "$signer_email does not exist: run tools/rauc-pki/ceremony.sh first" >&2
+  exit 1
+fi
 
 echo "== the catalog key"
 exists kms keys describe "$KEY" --keyring "$RING" "${kms[@]}" ||

@@ -142,8 +142,196 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  tag:
+  # The release images as published, in QEMU (test/qemu/run.py, amd64-efi
+  # base under KVM): first boot, enrollment from the test .flock, reboot. A
+  # release also updates into slot B with its own bundle, whose Cloud KMS
+  # signature the image's keyring (the FlockOS root CA) must accept, and
+  # falls back. A dry run's bundles carry the stand-in's signature, which no
+  # release image accepts: it boots and reboots only.
+  e2e:
     needs: [verify, sign]
+    if: needs.verify.outputs.mode != 'released'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ env.MODE }}
+          path: out
+      - name: install QEMU, OVMF and mtools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf mtools
+      - name: give the runner KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: hello-world image for the VM
+        run: |
+          docker pull "$HELLO_WORLD"
+          docker tag "$HELLO_WORLD" hello-world:latest
+          docker save -o "$RUNNER_TEMP/hello-world.tar" hello-world:latest
+      - name: QEMU test of the release image (${{ env.MODE }})
+        run: |
+          sudo mkdir -p /mnt/flockos-qemu
+          sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
+          only=()
+          [ "$MODE" = release ] || only=(--only boot)
+          python3 -I test/qemu/run.py --target amd64-efi --variant base "${only[@]}" \
+            --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
+      - name: console and shell logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-logs-${{ env.MODE }}
+          path: |
+            /mnt/flockos-qemu/console.log
+            /mnt/flockos-qemu/shell.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The signed release to the staging tree, as the publisher identity
+  # (flockos-publisher: the FlockOS trees of the download bucket only).
+  stage:
+    needs: [verify, sign]
+    if: needs.verify.outputs.mode != 'released'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      DRY_RUN: ${{ needs.verify.outputs.mode == 'release' && '0' || '1' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ env.MODE }}
+          path: out
+      - name: authenticate the publisher (release only)
+        if: env.MODE == 'release'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        if: env.MODE == 'release'
+      - name: stage (${{ env.MODE }})
+        run: build/publish.sh stage out "$(tr -d '[:space:]' < VERSION)"
+
+  # The live release: the staged files to flockos/<version>/, then the
+  # catalog (tools/catalog), built on the published one with this release on
+  # the test channel (the first release is production too), signed with the
+  # catalog key in Cloud KMS as flockos-release, and published last. Then
+  # every file and the catalog must answer through the download proxy, or
+  # there is no tag. A dry run signs with a throwaway key and publishes
+  # nothing.
+  promote:
+    needs: [verify, stage, e2e]
+    if: needs.verify.outputs.mode != 'released'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      DRY_RUN: ${{ needs.verify.outputs.mode == 'release' && '0' || '1' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ env.MODE }}
+          path: out
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/catalog/go.mod
+          cache: false
+      - name: the published catalog (none before the first release)
+        run: |
+          # The bucket's public face, not the proxy: a 404 here means there is no catalog yet.
+          code=$(curl -sS -o previous.json -w '%{http_code}' --retry 5 \
+            https://storage.googleapis.com/ironflock-downloads/flockos/manifest.json)
+          case "$code" in
+            200) echo "PREVIOUS=previous.json" >> "$GITHUB_ENV" ;;
+            404) rm -f previous.json; echo "no published catalog: this is the first release" ;;
+            *) echo "::error::the published catalog answers $code"; exit 1 ;;
+          esac
+      - name: authenticate the catalog signer (release only)
+        if: env.MODE == 'release'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+      - name: build and sign the catalog (${{ env.MODE }})
+        run: |
+          . build/lib.sh
+          load_conf build/release.conf
+          version=$(tr -d '[:space:]' < VERSION)
+          if [ "$MODE" = release ]; then
+            [ -f pki/flockos-catalog.pub ] || { echo "::error::pki/flockos-catalog.pub is missing: tools/release-setup.sh"; exit 1; }
+            pub=$PWD/pki/flockos-catalog.pub
+            signer=(-kms-key "$CATALOG_KMS_KEY")
+          else
+            openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/catalog-key.pem"
+            openssl pkey -in "$RUNNER_TEMP/catalog-key.pem" -pubout -out "$RUNNER_TEMP/catalog-key.pub"
+            pub=$RUNNER_TEMP/catalog-key.pub
+            signer=(-key-file "$RUNNER_TEMP/catalog-key.pem")
+          fi
+          previous=()
+          if [ -n "${PREVIOUS:-}" ] && [ -f pki/flockos-catalog.pub ]; then
+            previous=(-previous "$PWD/$PREVIOUS" -pubkey "$PWD/pki/flockos-catalog.pub")
+          fi
+          cd tools/catalog
+          go run . build -dir ../../out -repo ../.. -version "$version" -channel test \
+            -url "$DL_BASE/flockos/$version" -min-agent "$CATALOG_MIN_AGENT" \
+            -boards ../../release/boards.json "${previous[@]}" -o ../../payload.json
+          go run . sign -payload ../../payload.json "${signer[@]}" -pubkey "$pub" -o ../../manifest.json
+          go run . verify -pubkey "$pub" ../../manifest.json >/dev/null
+          rm -f "$RUNNER_TEMP/catalog-key.pem"
+          cd ../..
+          jq '{issued_at, channels, releases: (.releases | keys)}' payload.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: catalog-${{ env.MODE }}
+          path: |
+            manifest.json
+            payload.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: authenticate the publisher (release only)
+        if: env.MODE == 'release'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        if: env.MODE == 'release'
+      - name: promote, publish the catalog, check (${{ env.MODE }})
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          build/publish.sh promote "$version"
+          build/publish.sh catalog manifest.json
+          if [ "$MODE" = release ]; then
+            build/publish.sh check "$version" manifest.json
+          fi
+
+  tag:
+    needs: [verify, promote]
     if: needs.verify.outputs.mode == 'release'
     uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
     permissions:
@@ -153,3 +341,45 @@ jobs:
     secrets: inherit # zizmor: ignore[secrets-inherit] # nosemgrep: yaml.github-actions.security.secrets-inherit.secrets-inherit
     with:
       version-file: VERSION
+      github-release: true
+
+  # The GitHub Release the tag job made gets the release's checksums, SBOMs
+  # and catalog (the images and bundles are on the download server; links in
+  # SHA256SUMS' names below DL_BASE/flockos/<version>/). As the release App,
+  # like the tag: this workflow's token stays read-only.
+  assets:
+    needs: [verify, tag]
+    if: needs.verify.outputs.mode == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-release
+          path: out
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: catalog-release
+          path: catalog
+      - name: release App token (contents of this repository)
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - name: attach checksums, SBOMs and the catalog
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          build/publish.sh sums out > SHA256SUMS
+          gh release upload "v$version" --repo "$REPO" --clobber SHA256SUMS catalog/manifest.json out/*/*.cdx.json

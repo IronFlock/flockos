@@ -40,7 +40,8 @@ jobs:
     with:
       skip: build
 
-  # The Go tool of the RAUC PKI (tools/rauc-pki): the shell gate has no Go.
+  # The Go tools (tools/rauc-pki, the RAUC PKI; tools/catalog, the release
+  # catalog): the shell gate has no Go.
   pki-tool:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -55,12 +56,14 @@ jobs:
           go-version-file: tools/rauc-pki/go.mod
           cache: false
       - name: gofmt, vet, test
-        working-directory: tools/rauc-pki
         run: |
-          unformatted=$(gofmt -l .)
-          [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
-          go vet ./...
-          go test -race -count=1 ./...
+          for m in tools/rauc-pki tools/catalog; do
+            echo "== $m"
+            unformatted=$(gofmt -l "$m")
+            [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
+            go -C "$m" vet ./...
+            go -C "$m" test -race -count=1 ./...
+          done
 
   # Every image, with throwaway keys (build.yml): the targets, variants and
   # kernels, and the amd64-efi installer stick.
