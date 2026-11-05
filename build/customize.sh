@@ -123,9 +123,12 @@ case "$BOOTLOADER" in
   tegra)
     # --- NVIDIA's kernel and initrd, where L4TLauncher loads them ----------
     # nvidia-l4t-kernel installs /boot/Image, nvidia-l4t-initrd /boot/initrd;
-    # extlinux.conf comes with the partition layout (WP-6.2).
+    # extlinux.conf boots slot A (APP, whose PARTUUID the flash package
+    # gives it); rauc-post-install points a slot it writes at that slot.
     [ -s "$ROOT/boot/Image" ] || die "no /boot/Image (nvidia-l4t-kernel)"
     [ -s "$ROOT/boot/initrd" ] || die "no /boot/initrd (nvidia-l4t-initrd)"
+    mkdir -p "$ROOT/boot/extlinux"
+    SLOT=A ROOT_PARTUUID=$(uuid_for rootfs-a) render "$target_dir/boot/extlinux.conf" >"$ROOT/boot/extlinux/extlinux.conf"
     mapfile -t kvers < <(cd "$ROOT/usr/lib/modules" && ls)
     [ "${#kvers[@]}" -eq 1 ] || die "expected one kernel's modules, found: ${kvers[*]}"
     kver=${kvers[0]}

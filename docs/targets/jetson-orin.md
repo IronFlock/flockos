@@ -8,7 +8,7 @@ backend (WP-6.3) and the QSPI lane (WP-6.5).
 
 | | |
 |---|---|
-| Boot | NVIDIA's UEFI firmware in QSPI starts L4TLauncher, which boots the root slot's `/boot/Image` with `/boot/initrd` (`extlinux.conf` comes with the layout) |
+| Boot | NVIDIA's UEFI firmware in QSPI starts L4TLauncher, which reads the root slot's `/boot/extlinux/extlinux.conf` and boots its `/boot/Image` with `/boot/initrd` (see below) |
 | A/B | NVIDIA's rootfs A/B: root slots `APP` and `APP_b`, switched through `nvbootctrl -t rootfs` by a RAUC `custom` backend (WP-6.3) |
 | Distribution | `ubuntu-noble` (`distros/ubuntu-noble`): ports.ubuntu.com, Docker's noble repository |
 | Kernel | `nvidia-l4t-kernel` 6.8.12 (`6.8.12-1021-tegra`) with NVIDIA's out-of-tree modules; Orin's GPU driver is `nvgpu` (`-nvgpu` packages; `-openrm` is Thor's) |
@@ -57,6 +57,27 @@ display modules, power model, fan control.
 There is no `repart.d` on this target: NVIDIA's flash tools write the whole
 layout, the `data` partition included.
 
+## Booting a slot
+
+Each root slot boots with its own `/boot/extlinux/extlinux.conf`, rendered
+from `targets/jetson-orin/boot/extlinux.conf`. NVIDIA's initrd mounts the
+last `root=` on the command line (`/dev/…`, `PARTUUID=` or `UUID=`). Under
+rootfs A/B, NVIDIA's `flash.sh` gives each slot its own command line, with
+`root=PARTUUID=` of `APP` or `APP_b`, and L4TLauncher does not rewrite it.
+FlockOS does the same:
+
+- The image's file names slot A: `root=PARTUUID=` of `APP`, derived from the
+  image id (`uuid_for rootfs-a`, which the flash package gives `APP`), and
+  `rauc.slot=A`.
+- RAUC writes one image into either slot, so `rauc-post-install` runs
+  `/usr/lib/flockos/tegra-extlinux` on the slot it has just written. That
+  points the slot's `APPEND` line at its own PARTUUID and bootname, as
+  `rpi-cmdline` does for the Pi's `cmdline.txt`.
+
+The rest of the command line is NVIDIA's for the Orin modules (`TEGRA_CMDLINE`
+in `target.conf`, from `CMDLINE_ADD` of `p3701.conf.common` and
+`p3767.conf.common`). L4TLauncher fills in `${cbootargs}`.
+
 ## Tests
 
 `just rootfs jetson-orin base` builds the tree. On an arm64 host,
@@ -69,14 +90,11 @@ CI runs both on every pull request (`jetson-rootfs` in `ci.yml`).
 
 ## Open points
 
-- The root device in `extlinux.conf`. NVIDIA's initrd mounts the last `root=`
-  on the command line (`/dev/…`, `PARTUUID=` or `UUID=`). Under rootfs A/B,
-  NVIDIA's `flash.sh` gives each slot its own command line: `APP`'s
-  `extlinux.conf` says `root=PARTUUID=<APP>` and `APP_b`'s says
-  `root=PARTUUID=<APP_b>`; L4TLauncher does not rewrite it. As RAUC writes one
-  image into either slot, `rauc-post-install` points the new slot's
-  `extlinux.conf` at its own PARTUUID, as it does for the Pi's `cmdline.txt`
-  (the layout part of WP-6.2, then WP-6.3).
+- The partition layout. It is generated from the BSP's
+  `flash_l4t_t234_nvme_rootfs_ab.xml` with a `data` partition added, because
+  NVIDIA's layout files are under NVIDIA's licence and are not copied here.
+  A flash dry run with the BSP's tools also belongs to the layout part of
+  WP-6.2.
 - `/etc/nv_boot_control.conf`, which `nvbootctrl` needs. NVIDIA's flash tools
   write it for the module (WP-6.4).
 - The licence review of what the image redistributes, before the first

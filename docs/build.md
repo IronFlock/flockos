@@ -77,7 +77,8 @@ SSH host keys are made on the first boot in `/data/etc/ssh` and `sshd` is
 pointed there. The machine-id is generated on the first boot in the slot; RAUC's
 post-install handler (`/usr/lib/flockos/rauc-post-install`) copies it and the
 hostname into the slot it has just written, so an update keeps the device's
-identity. RAUC's own state is in `/data/rauc`.
+identity. On Jetson it also points that slot's `extlinux.conf` at the slot
+(`docs/targets/jetson-orin.md`). RAUC's own state is in `/data/rauc`.
 
 ## Boot and A/B
 

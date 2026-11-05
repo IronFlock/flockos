@@ -1,0 +1,35 @@
+#!/bin/sh
+# Points a Jetson root slot's /boot/extlinux/extlinux.conf at that slot
+# (WP-6.2): root= and rauc.slot= on its APPEND lines. Under NVIDIA's rootfs
+# A/B each slot boots with its own extlinux.conf (L4TLauncher does not
+# rewrite root=); rauc-post-install runs this on the root slot RAUC has just
+# written, whose extlinux.conf came from the bundle and names slot A.
+#   tegra-extlinux FILE PARTUUID BOOTNAME
+set -eu
+[ "$#" -eq 3 ] || {
+  echo "usage: tegra-extlinux FILE PARTUUID BOOTNAME" >&2
+  exit 2
+}
+file=$1 partuuid=$2 slot=$3
+case "$partuuid" in
+  *[!0-9a-fA-F-]* | '') echo "tegra-extlinux: not a PARTUUID: $partuuid" >&2 && exit 1 ;;
+esac
+case "$slot" in
+  A | B) ;;
+  *) echo "tegra-extlinux: not a slot: $slot" >&2 && exit 1 ;;
+esac
+[ -s "$file" ] || {
+  echo "tegra-extlinux: $file is missing" >&2
+  exit 1
+}
+for key in root rauc.slot; do
+  grep -Eq "^[[:space:]]*APPEND .*[[:space:]]$key=" "$file" || {
+    echo "tegra-extlinux: $file has no APPEND line with $key=" >&2
+    exit 1
+  }
+done
+sed -E \
+  -e "/^[[:space:]]*APPEND /s/([[:space:]])root=[^[:space:]]+/\1root=PARTUUID=$partuuid/" \
+  -e "/^[[:space:]]*APPEND /s/([[:space:]])rauc\.slot=[^[:space:]]+/\1rauc.slot=$slot/" \
+  "$file" >"$file.new"
+mv "$file.new" "$file"
