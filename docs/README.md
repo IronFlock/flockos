@@ -22,6 +22,7 @@
 | [0005](adr/0005-builder-mmdebstrap-genimage.md) | mmdebstrap + genimage behind a just/shell framework | proposed |
 | [0006](adr/0006-rauc-pki-in-cloud-kms.md) | RAUC signing with a CA in Cloud KMS via PKCS#11 | accepted |
 | [0007](adr/0007-update-mechanism-rauc-and-firmware-lanes.md) | RAUC stays the OS updater; firmware in three lanes (bundle, RAUC hooks, fwupd); alternatives compared | accepted |
+| [0008](adr/0008-jetson-orin-bsp-jetpack-7.md) | Jetson Orin on Jetson Linux r39.2.1 (JetPack 7.2.1), Ubuntu 24.04; rootfs from NVIDIA's apt repositories, BSP tarball for flashing and capsules | proposed |
 
 Planned additions as the phases land: `targets/<target>.md` for the other targets,
 `migration.md` (reflashing ReswarmOS devices).
