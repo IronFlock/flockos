@@ -41,14 +41,19 @@ Sequence:
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses
    root and passwords; no account has a password; RAUC reports slot A booted with
    the right compatible; Docker's data-root is on `/data` and, with
-   `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers.
+   `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers. With the test
+   `.flock` the harness puts on the FLOCKOS partition (a throwaway key, useless to
+   the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
+   rule and agent unit exist, the `.flock` has left the FLOCKOS partition and the
+   agent's copy is 0600.
 2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked
-   good, and keeps machine-id, host key and `/data`.
+   good, keeps machine-id, host key and `/data`, and is enrolled again from the
+   agent's copy (SSH user and agent unit back in the new slot).
 4. **Fallback.** With `flockos.no-mark-good` added, a second update makes A
    primary; A boots once with `A_TRY=1` and is never marked good; the next boot
    falls back to B.

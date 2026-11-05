@@ -99,6 +99,9 @@ done
 [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||
   die "RAUC's D-Bus service is missing (package rauc-service)"
 
+# --- IronFlock: the agent and the host defaults, by device-init ----------
+bash "$here/bake.sh"
+
 # --- record what is in the image, then clean ------------------------------
 dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${Package}\t${Version}\t${Architecture}\n' |
   sort >"$OUT/$NAME.packages.tsv"

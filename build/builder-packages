@@ -10,6 +10,10 @@ dosfstools
 mtools
 grub-common
 openssl
+# OpenPGP signature check of ironflock-init (build/bake.sh)
+sqv
+curl
+jq
 pigz
 zstd
 xz-utils
