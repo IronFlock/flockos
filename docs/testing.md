@@ -65,8 +65,8 @@ Sequence:
    primary; A boots once with `A_TRY=1` and is never marked good; the next boot
    falls back to B.
 
-**Install test** (`--variant installer`, the `install-test` job): the installer
-image is attached as a USB stick with `installer.conf` set to `confirm=no` and
+**Install test** (`--variant installer`, the `install-test` job, for amd64-efi
+under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to `confirm=no` and
 the test `.flock`, next to a blank 20 GiB NVMe. The stick must install to
 `/dev/nvme0n1` on its own, copy the `.flock` to the new disk and power off; its
 log must say both. The NVMe then boots alone, with the UEFI variables the

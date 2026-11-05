@@ -8,7 +8,7 @@ src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${SOURCE_DATE_EPOCH:?}"
-: "${GRUB_FORMAT:?}" "${EFI_LOADER:?}" "${ESP_SIZE:?}" "${ROOT_PART_TYPE:?}" "${CONSOLE_CMDLINE:?}" "${GRUB_SERIAL:?}"
+: "${GRUB_FORMAT:?}" "${EFI_LOADER:?}" "${ESP_SIZE:?}" "${ROOT_PART_TYPE:?}" "${CONSOLE_CMDLINE:?}" "${GRUB_SERIAL:?}" "${GRUB_TERMINAL:?}"
 : "${ESP_PART_NAME:?}" "${ROOT_PART_NAME:?}"
 require grub-mkimage grub-editenv mkfs.vfat mmd mcopy mke2fs genimage pigz
 target_dir=$src/targets/$TARGET

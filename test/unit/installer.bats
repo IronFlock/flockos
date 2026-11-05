@@ -3,6 +3,7 @@
 # selection rules, the payload choice, and a dry run of the whole program.
 
 lib="$BATS_TEST_DIRNAME/../../profiles/installer/overlay/usr/lib/flockos"
+repo="$BATS_TEST_DIRNAME/../.."
 
 setup() {
   # shellcheck source=profiles/installer/overlay/usr/lib/flockos/installer-lib.sh
@@ -91,6 +92,17 @@ teardown() { rm -rf "$tmp"; }
   run installer_payload "$tmp/p" ""
   [ "$status" -ne 0 ]
   [[ "$output" == *"set payload="* ]]
+}
+
+@test "the boot entry's loader is the target's EFI_LOADER" {
+  [ "$(installer_loader x86_64)" = '\EFI\BOOT\BOOTX64.EFI' ]
+  [ "$(installer_loader aarch64)" = '\EFI\BOOT\BOOTAA64.EFI' ]
+  ! installer_loader riscv64
+  for t in amd64-efi arm64-efi; do
+    want=$(. "$repo/build/lib.sh" && load_conf "$repo/targets/$t/target.conf" && echo "$EFI_LOADER")
+    case $t in amd64-efi) m=x86_64 ;; arm64-efi) m=aarch64 ;; esac
+    [ "$(installer_loader $m)" = "\\EFI\\BOOT\\$want" ]
+  done
 }
 
 @test "partition names: sda1, nvme0n1p1, mmcblk0p1" {

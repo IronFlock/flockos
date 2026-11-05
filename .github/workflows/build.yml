@@ -104,15 +104,25 @@ jobs:
           compression-level: 0
           retention-days: 3
 
-  # The installer stick of amd64-efi, carrying the base image built above.
+  # The installer sticks of the EFI targets, each carrying its target's base
+  # image built above.
   installer:
+    name: installer (${{ matrix.target }})
     needs: [image]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: amd64-efi
+            runner: ubuntu-latest
+          - target: arm64-efi
+            runner: ubuntu-24.04-arm
     env:
-      TARGET: amd64-efi
+      TARGET: ${{ matrix.target }}
       VARIANT: base
       FLOCKOS_SIGNING: ${{ inputs.signing }}
     steps:

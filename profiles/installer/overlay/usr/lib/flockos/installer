@@ -101,8 +101,12 @@ if [ -n "$flock" ]; then
 fi
 
 say "registering $target as the first UEFI boot entry"
-run efibootmgr --quiet --create --disk "$target" --part 1 --label FlockOS --loader '\EFI\BOOT\BOOTX64.EFI' ||
-  say "warning: no UEFI boot entry (the disk still boots from its removable-media path)"
+if loader=$(installer_loader); then
+  run efibootmgr --quiet --create --disk "$target" --part 1 --label FlockOS --loader "$loader" ||
+    say "warning: no UEFI boot entry (the disk still boots from its removable-media path)"
+else
+  say "warning: no UEFI loader known for $(uname -m): no boot entry (the disk boots from its removable-media path)"
+fi
 
 say "FlockOS is installed on $target. Remove the stick; the device starts from $target."
 sync
