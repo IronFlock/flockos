@@ -6,10 +6,10 @@
 
 The image under test is the artefact from `just build`, unchanged except for
 one value in the FLOCKOS partition's grubenv of the test copy:
-FLOCKOS_CMDLINE asks systemd for a root debug shell on the second serial
-port (systemd.debug_shell=ttyS1), which this script drives. grubenv lives on
-the FLOCKOS partition, so the shell is there on both slots, before and after
-an update.
+FLOCKOS_CMDLINE asks systemd for a root debug shell, which this script drives:
+on the second serial port on amd64 (ttyS1), on a virtio console on arm64
+(hvc0; QEMU's virt machine has one UART). grubenv lives on the FLOCKOS
+partition, so the shell is there on both slots, before and after an update.
 
 Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (partitions grown, /data
 layout, identity, SSH policy, RAUC slot A good, Docker, fwupd); reboot
@@ -37,7 +37,13 @@ import time
 import uuid
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEBUG_CMDLINE = "systemd.debug_shell=ttyS1"
+# The guest device of the debug shell per architecture (see the docstring).
+DEBUG_SHELL = {"amd64": "ttyS1", "arm64": "hvc0"}
+HOST_ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(os.uname().machine)
+
+
+def debug_cmdline(arch):
+    return f"systemd.debug_shell={DEBUG_SHELL[arch]}"
 FIRMWARE = {
     "amd64": [
         ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
@@ -149,8 +155,9 @@ def set_test_cmdline(disk, workdir, cmdline):
 
 
 class VM:
-    def __init__(self, arch, disk, workdir, kvm):
-        self.arch, self.disk, self.workdir, self.kvm = arch, disk, workdir, kvm
+    def __init__(self, arch, disk, workdir, accel):
+        self.arch, self.disk, self.workdir, self.accel = arch, disk, workdir, accel
+        self.debug_cmdline = debug_cmdline(arch)
         self.sock_path = os.path.join(workdir, "shell.sock")
         self.console = os.path.join(workdir, "console.log")
         self.proc = None
@@ -174,7 +181,7 @@ class VM:
             cmd += ["-machine", "q35", "-device", "i6300esb"]
         else:
             cmd += ["-machine", "virt"]
-        cmd += ["-accel", "kvm", "-cpu", "host"] if self.kvm else ["-accel", "tcg", "-cpu", "max"]
+        cmd += ["-accel", self.accel, "-cpu", "host" if self.accel != "tcg" else "max"]
         cmd += ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}"]
         if vars_template:
             cmd += ["-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}"]
@@ -182,9 +189,14 @@ class VM:
             "-drive", f"file={self.disk},format=raw,if=virtio,cache=unsafe",
             "-nic", "user,model=virtio-net-pci",
             "-serial", f"file:{self.console}",
-            "-serial", f"unix:{self.sock_path},server=on,wait=off",
             "-device", "virtio-rng-pci",
         ]
+        if self.arch == "amd64":
+            cmd += ["-serial", f"unix:{self.sock_path},server=on,wait=off"]
+        else:
+            cmd += ["-device", "virtio-serial-pci",
+                    "-chardev", f"socket,id=shell,path={self.sock_path},server=on,wait=off",
+                    "-device", "virtconsole,chardev=shell"]
         log("qemu: " + " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
         deadline = time.time() + 30
@@ -238,7 +250,7 @@ class VM:
                 self.buf += chunk
 
     def wait_shell(self, timeout):
-        """Wait until the debug shell on ttyS1 answers; returns its boot id."""
+        """Wait until the debug shell answers; returns its boot id."""
         deadline = time.time() + timeout
         n = 0
         while time.time() < deadline:
@@ -447,7 +459,7 @@ class Runner:
         return out
 
     def fallback(self):
-        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={DEBUG_CMDLINE} flockos.no-mark-good'")
+        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={self.vm.debug_cmdline} flockos.no-mark-good'")
         self.install_bundle()
         primary = self.rauc_status().get("boot_primary")
         if primary != "rootfs.0":
@@ -463,7 +475,7 @@ class Runner:
         self.wait_running()
         if self.booted() != "B":
             raise TestFailure(f"booted {self.booted()}: an untested slot A must fall back to B")
-        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={DEBUG_CMDLINE}'")
+        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={self.vm.debug_cmdline}'")
         self.vm.run("rauc status mark-good")
 
 
@@ -504,7 +516,7 @@ def main():
         shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
     size = {"G": 1024**3, "M": 1024**2}[args.disk_size[-1]] * int(args.disk_size[:-1])
     os.truncate(disk, size)
-    set_test_cmdline(disk, workdir, DEBUG_CMDLINE)
+    set_test_cmdline(disk, workdir, debug_cmdline(arch))
     flock = None if args.no_flock else put_test_flock(disk, workdir)
 
     serve_dir = os.path.join(workdir, "http")
@@ -514,10 +526,16 @@ def main():
         shutil.copy(args.docker_image_tar, serve_dir)
     server, port = serve(serve_dir)
 
-    kvm = os.access("/dev/kvm", os.R_OK | os.W_OK) and arch == {"x86_64": "amd64", "aarch64": "arm64"}.get(os.uname().machine)
-    boot_timeout = 300 if kvm else 1500
-    log(f"accelerator: {'kvm' if kvm else 'tcg (slow)'}")
-    vm = VM(arch, disk, workdir, kvm)
+    # KVM on Linux, Hypervisor.framework on an arm64 Mac, else emulation.
+    if arch == HOST_ARCH and os.access("/dev/kvm", os.R_OK | os.W_OK):
+        accel = "kvm"
+    elif arch == HOST_ARCH == "arm64" and sys.platform == "darwin":
+        accel = "hvf"
+    else:
+        accel = "tcg"
+    boot_timeout = 300 if accel != "tcg" else 1500
+    log(f"accelerator: {accel}{' (slow)' if accel == 'tcg' else ''}")
+    vm = VM(arch, disk, workdir, accel)
     runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout, flock)
     ok = False
     try:

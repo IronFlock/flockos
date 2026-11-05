@@ -29,7 +29,8 @@ just test
 disk image, grows the copy to 20 GiB and boots it with UEFI firmware (OVMF). The
 image is the shipped one; the only change to the copy is one value in its
 `grubenv`, `FLOCKOS_CMDLINE=systemd.debug_shell=ttyS1`, which gives a root shell
-on the second serial port. The script drives that shell; the first serial port
+on the second serial port (on arm64 `hvc0`, a virtio console: QEMU's `virt`
+machine has one UART). The script drives that shell; the first serial port
 (kernel and systemd console) is written to `console.log`. Because `grubenv` is on
 the FLOCKOS partition, the shell is there on both slots, also after an update.
 
@@ -61,7 +62,11 @@ Locally (Linux with KVM, or slowly under emulation elsewhere) after a build:
 just qemu-test amd64-efi base --keep
 ```
 
-It needs `qemu-system-x86_64`, OVMF and `mtools`. `--only boot` stops after the
+It needs `qemu-system-x86_64` and OVMF (or `qemu-system-aarch64` and AAVMF for
+`arm64-efi`) and `mtools`. The VM runs under KVM where the host has it and the
+architectures match, under Hypervisor.framework for `arm64-efi` on an Apple
+silicon Mac, and emulated otherwise (much slower; CI's arm64 runners have no
+KVM). `--only boot` stops after the
 reboot, `--only update` after the update. On failure the work directory with
 `console.log` and `shell.log` is kept; in CI both are uploaded as the
 `qemu-logs-*` artifact.
