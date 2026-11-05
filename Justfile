@@ -41,12 +41,14 @@ lint:
         fi
     fi
     if command -v go >/dev/null; then
-        echo "==> gofmt, go vet (tools/rauc-pki)"
-        unformatted=$(gofmt -l tools/rauc-pki)
-        [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
-        go -C tools/rauc-pki vet ./...
+        for m in tools/rauc-pki tools/catalog; do
+            echo "==> gofmt, go vet ($m)"
+            unformatted=$(gofmt -l "$m")
+            [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
+            go -C "$m" vet ./...
+        done
     else
-        echo "==> go not installed, tools/rauc-pki skipped"
+        echo "==> go not installed, tools/rauc-pki and tools/catalog skipped"
     fi
     echo "==> python syntax"
     git ls-files '*.py' | xargs -r python3 -I -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]'
@@ -56,15 +58,16 @@ lint:
     fi
     echo "==> lint OK"
 
-# Unit tests: bats for the build and image scripts, go test for tools/rauc-pki
+# Unit tests: bats for the build and image scripts, go test for the Go tools
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     bats test/unit
     if command -v go >/dev/null; then
         go -C tools/rauc-pki test -count=1 ./...
+        go -C tools/catalog test -count=1 ./...
     else
-        echo "go not installed: tools/rauc-pki tests skipped"
+        echo "go not installed: tools/rauc-pki and tools/catalog tests skipped"
     fi
 
 # Build one image into out/<image-id>/: just build TARGET VARIANT [KERNEL]
