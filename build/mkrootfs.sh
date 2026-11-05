@@ -10,7 +10,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
-: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}"
+: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}" "${TARGET:?}"
 require mmdebstrap
 
 profile=$src/profiles/base
@@ -44,7 +44,7 @@ SOURCES
 
 variant_profile=$src/profiles/$VARIANT
 mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH" \
-  "$variant_profile/packages" "$variant_profile/packages.$ARCH")
+  "$src/targets/$TARGET/packages" "$variant_profile/packages" "$variant_profile/packages.$ARCH")
 pin() { # pin PACKAGE VERSION: replace PACKAGE with PACKAGE=VERSION
   local i found=0
   for i in "${!packages[@]}"; do

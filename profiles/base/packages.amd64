@@ -1,5 +1,4 @@
-# amd64 additions to profiles/base/packages.
-linux-image-amd64
-grub-common
+# amd64 additions to profiles/base/packages: CPU microcode. The kernel comes
+# with the target (targets/amd64-efi/packages).
 amd64-microcode
 intel-microcode
