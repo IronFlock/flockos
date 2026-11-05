@@ -7,7 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
-: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}"
+: "${ROOT:?}" "${WORK:?}" "${ARCH:?}" "${VARIANT:?}" "${TARGET:?}"
 require mmdebstrap
 
 profile=$src/profiles/base
@@ -39,7 +39,7 @@ SOURCES
   sed -e 's/^$/./' -e 's/^/ /' "$profile/apt/docker.asc"
 } >"$sources/docker.sources"
 
-mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH")
+mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH" "$src/targets/$TARGET/packages")
 pin() { # pin PACKAGE VERSION: replace PACKAGE with PACKAGE=VERSION
   local i found=0
   for i in "${!packages[@]}"; do

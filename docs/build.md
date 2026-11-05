@@ -18,7 +18,7 @@ stage:
 | Stage | Script | Result |
 |-------|--------|--------|
 | signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key: throwaway on every build except a release (ADR-0006, `docs/signing.md`) |
-| rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions` |
+| rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages`, its per-architecture list and the target's `targets/<target>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions` |
 | customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
 | bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring |

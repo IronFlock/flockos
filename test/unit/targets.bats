@@ -43,3 +43,12 @@ setup() {
   load_conf "$repo/targets/arm64-efi/target.conf"
   [ -z "${SLOT_SIZE_NVIDIA:-}" ]
 }
+
+@test "each EFI target brings its kernel and GRUB's environment tool" {
+  for t in amd64-efi arm64-efi; do
+    mapfile -t pkgs < <(read_list "$repo/targets/$t/packages")
+    printf '%s\n' "${pkgs[@]}" | grep -q '^linux-image-'
+    printf '%s\n' "${pkgs[@]}" | grep -qx grub-common
+  done
+  ! read_list "$repo/profiles/base/packages" "$repo/profiles/base/packages.amd64" "$repo/profiles/base/packages.arm64" | grep -q '^linux-image-'
+}

@@ -187,7 +187,9 @@ class VM:
             cmd += ["-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}"]
         cmd += [
             "-drive", f"file={self.disk},format=raw,if=virtio,cache=unsafe",
-            "-nic", "user,model=virtio-net-pci",
+            # No option ROM: the UEFI firmware has its own virtio-net driver, and
+            # the iPXE ROMs are only a recommendation of the QEMU packages.
+            "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0,romfile=",
             "-serial", f"file:{self.console}",
             "-device", "virtio-rng-pci",
         ]
@@ -206,8 +208,20 @@ class VM:
             if time.time() > deadline:
                 raise TestFailure("qemu made no serial socket")
             time.sleep(0.2)
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(self.sock_path)
+        # The socket file exists from bind(); QEMU listens a moment later, or
+        # has exited on a bad option.
+        while True:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                self.sock.connect(self.sock_path)
+                break
+            except ConnectionRefusedError:
+                self.sock.close()
+                if self.proc.poll() is not None:
+                    raise TestFailure(f"qemu exited with {self.proc.returncode}")
+                if time.time() > deadline:
+                    raise TestFailure("qemu does not accept on its serial socket")
+                time.sleep(0.2)
         self.sock.setblocking(False)
 
     def stop(self):
