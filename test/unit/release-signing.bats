@@ -90,13 +90,37 @@ images() {
   ' "$repo/.github/workflows/$1" | sort -u
 }
 
-@test "every image CI tests or scans is one build.yml builds" {
+@test "every image CI tests is one build.yml builds" {
   built=$(images build.yml image)
   [ "$(echo "$built" | wc -l)" -ge 6 ]
-  for job in image-test rootfs-scan; do
-    tested=$(images ci.yml "$job")
-    [ -n "$tested" ] || { echo "no images in ci.yml $job"; return 1; }
-    missing=$(comm -13 <(echo "$built") <(echo "$tested"))
-    [ -z "$missing" ] || { echo "ci.yml $job uses images build.yml does not build: $missing"; return 1; }
-  done
+  tested=$(images ci.yml image-test)
+  [ -n "$tested" ]
+  missing=$(comm -13 <(echo "$built") <(echo "$tested"))
+  [ -z "$missing" ] || { echo "ci.yml image-test uses images build.yml does not build: $missing"; return 1; }
+}
+
+@test "security.yml scans exactly the images build.yml builds" {
+  # The "args" of the harness's rootfs-matrix: just rootfs TARGET VARIANT KERNEL.
+  scanned=$(grep -o '"args": "[^"]*"' "$repo/.github/workflows/security.yml" | sed 's/^"args": "//; s/"$//' | sort -u)
+  [ -n "$scanned" ]
+  [ "$scanned" = "$(images build.yml image)" ]
+}
+
+@test "each rootfs-matrix entry names the tree just rootfs leaves" {
+  # path is flockos-<name>/rootfs (build.sh: ROOTFS_WORK/<image-id>/rootfs).
+  run python3 -I -c '
+import json, re, sys
+text = open(sys.argv[1]).read()
+block = re.search(r"rootfs-matrix: >-\n((?:        .*\n)+)", text).group(1)
+entries = json.loads(" ".join(block.split()))
+for e in entries:
+    t, v, k = e["args"].split()
+    image = t + "-" + v + ("-rt" if k == "rt" else "")
+    assert e["name"] == image, e
+    assert e["path"] == "flockos-" + image + "/rootfs", e
+    assert e.get("runner", "ubuntu-latest") == ("ubuntu-latest" if t == "amd64-efi" else "ubuntu-24.04-arm"), e
+print(len(entries))
+' "$repo/.github/workflows/security.yml"
+  [ "$status" -eq 0 ]
+  [ "$output" = 6 ]
 }
