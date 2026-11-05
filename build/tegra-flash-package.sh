@@ -17,8 +17,12 @@
 # - their PARTUUIDs: the ones the image's extlinux.conf files name
 #   (uuid_for rootfs-a and rootfs-b), through flash.sh's UUID files;
 # - flash.sh reuses the slot images (-r) instead of building them from a
-#   tree with the BSP's kernel and its own command line.
-# The package lands in L4T_DIR/tools/kernel_flash/images.
+#   tree with the BSP's kernel and its own command line;
+# - L4T_DIR/rootfs holds slot A's tree, as NVIDIA's tools expect (flash.sh
+#   reads the board's compatible spec from it).
+# The package lands in L4T_DIR/tools/kernel_flash/images. The BSP's copy in
+# L4T_DIR is changed: its rootfs, bootloader/system.img*, the UUID files, and
+# a fix of the initrd flash scripts' -r option (see fix_reuse_option).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
@@ -45,7 +49,23 @@ uuid_b=$(uuid_for rootfs-b)
 bl=$l4t/bootloader
 kf=$l4t/tools/kernel_flash
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'umount "$work/mnt" 2>/dev/null; rm -rf "$work"' EXIT
+
+# --- NVIDIA's -r option ----------------------------------------------------
+# l4t_initrd_flash.func and l4t_create_images_for_kernel_flash.sh declare
+# -r (reuse the system images) with an argument in their getopts strings,
+# though it takes none: -r swallows the next option, getopts stops at that
+# option's value, and every option after it is dropped (the layout and
+# --external-only among them). fix_reuse_option FILE OLD NEW makes -r a
+# flag; it fails where the BSP's string is not the known one.
+fix_reuse_option() {
+  local file=$l4t/tools/kernel_flash/$1
+  if grep -qF "opstr+=\"$3\"" "$file"; then return 0; fi
+  grep -qF "opstr+=\"$2\"" "$file" || die "$1: its getopts string is not the known one ($2); check -r before flashing"
+  sed -i "s|opstr+=\"$2\"|opstr+=\"$3\"|" "$file"
+}
+fix_reuse_option l4t_initrd_flash.func "u:p:P:v:c:r:-:S:k:i:" "u:p:P:v:c:r-:S:k:i:"
+fix_reuse_option l4t_create_images_for_kernel_flash.sh "k:u:p:v:c:r:-:S:i:" "k:u:p:v:c:r-:S:i:"
 
 # --- layout ----------------------------------------------------------------
 layout=$kf/flockos_t234_nvme_rootfs_ab.xml
@@ -71,6 +91,16 @@ for s in system.img system.img_b; do
 done
 log "slot images: APP ($uuid_a), APP_b ($uuid_b)"
 
+# --- the tree NVIDIA's tools read: slot A's --------------------------------
+mkdir -p "$work/mnt"
+mount -o loop,ro "$bl/system.img.raw" "$work/mnt"
+rm -rf "$l4t/rootfs"
+mkdir -p "$l4t/rootfs"
+cp -a "$work/mnt/." "$l4t/rootfs/"
+umount "$work/mnt"
+[ -x "$l4t/rootfs/opt/nvidia/l4t-bootloader-config/nv-l4t-board-config.sh" ] ||
+  die "slot A's tree has no nv-l4t-board-config.sh (nvidia-l4t-bootloader-utils)"
+
 # --- the slots' PARTUUIDs, as extlinux.conf names them --------------------
 printf '%s\n' "$uuid_a" >"$bl/l4t-rootfs-uuid.txt_ext"
 printf '%s\n' "$uuid_b" >"$bl/l4t-rootfs-uuid.txt_b_ext"
@@ -79,12 +109,9 @@ printf '%s\n' "$uuid_b" >"$bl/l4t-rootfs-uuid.txt_b_ext"
 slot_bytes=$(size_bytes "$SLOT_SIZE_BASE")
 (
   cd "$l4t"
-  # "-r 1": l4t_initrd_flash.func declares -r with an argument (getopts
-  # "r:") though it takes none; without one, -r swallows the next option
-  # and getopts stops at its value, dropping every option after it.
   BOARDID=$board_id BOARDSKU=$board_sku FAB=000 ROOTFS_AB=1 \
-    ./tools/kernel_flash/l4t_initrd_flash.sh --no-flash \
+    ./tools/kernel_flash/l4t_initrd_flash.sh --no-flash -r \
     --external-device nvme0n1 -c "$layout" -S "$slot_bytes" \
-    --external-only -r 1 "$board" external
+    --external-only "$board" external
 )
 log "flash package: $kf/images"
