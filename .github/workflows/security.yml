@@ -1,7 +1,7 @@
 # Security screening from the shared IronFlock CI harness: secrets (gitleaks),
 # semgrep, configuration, licences, the Go module of tools/rauc-pki
-# (govulncheck, SBOM), and the packages of every FlockOS image (`rootfs`
-# below; master plan, section 3.8; WP-1.8).
+# (govulncheck, SBOM), and the packages of every FlockOS image (the
+# harness's rootfs-recipe input below; master plan, section 3.8; WP-1.8).
 #
 # Report-only for the first two weeks, as the harness README asks; then set
 #   fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
@@ -25,140 +25,8 @@ concurrency:
   group: security-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  # The packages of every image against the vulnerability database. Each
-  # image's root tree is built to the end of its customisation in the build
-  # container (`just rootfs`, no disk image), then `trivy rootfs` writes:
-  # - SARIF of the vulnerabilities that have a fix, as the artifact
-  #   security-findings-rootfs-<image>, which the harness report below
-  #   counts (it reads every security-findings-* artifact of the run), and
-  #   to code scanning;
-  # - the CycloneDX SBOM of all packages, as the artifact rootfs-sbom-<image>.
-  # The `security` job waits for this one: a scan that did not finish leaves
-  # `security / report` missing, never green.
-  rootfs:
-    name: rootfs (${{ matrix.target }}, ${{ matrix.variant }}${{ matrix.kernel == 'rt' && ', rt' || '' }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
-    permissions:
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        # The images of build.yml (test/unit/release-signing.bats checks it).
-        include:
-          - target: amd64-efi
-            variant: base
-            kernel: std
-            runner: ubuntu-latest
-          - target: amd64-efi
-            variant: base
-            kernel: rt
-            runner: ubuntu-latest
-          - target: amd64-efi
-            variant: nvidia
-            kernel: std
-            runner: ubuntu-latest
-          - target: arm64-efi
-            variant: base
-            kernel: std
-            runner: ubuntu-24.04-arm
-          - target: arm64-efi
-            variant: base
-            kernel: rt
-            runner: ubuntu-24.04-arm
-          - target: rpi-arm64
-            variant: base
-            kernel: std
-            runner: ubuntu-24.04-arm
-    env:
-      TARGET: ${{ matrix.target }}
-      VARIANT: ${{ matrix.variant }}
-      KERNEL: ${{ matrix.kernel }}
-      IMAGE: ${{ matrix.target }}-${{ matrix.variant }}${{ matrix.kernel == 'rt' && '-rt' || '' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: v1
-          path: .harness
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-            tools.lock
-          sparse-checkout-cone-mode: false
-      - name: move harness out of the workspace
-        run: |
-          mv .harness "$RUNNER_TEMP/harness"
-          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/findings" "$RUNNER_TEMP/sbom"
-      - name: install just and trivy (tools.lock)
-        run: '"$HARNESS/scripts/install-tool.sh" just trivy'
-      - name: scratch space on the runner's second disk
-        run: sudo mkdir -p /mnt/flockos-work
-      - name: just rootfs ${{ env.TARGET }} ${{ env.VARIANT }} ${{ env.KERNEL }}
-        env:
-          FLOCKOS_WORK: /mnt/flockos-work
-        run: just rootfs "$TARGET" "$VARIANT" "$KERNEL"
-      - name: trivy rootfs
-        env:
-          VEX: security/vex.openvex.json
-          TRIVYIGNORE: .trivyignore.yaml
-        run: |
-          tree=/mnt/flockos-work/flockos-$IMAGE/rootfs
-          sudo test -f "$tree/var/lib/dpkg/status"
-          args=(--quiet --scanners vuln)
-          if [ -f "$VEX" ]; then args+=(--vex "$VEX"); fi
-          if [ -f "$TRIVYIGNORE" ]; then args+=(--ignorefile "$TRIVYIGNORE"); fi
-          sudo env "PATH=$PATH" trivy rootfs "${args[@]}" --ignore-unfixed --format sarif \
-            --output "$RUNNER_TEMP/findings/trivy-rootfs-$IMAGE.sarif" "$tree"
-          sudo env "PATH=$PATH" trivy rootfs "${args[@]}" --format cyclonedx \
-            --output "$RUNNER_TEMP/sbom/flockos-$IMAGE.cdx.json" "$tree"
-          sudo env "PATH=$PATH" trivy rootfs "${args[@]}" --ignore-unfixed --severity HIGH,CRITICAL \
-            --format table "$tree" | tee "$RUNNER_TEMP/summary.txt"
-          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/findings" "$RUNNER_TEMP/sbom"
-          {
-            echo "### flockos-$IMAGE: packages with a fixed HIGH or CRITICAL vulnerability"
-            echo '```'
-            tail -n 60 "$RUNNER_TEMP/summary.txt"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: security-findings-rootfs-${{ env.IMAGE }}
-          path: ${{ runner.temp }}/findings
-          if-no-files-found: error
-          retention-days: 90
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rootfs-sbom-${{ env.IMAGE }}
-          path: ${{ runner.temp }}/sbom
-          if-no-files-found: error
-          retention-days: 90
-      - id: cs
-        if: always() && !github.event.repository.private
-        env:
-          VEX: security/vex.openvex.json
-        run: |
-          python3 -I "$HARNESS/scripts/sarif-summary.py" upload-copy --dir "$RUNNER_TEMP/findings" --out "$RUNNER_TEMP/code-scanning" --vex "$VEX"
-          echo "files=$(find "$RUNNER_TEMP/code-scanning" -name '*.sarif' | wc -l)" >> "$GITHUB_OUTPUT"
-      - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
-        if: always() && steps.cs.outputs.files > 0
-        continue-on-error: true
-        with:
-          sarif_file: ${{ runner.temp }}/code-scanning
-          category: rootfs-${{ env.IMAGE }}
-
   security:
-    needs: [rootfs]
     uses: IronFlock/workflows/.github/workflows/security.yml@v1
     permissions:
       contents: read
@@ -170,3 +38,19 @@ jobs:
       fail-on: ""
       # Public repository: findings also go to the Security tab.
       code-scanning: true
+      # The packages of every image (WP-1.8): `just rootfs` builds each
+      # image's root tree in ROOTFS_WORK (no disk image), and the harness
+      # scans it with trivy rootfs: SARIF of the vulnerabilities with a fix,
+      # counted by `security / report` and shown in code scanning, and the
+      # CycloneDX SBOM as the artifact security-rootfs-sbom-<name>. The images
+      # of build.yml (test/unit/release-signing.bats checks it).
+      rootfs-recipe: rootfs
+      rootfs-matrix: >-
+        [
+          {"name": "amd64-efi-base", "args": "amd64-efi base std", "path": "flockos-amd64-efi-base/rootfs"},
+          {"name": "amd64-efi-base-rt", "args": "amd64-efi base rt", "path": "flockos-amd64-efi-base-rt/rootfs"},
+          {"name": "amd64-efi-nvidia", "args": "amd64-efi nvidia std", "path": "flockos-amd64-efi-nvidia/rootfs"},
+          {"name": "arm64-efi-base", "args": "arm64-efi base std", "path": "flockos-arm64-efi-base/rootfs", "runner": "ubuntu-24.04-arm"},
+          {"name": "arm64-efi-base-rt", "args": "arm64-efi base rt", "path": "flockos-arm64-efi-base-rt/rootfs", "runner": "ubuntu-24.04-arm"},
+          {"name": "rpi-arm64-base", "args": "rpi-arm64 base std", "path": "flockos-rpi-arm64-base/rootfs", "runner": "ubuntu-24.04-arm"}
+        ]
