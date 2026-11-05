@@ -128,6 +128,9 @@ fixture_layout() {
         <partition name="primary_gpt" type="primary_gpt">
             <size> 19968 </size>
         </partition>
+        <partition name="A_kernel" id="3" type="kernel">
+            <size> 134217728 </size>
+        </partition>
         <partition name="esp" type="data">
             <size> 67108864 </size>
             <filename> ESP_FILE </filename>
@@ -149,7 +152,7 @@ fixture_layout() {
 XML
 }
 
-@test "tegra-layout adds /data after APP_b, grown to the end, and keeps the rest" {
+@test "tegra-layout adds /data after APP_b, grown to the end, with a GPT number of its own" {
   dir=$(mktemp -d)
   fixture_layout >"$dir/in.xml"
   run python3 -I "$layout_tool" "$dir/in.xml" "$dir/out.xml"
@@ -160,12 +163,14 @@ dev = ET.parse(sys.argv[1]).getroot().find("device")
 parts = dev.findall("partition")
 print(" ".join(p.get("name") for p in parts))
 d = [p for p in parts if p.get("name") == "data"][0]
-print(d.find("allocation_attribute").text.strip(), d.find("partition_type_guid").text.strip())
-print(parts[3].find("size").text.strip(), parts[3].get("id"))
+print(d.find("allocation_attribute").text.strip(), d.find("partition_type_guid").text.strip(), d.get("id"))
+app_b = [p for p in parts if p.get("name") == "APP_b"][0]
+print(app_b.find("size").text.strip(), app_b.get("id"))
 ' "$dir/out.xml"
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "primary_gpt esp APP APP_b data secondary_gpt" ]
-  [ "${lines[1]}" = "0x808 0FC63DAF-8483-4772-8E79-3D69D8477DE4" ]
+  [ "${lines[0]}" = "primary_gpt A_kernel esp APP APP_b data secondary_gpt" ]
+  # A_kernel 3, esp 4 (counted on), APP 1, APP_b 2: data takes 5, not 3
+  [ "${lines[1]}" = "0x808 0FC63DAF-8483-4772-8E79-3D69D8477DE4 5" ]
   [ "${lines[2]}" = "APPSIZE 2" ]
   head -n 2 "$dir/out.xml" | grep -qx '<!-- a fixture, not NVIDIA.s layout -->'
   rm -rf "$dir"
@@ -185,6 +190,9 @@ print(parts[3].find("size").text.strip(), parts[3].get("id"))
   fixture_layout | sed '0,/APPSIZE/s/APPSIZE/8589934592/' >"$dir/size.xml"
   run python3 -I "$layout_tool" "$dir/size.xml" "$dir/out.xml"
   [ "$status" -ne 0 ] && [[ "$output" == *"APP's size is not the APPSIZE placeholder"* ]]
+  fixture_layout | sed 's/ id="3"//' >"$dir/dup.xml"
+  run python3 -I "$layout_tool" "$dir/dup.xml" "$dir/out.xml"
+  [ "$status" -ne 0 ] && [[ "$output" == *"GPT entry numbers used twice"* ]]
   printf 'not xml' >"$dir/bad.xml"
   run python3 -I "$layout_tool" "$dir/bad.xml" "$dir/out.xml"
   [ "$status" -ne 0 ]

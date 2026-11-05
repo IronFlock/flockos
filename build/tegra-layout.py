@@ -34,6 +34,23 @@ def fail(msg):
     sys.exit(1)
 
 
+# Partitions with no GPT entry of their own.
+NO_GPT_ENTRY = ("protective_master_boot_record", "primary_gpt", "secondary_gpt")
+
+
+def gpt_ids(parts):
+    """The GPT entry numbers tegraparser_v2 gives the partitions: an id
+    attribute where there is one, else the previous partition's + 1."""
+    ids, last = {}, 0
+    for part in parts:
+        if part.get("type") in NO_GPT_ENTRY:
+            continue
+        given = part.get("id")
+        last = int(given) if given is not None else last + 1
+        ids[part.get("name")] = last
+    return ids
+
+
 def text(part, tag):
     node = part.find(tag)
     return (node.text or "").strip() if node is not None else ""
@@ -76,9 +93,12 @@ def main(argv):
         if text(parts[names.index(name)], "size") != "APPSIZE":
             fail(f"{name}'s size is not the APPSIZE placeholder")
 
-    # The new partition, written like its neighbours.
+    # The new partition, written like its neighbours. Its GPT entry number
+    # is explicit, one above the highest: counted on from APP_b's (2), it
+    # would take one an earlier partition has (tegraparser_v2 refuses that).
     app_b = parts[names.index("APP_b")]
-    data = ET.Element("partition", {"name": "data", "type": "data"})
+    data_id = max(gpt_ids(parts).values()) + 1
+    data = ET.Element("partition", {"name": "data", "id": str(data_id), "type": "data"})
     data.text = app_b.text
     fields = [
         ("allocation_policy", "sequential"),
@@ -102,6 +122,11 @@ def main(argv):
     index = list(device).index(parts[-1])
     device.insert(index, comment)
     device.insert(index + 1, data)
+    ids = gpt_ids(device.findall("partition"))
+    numbers = list(ids.values())
+    if len(set(numbers)) != len(numbers):
+        dup = sorted({n for n in numbers if numbers.count(n) > 1})
+        fail(f"GPT entry numbers used twice: {dup} ({ids})")
 
     # What precedes the root element (the XML declaration and NVIDIA's
     # licence header) is kept as it is; ElementTree drops it.
