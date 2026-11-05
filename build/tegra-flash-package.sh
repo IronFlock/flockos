@@ -49,7 +49,7 @@ uuid_b=$(uuid_for rootfs-b)
 bl=$l4t/bootloader
 kf=$l4t/tools/kernel_flash
 work=$(mktemp -d)
-trap 'umount "$work/mnt" 2>/dev/null || true; rm -rf "$work"' EXIT
+trap 'umount "$work/mnt" "$l4t/rootfs/proc" "$l4t/rootfs/dev" 2>/dev/null || true; rm -rf "$work"' EXIT
 
 # --- NVIDIA's -r option ----------------------------------------------------
 # l4t_initrd_flash.func and l4t_create_images_for_kernel_flash.sh declare
@@ -100,6 +100,31 @@ cp -a "$work/mnt/." "$l4t/rootfs/"
 umount "$work/mnt"
 [ -f "$l4t/rootfs/opt/nvidia/l4t-bootloader-config/nv-l4t-board-config.sh" ] ||
   die "slot A's tree has no nv-l4t-board-config.sh (nvidia-l4t-bootloader-utils)"
+
+# --- what the flashing initrd takes from the tree --------------------------
+# l4t_initrd_flash_internal.sh builds the initrd the Jetson flashes itself
+# from with tools out of L4T_DIR/rootfs: flash_erase and mtd_debug
+# (mtd-utils), file, partprobe (parted), nvluks-srv-app (nvidia-l4t-optee).
+# The image never flashes itself and does not carry them; this copy of its
+# tree gets them, from the image's own sources and pins, in a chroot through
+# qemu-user (NVIDIA's prerequisites install it). The slot images stay as
+# built (-r).
+tree=$l4t/rootfs
+mount --bind /dev "$tree/dev"
+mount -t proc proc "$tree/proc"
+rm -f "$tree/etc/resolv.conf"
+cp -L /etc/resolv.conf "$tree/etc/resolv.conf"
+mkdir -p "$tree/opt/nvidia/l4t-packages"
+touch "$tree/opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall"
+chroot "$tree" apt-get -qq update
+chroot "$tree" env DEBIAN_FRONTEND=noninteractive apt-get -y -qq install --no-install-recommends \
+  mtd-utils file parted "nvidia-l4t-optee=$L4T_PACKAGE_VERSION" >/dev/null
+rm -f "$tree/opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall"
+umount "$tree/proc" "$tree/dev"
+for f in usr/sbin/flash_erase usr/sbin/mtd_debug usr/bin/file sbin/partprobe usr/sbin/nvluks-srv-app; do
+  [ -e "$tree/$f" ] || die "the flashing initrd's $f is not in the tree"
+done
+log "the flashing initrd's tools: mtd-utils, file, parted, nvidia-l4t-optee in $tree"
 
 # --- the slots' PARTUUIDs, as extlinux.conf names them --------------------
 printf '%s\n' "$uuid_a" >"$bl/l4t-rootfs-uuid.txt_ext"
