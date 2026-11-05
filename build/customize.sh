@@ -124,6 +124,12 @@ else
     die "RAUC's D-Bus service is missing (package rauc-service)"
 fi
 
+# --- IronFlock: the agent and the host defaults, by device-init ----------
+# The installer writes devices; it is not one.
+if [ "$VARIANT" != installer ]; then
+  bash "$here/bake.sh"
+fi
+
 # --- record what is in the image, then clean ------------------------------
 dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${Package}\t${Version}\t${Architecture}\n' |
   sort >"$OUT/$NAME.packages.tsv"

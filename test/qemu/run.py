@@ -111,6 +111,26 @@ def esp_offset(disk):
         return first_lba * 512
 
 
+TEST_OWNER = "flockostest"
+
+
+def put_test_flock(disk, workdir):
+    """A .flock with a throwaway key on the test copy's FLOCKOS partition:
+    enough for ironflock-init enroll (SSH user, agent unit), useless to the
+    platform. Returns its file name."""
+    key = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519"], check=True,
+                         capture_output=True, text=True).stdout
+    flock = {"name": "flockos-ci", "swarm_owner_name": TEST_OWNER, "device_key": "4711",
+             "secret": "not-a-real-secret", "wlanssid": "", "password": "",
+             "authentication": {"key": key}}
+    path = os.path.join(workdir, "flockos-ci.flock")
+    with open(path, "w") as fh:
+        json.dump(flock, fh)
+    subprocess.run(["mcopy", "-n", "-o", "-i", f"{disk}@@{esp_offset(disk)}", path, "::/flockos-ci.flock"], check=True)
+    log("test copy: flockos-ci.flock on the FLOCKOS partition")
+    return "flockos-ci.flock"
+
+
 def set_test_cmdline(disk, workdir, cmdline):
     offset = esp_offset(disk)
     image = f"{disk}@@{offset}"
@@ -292,9 +312,10 @@ def serve(directory):
 
 
 class Runner:
-    def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout, disk_dev="/dev/vda"):
+    def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout, disk_dev="/dev/vda", flock=None):
         self.vm, self.conf, self.image_id = vm, conf, image_id
         self.disk_dev = disk_dev
+        self.flock = flock
         self.http = f"http://10.0.2.2:{http_port}"
         self.docker_tar = docker_tar
         self.boot_timeout = boot_timeout
@@ -378,7 +399,24 @@ class Runner:
         fw = self.vm.run("fwupdmgr get-devices --json 2>&1; true", timeout=120)
         if "Devices" not in fw and "No detected devices" not in fw:
             raise TestFailure(f"fwupd gave no inventory:\n{fw}")
+        if self.flock:
+            self.enrolled(first=True)
         self.vm.run("echo flockos-test > /data/flockos-test-marker")
+
+    def enrolled(self, first):
+        """The slot is enrolled from the test .flock: SSH user, sudo rule,
+        the agent's unit; on the first boot the .flock left the FLOCKOS
+        partition for the agent's 0600 copy."""
+        self.vm.run(f"id {TEST_OWNER}")
+        self.vm.run(f"test -f /etc/sudoers.d/ironflock-{TEST_OWNER}")
+        self.vm.run(f"grep -q ironflock-device- /home/{TEST_OWNER}/.ssh/authorized_keys")
+        self.vm.run("systemctl is-enabled ironflock-device-agent.service")
+        self.vm.run("test -s /var/lib/flockos/enrolled")
+        mode = self.vm.run("stat -c %a /opt/ironflock/device-agent/device-config.flock").strip()
+        if mode != "600":
+            raise TestFailure(f"the agent's .flock copy has mode {mode}")
+        if first:
+            self.vm.run(f"test ! -e /boot/efi/{self.flock}")
 
     def reboot_persists(self):
         self.vm.reboot(self.boot_timeout)
@@ -411,6 +449,8 @@ class Runner:
         if self.vm.run("cat /etc/machine-id").strip() != self.machine_id:
             raise TestFailure("machine-id changed with the update")
         self.vm.run("grep -qx flockos-test /data/flockos-test-marker")
+        if self.flock:
+            self.enrolled(first=False)
         if self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip() != self.host_key:
             raise TestFailure("the SSH host key changed with the update")
         state = self._slots().get("rootfs.1", {}).get("boot_status")
@@ -471,6 +511,8 @@ def install_test(args, conf, arch, version, kvm, boot_timeout, port):
         fh.write(INSTALLER_CONF)
     subprocess.run(["mcopy", "-n", "-o", "-i", f"{stick}@@{offset}", conf_file, "::/installer.conf"], check=True)
     set_test_cmdline(stick, workdir, DEBUG_CMDLINE)
+    # The installer hands the stick's .flock to the new disk, which enrolls with it.
+    flock = None if args.no_flock else put_test_flock(stick, workdir)
     log(f"stick: {installer_id}-{version}, installer.conf {INSTALLER_CONF!r}; blank 20 GiB NVMe")
 
     results = []
@@ -490,6 +532,8 @@ def install_test(args, conf, arch, version, kvm, boot_timeout, port):
         print(text)
         if "FlockOS is installed on /dev/nvme0n1" not in text:
             raise TestFailure("the installer did not report an installation on /dev/nvme0n1")
+        if flock and f"copying {flock} to the new FLOCKOS partition" not in text:
+            raise TestFailure(f"the installer did not copy {flock} to the new disk")
         results.append(("install from the stick", True, time.time() - start))
         log(f"ok   install from the stick ({time.time() - start:.0f}s)")
 
@@ -498,10 +542,11 @@ def install_test(args, conf, arch, version, kvm, boot_timeout, port):
         if os.path.exists(vm.sock_path):
             os.remove(vm.sock_path)
         vm2 = VM(arch, nvme, workdir, kvm, nvme=True)
-        runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1")
+        runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1", flock=flock)
         try:
             vm2.start(conf["QEMU_SYSTEM"], port)
-            runner.step("the installed NVMe boots alone like a flashed disk", runner.first_boot)
+            runner.step("the installed NVMe boots alone like a flashed disk"
+                        + (" and enrolls with the stick's .flock" if flock else ""), runner.first_boot)
         finally:
             vm2.stop()
             results.extend(runner.results)
@@ -531,6 +576,7 @@ def main():
     ap.add_argument("--docker-image-tar", help="docker save output of hello-world, loaded and run in the VM")
     ap.add_argument("--keep", action="store_true", help="keep the work directory")
     ap.add_argument("--only", choices=["boot", "update"], help="stop after this part")
+    ap.add_argument("--no-flock", action="store_true", help="boot without a test .flock (an unenrolled device)")
     args = ap.parse_args()
 
     conf = load_conf(os.path.join(REPO, "targets", args.target, "target.conf"))
@@ -551,7 +597,7 @@ def main():
     for f in (img_gz, bundle):
         if not os.path.exists(f):
             sys.exit(f"{f} not found: run `just build {args.target} {args.variant}` first")
-    for tool in (conf["QEMU_SYSTEM"], "mcopy"):
+    for tool in (conf["QEMU_SYSTEM"], "mcopy", "openssl"):
         if not shutil.which(tool):
             sys.exit(f"{tool} is required")
 
@@ -564,6 +610,7 @@ def main():
     size = {"G": 1024**3, "M": 1024**2}[args.disk_size[-1]] * int(args.disk_size[:-1])
     os.truncate(disk, size)
     set_test_cmdline(disk, workdir, DEBUG_CMDLINE)
+    flock = None if args.no_flock else put_test_flock(disk, workdir)
 
     serve_dir = os.path.join(workdir, "http")
     os.makedirs(serve_dir, exist_ok=True)
@@ -576,7 +623,7 @@ def main():
     boot_timeout = 300 if kvm else 1500
     log(f"accelerator: {'kvm' if kvm else 'tcg (slow)'}")
     vm = VM(arch, disk, workdir, kvm)
-    runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout)
+    runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout, flock=flock)
     ok = False
     try:
         vm.start(conf["QEMU_SYSTEM"], port)

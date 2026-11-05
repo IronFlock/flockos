@@ -19,7 +19,7 @@ stage:
 |-------|--------|--------|
 | signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key: throwaway on every build except a release (ADR-0006, `docs/signing.md`) |
 | rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions` |
-| customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, package manifest, timestamps clamped to the commit time |
+| customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`; not into the installer), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
 | bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring |
 
@@ -76,15 +76,25 @@ Known limit of 1.x: slots are found by GPT partition name (`rootfs-a`,
 A second FlockOS disk attached to a running device is therefore ambiguous; the
 installer USB uses its own names.
 
-## Limits of the Phase 1 image
+## IronFlock in the image
 
-- Enrollment runs once per device, through the public device-init installer.
-  The SSH user, its sudo rule and the agent's systemd unit live in the root
-  slot, so after an A/B update the new slot has none of them until
-  `ironflock-init enroll` re-applies them on the first boot of every slot
-  (WP-2.2, WP-2.3). Phase 1 images are for testing the image, not for the field.
-- `flockos-mark-good.service` marks a slot good once Docker runs; the real
-  health gate (the agent reached the platform) comes with WP-2.4.
+`build/bake.sh` fetches `ironflock-init` at the version pinned in
+`profiles/base/versions`, checks its OpenPGP signature against device-init's
+bootstrap key (`profiles/base/keys`, pinned by SHA-256), and runs
+`ironflock-init bake` on the tree: the verified agent of the production channel,
+Docker's `daemon.json`, the NetworkManager and dbus restart drop-ins, the login
+banner, and `ironflock-init` itself. The agent version goes into
+`<image-id>-<version>.ironflock.json`.
+
+On the device `flockos-enroll.service` runs `ironflock-init enroll` on the first
+boot of every slot and whenever a `.flock` lies on the FLOCKOS partition: with
+the newest `.flock` there (removed afterwards), else with the agent's own copy
+on `/data`. An A/B update brings a slot without the SSH user and the agent's
+unit; enroll puts them back without network. `/etc/flockos/enroll.conf` with
+`hostname-from-flock=yes` also sets the hostname.
+
+Until the device-agent marks the slot good after reaching the platform
+(WP-2.4), `flockos-mark-good.service` does it once Docker runs.
 
 ## The installer variant
 

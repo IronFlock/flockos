@@ -41,20 +41,27 @@ Sequence:
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses
    root and passwords; no account has a password; RAUC reports slot A booted with
    the right compatible; Docker's data-root is on `/data` and, with
-   `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers.
+   `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers. With the test
+   `.flock` the harness puts on the FLOCKOS partition (a throwaway key, useless to
+   the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
+   rule and agent unit exist, the `.flock` has left the FLOCKOS partition and the
+   agent's copy is 0600.
 2. **Reboot.** machine-id, SSH host key and the persistent journal survive.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked
-   good, and keeps machine-id, host key and `/data`.
+   good, keeps machine-id, host key and `/data`, and is enrolled again from the
+   agent's copy (SSH user and agent unit back in the new slot).
 4. **Fallback.** With `flockos.no-mark-good` added, a second update makes A
    primary; A boots once with `A_TRY=1` and is never marked good; the next boot
    falls back to B.
 
 **Install test** (`--variant installer`, the `install-test` job): the installer
-image is attached as a USB stick with `installer.conf` set to `confirm=no`, next
-to a blank 20 GiB NVMe. The stick must install to `/dev/nvme0n1` on its own and
-power off; its log must say so. The NVMe then boots alone, with the UEFI
-variables the installer wrote, and passes the first-boot checks above.
+image is attached as a USB stick with `installer.conf` set to `confirm=no` and
+the test `.flock`, next to a blank 20 GiB NVMe. The stick must install to
+`/dev/nvme0n1` on its own, copy the `.flock` to the new disk and power off; its
+log must say both. The NVMe then boots alone, with the UEFI variables the
+installer wrote, passes the first-boot checks above and enrolls with that
+`.flock` (`--no-flock` leaves it out).
 
 Locally (Linux with KVM, or slowly under emulation elsewhere) after a build:
 

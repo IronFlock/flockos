@@ -13,3 +13,13 @@ DOCKER_CE_VERSION=5:29.9.2-1~debian.13~trixie
 CONTAINERD_VERSION=2.4.2-1~debian.13~trixie
 BUILDX_VERSION=0.38.0-1~debian.13~trixie
 COMPOSE_VERSION=5.6.1-1~debian.13~trixie
+
+# device-init (IronFlock/device-init): ironflock-init bakes the agent and the
+# host defaults into the image and enrolls the device (WP-2.1 to WP-2.3). The
+# binary is checked against the bootstrap key in profiles/base/keys, as
+# install.sh does: IronFlock Bootstrap <security@ironflock.com>, fingerprint
+# F6C9 4D96 CE31 5377 ACA7 C8EA 4990 5433 7321 2788. The key file is pinned
+# by its SHA-256.
+IRONFLOCK_DL_BASE=https://instance-registry.ironflock.com/dl
+DEVICE_INIT_VERSION=1.4.9
+DEVICE_INIT_KEYRING_SHA256=930b953cdce504a31d726f88874e1f6ca5f0ab8f89872b9d806636dc8284c637
