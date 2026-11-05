@@ -74,6 +74,7 @@ jobs:
         run: just test
 
   build:
+    name: build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -132,6 +133,7 @@ jobs:
   # update into slot B with the bundle of the same build, fallback of an
   # untested slot.
   image-test:
+    name: image-test (${{ matrix.target }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     # arm64 runners have no KVM: the arm64 image boots emulated (TCG).
@@ -199,6 +201,7 @@ jobs:
   # Report-only: Debian always carries some unfixed CVEs; the release gate
   # comes with security.yml's rootfs input (master plan, section 3.8).
   rootfs-scan:
+    name: rootfs-scan (${{ matrix.target }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
