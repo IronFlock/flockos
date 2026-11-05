@@ -1,10 +1,7 @@
-# Gate (just lint / test), the image build, the QEMU image test, workflow
-# lint, the release intent and, on release pull requests, release.yml as a
-# dry run. `ci-ok` is the required check of the main-branch ruleset.
-#
-# The gate is repository-local until IronFlock/workflows publishes
-# shell-gate.yml at v1 (IronFlock/workflows#31); `lint`/`unit`/`build` then
-# become one `uses:` and `image-test` keeps downloading the build artifact.
+# Gate (just lint / test, IronFlock/workflows shell-gate.yml), the image
+# build, the QEMU image test, workflow lint, the release intent and, on
+# release pull requests, release.yml as a dry run. `ci-ok` is the required
+# check of the main-branch ruleset.
 #
 # Pull requests into main only: the ruleset lets nothing reach main without
 # ci-ok. The release intent decides whether the merge releases.
@@ -28,53 +25,45 @@ defaults:
 
 env:
   # Debian images built and booted on every pull request (master plan, 3.8):
-  # amd64-efi on x86 runners, arm64-efi on arm64 runners (WP-7.1), as the
-  # jobs' matrix.
-  VARIANT: base
+  # amd64-efi base and nvidia (without a GPU, WP-4.1) on x86 runners,
+  # arm64-efi base on arm64 runners (WP-7.1), as the jobs' matrix. NVIDIA's
+  # repositories of the nvidia variant are x86_64 only.
   # docker save of this image is loaded and run inside the VM.
   HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
 
 jobs:
+  # lint and unit tests through the shared shell gate (tools from the
+  # harness tools.lock). Its build job is skipped: the image build below
+  # hands its output to the image tests.
   gate:
+    uses: IronFlock/workflows/.github/workflows/shell-gate.yml@v1
+    with:
+      skip: build
+
+  # The Go tool of the RAUC PKI (tools/rauc-pki): the shell gate has no Go.
+  pki-tool:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: v1
-          path: .harness
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-            tools.lock
-          sparse-checkout-cone-mode: false
-      - name: move harness out of the workspace
-        run: |
-          mv .harness "$RUNNER_TEMP/harness"
-          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
-      - name: install just and shellcheck (tools.lock)
-        run: '"$HARNESS/scripts/install-tool.sh" just shellcheck'
-      - name: install yamllint, shfmt and bats
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends yamllint shfmt bats
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tools/rauc-pki/go.mod
           cache: false
-      - name: just lint
-        run: just lint
-      - name: just test
-        run: just test
+      - name: gofmt, vet, test
+        working-directory: tools/rauc-pki
+        run: |
+          unformatted=$(gofmt -l .)
+          [ -z "$unformatted" ] || { echo "gofmt: $unformatted"; exit 1; }
+          go vet ./...
+          go test -race -count=1 ./...
 
   build:
-    name: build (${{ matrix.target }})
+    name: build (${{ matrix.target }}, ${{ matrix.variant }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -84,15 +73,23 @@ jobs:
       matrix:
         include:
           - target: amd64-efi
+            variant: base
+            runner: ubuntu-latest
+            qemu: qemu-system-x86 ovmf
+          - target: amd64-efi
+            variant: nvidia
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
           - target: arm64-efi
+            variant: base
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
           - target: rpi-arm64
+            variant: base
             runner: ubuntu-24.04-arm
     env:
       TARGET: ${{ matrix.target }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,8 +97,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: IronFlock/workflows
-          # arm64 tools.lock entries: IronFlock/workflows#32; back to v1 once it is published.
-          ref: 79205180cac70b647ad71a1eed4a820b5d615df5
+          ref: v1
           path: .harness
           persist-credentials: false
           sparse-checkout: |
@@ -135,7 +131,7 @@ jobs:
   # update into slot B with the bundle of the same build, fallback of an
   # untested slot.
   image-test:
-    name: image-test (${{ matrix.target }})
+    name: image-test (${{ matrix.target }}, ${{ matrix.variant }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     # arm64 runners have no KVM: the arm64 image boots emulated (TCG).
@@ -147,13 +143,20 @@ jobs:
       matrix:
         include:
           - target: amd64-efi
+            variant: base
+            runner: ubuntu-latest
+            qemu: qemu-system-x86 ovmf
+          - target: amd64-efi
+            variant: nvidia
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
           - target: arm64-efi
+            variant: base
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
     env:
       TARGET: ${{ matrix.target }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -203,7 +206,7 @@ jobs:
   # Report-only: Debian always carries some unfixed CVEs; the release gate
   # comes with security.yml's rootfs input (master plan, section 3.8).
   rootfs-scan:
-    name: rootfs-scan (${{ matrix.target }})
+    name: rootfs-scan (${{ matrix.target }}, ${{ matrix.variant }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -214,22 +217,29 @@ jobs:
       matrix:
         include:
           - target: amd64-efi
+            variant: base
+            runner: ubuntu-latest
+            rootfs-part: 2
+          - target: amd64-efi
+            variant: nvidia
             runner: ubuntu-latest
             rootfs-part: 2
           - target: arm64-efi
+            variant: base
             runner: ubuntu-24.04-arm
             rootfs-part: 2
           - target: rpi-arm64
+            variant: base
             runner: ubuntu-24.04-arm
             rootfs-part: 4
     env:
       TARGET: ${{ matrix.target }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: IronFlock/workflows
-          # arm64 tools.lock entries: IronFlock/workflows#32; back to v1 once it is published.
-          ref: 79205180cac70b647ad71a1eed4a820b5d615df5
+          ref: v1
           path: .harness
           persist-credentials: false
           sparse-checkout: |
@@ -298,7 +308,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: image-rpi-arm64-${{ env.VARIANT }}
+          name: image-rpi-arm64-base
           path: image
       - name: rpi-check
         run: sudo test/image/rpi-check.sh image/*.img.gz
@@ -329,13 +339,13 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, build, image-test, rootfs-scan, rpi-check, workflows, intent, release-build]
+    needs: [gate, pki-tool, build, image-test, rootfs-scan, rpi-check, workflows, intent, release-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.rpi-check.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.rpi-check.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
           RELEASE_BUILD: ${{ needs.release-build.result }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |

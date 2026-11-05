@@ -19,8 +19,7 @@ valid_target "$TARGET" || die "unknown target $TARGET"
 valid_variant "$VARIANT" || die "unknown variant $VARIANT"
 valid_kernel "$KERNEL" || die "unknown kernel $KERNEL"
 case "$VARIANT" in
-  base) ;;
-  nvidia) die "the nvidia variant arrives with Phase 4 (WP-4.1)" ;;
+  base | nvidia) ;;
   installer) die "the installer variant arrives with Phase 3 (WP-3.2)" ;;
 esac
 [ "$KERNEL" = std ] || die "the rt kernel arrives with Phase 4b (WP-4b.1)"
@@ -31,6 +30,7 @@ FLOCKOS_SIGNING=${FLOCKOS_SIGNING:-dev}
 
 load_conf "$src/targets/$TARGET/target.conf"
 load_conf "$src/profiles/base/versions"
+[ -f "$src/profiles/$VARIANT/versions" ] && load_conf "$src/profiles/$VARIANT/versions"
 [ "$(dpkg --print-architecture)" = "$ARCH" ] || die "target $TARGET is $ARCH; this build container is $(dpkg --print-architecture)"
 
 IMAGE_ID=$(image_id "$TARGET" "$VARIANT" "$KERNEL")

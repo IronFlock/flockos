@@ -21,6 +21,7 @@ copy_tree() {
 # --- overlay ---------------------------------------------------------------
 copy_tree "$src/overlay"
 [ -d "$target_dir/overlay" ] && copy_tree "$target_dir/overlay"
+[ "$VARIANT" != base ] && [ -d "$src/profiles/$VARIANT/overlay" ] && copy_tree "$src/profiles/$VARIANT/overlay"
 
 # --- RAUC ------------------------------------------------------------------
 # shellcheck disable=SC1091 # written by build/signing.sh
@@ -130,9 +131,23 @@ for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enrol
 done
 [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||
   die "RAUC's D-Bus service is missing (package rauc-service)"
+if [ "$VARIANT" = nvidia ]; then
+  # nvidia-persistenced fails without a GPU: udev starts it where the nvidia
+  # module loads (71-flockos-nvidia.rules). nvidia-powerd is for notebooks.
+  # 10-flockos-nvidia.preset keeps both off on each slot's first boot.
+  systemctl --root="$ROOT" disable nvidia-persistenced.service nvidia-powerd.service
+  compgen -G "$ROOT/usr/lib/modules/$kver/updates/nvidia/nvidia.ko*" >/dev/null ||
+    die "no NVIDIA kernel module for $kver in the image"
+  [ -x "$ROOT/usr/bin/nvidia-container-runtime" ] || die "nvidia-container-runtime is missing"
+fi
 
 # --- IronFlock: the agent and the host defaults, by device-init ----------
 bash "$here/bake.sh"
+if [ "$VARIANT" = nvidia ]; then
+  # bake adds the nvidia runtime where nvidia-container-runtime exists.
+  jq -e '.runtimes.nvidia.path == "/usr/bin/nvidia-container-runtime"' "$ROOT/etc/docker/daemon.json" >/dev/null ||
+    die "daemon.json has no nvidia runtime"
+fi
 
 # --- record what is in the image, then clean ------------------------------
 dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${Package}\t${Version}\t${Architecture}\n' |
