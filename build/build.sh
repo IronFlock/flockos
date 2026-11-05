@@ -33,13 +33,9 @@ load_conf "$src/targets/$TARGET/target.conf"
 # PREEMPT_RT on x86; EFI targets only, as the Pi boots its own kernels.
 [ "$KERNEL" = std ] || [ "$VARIANT" = base ] || die "the rt kernel is built for the base variant only"
 [ "$KERNEL" = std ] || [ "$BOOTLOADER" = grub-efi ] || die "the rt kernel is built for the EFI targets only; $TARGET boots with $BOOTLOADER"
-# Jetson (BOOTLOADER=tegra): the base variant, its GPU being the SoC's; the
-# root tree only until its partition layout and flash package exist (WP-6.2,
-# WP-6.4).
+# Jetson (BOOTLOADER=tegra): the base variant, its GPU being the SoC's.
 if [ "$BOOTLOADER" = tegra ]; then
   [ "$VARIANT" = base ] || die "$TARGET is built in the base variant only"
-  [ "${FLOCKOS_STAGES:-all}" = rootfs ] ||
-    die "$TARGET has no disk image yet: build its root tree (just rootfs $TARGET)"
 fi
 # The distribution (distros/<distro>/versions): its archive and the Docker
 # pins built for it. Debian 13 unless the target names another.
@@ -99,6 +95,8 @@ log "$NAME: disk image"
 case "$BOOTLOADER" in
   grub-efi) bash "$here/mkimage.sh" ;;
   rpi) bash "$here/mkimage-rpi.sh" ;;
+  # NVIDIA's tools write a Jetson's disk: the image is slot A's filesystem.
+  tegra) bash "$here/mkimage-tegra.sh" ;;
   *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
 esac
 
@@ -110,7 +108,7 @@ fi
 log "$NAME: checksums"
 (
   cd "$OUT"
-  files=(*.img.gz)
+  if [ "$BOOTLOADER" = tegra ]; then files=(*.rootfs.ext4.zst); else files=(*.img.gz); fi
   [ "$VARIANT" = installer ] || files+=(*.raucb)
   sha256sum -- "${files[@]}" >SHA256SUMS
   cat SHA256SUMS

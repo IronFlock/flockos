@@ -245,10 +245,11 @@ jobs:
       - name: rpi-check
         run: sudo test/image/rpi-check.sh image/*.img.gz
 
-  # jetson-orin's root tree (WP-6.2): Ubuntu 24.04 with NVIDIA's L4T
-  # packages, built on the arm64 runner and checked there in a chroot. No
-  # disk image yet (partition layout and flash package: WP-6.2, WP-6.4), so
-  # not in build.yml's matrix.
+  # jetson-orin (WP-6.2): Ubuntu 24.04 with NVIDIA's L4T packages, built on
+  # the arm64 runner (slot A's filesystem image and the RAUC bundle; NVIDIA's
+  # flash tools write the disk) and its tree checked there in a chroot. Not
+  # in build.yml's matrix: no Jetson image is released before the licence
+  # review (ADR-0008).
   jetson-rootfs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
@@ -278,20 +279,21 @@ jobs:
         run: |
           sudo mkdir -p /mnt/flockos-work
           df -h / /mnt
-      - name: just rootfs jetson-orin base
+      - name: just build jetson-orin base
         env:
           FLOCKOS_WORK: /mnt/flockos-work
-        run: just rootfs jetson-orin base
+        run: just build jetson-orin base
       - name: jetson-rootfs-check
         run: sudo test/image/jetson-rootfs-check.sh /mnt/flockos-work/flockos-jetson-orin-base/rootfs
-      - name: upload the package list and os-release
+      - name: upload the slot image, bundle, package list and os-release
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rootfs-jetson-orin-base
+          name: image-jetson-orin-base
           path: out/flockos-jetson-orin-base/
           if-no-files-found: ignore
-          retention-days: 7
+          compression-level: 0
+          retention-days: 3
 
   workflows:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1

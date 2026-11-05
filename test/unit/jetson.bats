@@ -65,10 +65,8 @@ setup() {
   [ ! -d "$t/repart.d" ]
 }
 
-@test "the build makes jetson-orin's root tree only, in the base variant" {
+@test "the build makes jetson-orin in the base variant with the standard kernel only" {
   export FLOCKOS_VERSION=0.0.0 FLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
-  run bash "$repo/build/build.sh" jetson-orin base std
-  [ "$status" -ne 0 ] && [[ "$output" == *"jetson-orin has no disk image yet"* ]]
   FLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin nvidia std
   [ "$status" -ne 0 ] && [[ "$output" == *"jetson-orin is built in the base variant only"* ]]
   FLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin base rt
@@ -115,4 +113,88 @@ extlinux_tool="$repo/targets/jetson-orin/overlay/usr/lib/flockos/tegra-extlinux"
   [ "$status" -ne 0 ]
   grep -qx $'\tAPPEND root=PARTUUID=x rauc.slot=A' "$dir/extlinux.conf"
   rm -rf "$dir"
+}
+
+layout_tool="$repo/build/tegra-layout.py"
+
+# A layout shaped like the BSP's NVMe rootfs A/B layout (the real one is
+# NVIDIA's, read from the BSP at build time): only what the tool checks.
+fixture_layout() {
+  cat <<'XML'
+<?xml version="1.0"?>
+<!-- a fixture, not NVIDIA's layout -->
+<partition_layout version="01.00.0000">
+    <device type="external" instance="0" sector_size="512" num_sectors="EXT_NUM_SECTORS" >
+        <partition name="primary_gpt" type="primary_gpt">
+            <size> 19968 </size>
+        </partition>
+        <partition name="esp" type="data">
+            <size> 67108864 </size>
+            <filename> ESP_FILE </filename>
+            <partition_type_guid> C12A7328-F81F-11D2-BA4B-00A0C93EC93B </partition_type_guid>
+        </partition>
+        <partition name="APP" id="1" type="data">
+            <size> APPSIZE </size>
+            <filename> APPFILE </filename>
+        </partition>
+        <partition name="APP_b" id="2" type="data">
+            <size> APPSIZE </size>
+            <filename> APPFILE_b </filename>
+        </partition>
+        <partition name="secondary_gpt" type="secondary_gpt">
+            <size> 0xFFFFFFFFFFFFFFFF </size>
+        </partition>
+    </device>
+</partition_layout>
+XML
+}
+
+@test "tegra-layout adds /data after APP_b, grown to the end, and keeps the rest" {
+  dir=$(mktemp -d)
+  fixture_layout >"$dir/in.xml"
+  run python3 -I "$layout_tool" "$dir/in.xml" "$dir/out.xml"
+  [ "$status" -eq 0 ]
+  run python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+dev = ET.parse(sys.argv[1]).getroot().find("device")
+parts = dev.findall("partition")
+print(" ".join(p.get("name") for p in parts))
+d = [p for p in parts if p.get("name") == "data"][0]
+print(d.find("allocation_attribute").text.strip(), d.find("partition_type_guid").text.strip())
+print(parts[3].find("size").text.strip(), parts[3].get("id"))
+' "$dir/out.xml"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "primary_gpt esp APP APP_b data secondary_gpt" ]
+  [ "${lines[1]}" = "0x808 0FC63DAF-8483-4772-8E79-3D69D8477DE4" ]
+  [ "${lines[2]}" = "APPSIZE 2" ]
+  head -n 2 "$dir/out.xml" | grep -qx '<!-- a fixture, not NVIDIA.s layout -->'
+  rm -rf "$dir"
+}
+
+@test "tegra-layout refuses a layout that is not shaped as expected" {
+  dir=$(mktemp -d)
+  fixture_layout | sed '/name="APP_b"/,/<\/partition>/d' >"$dir/no-b.xml"
+  run python3 -I "$layout_tool" "$dir/no-b.xml" "$dir/out.xml"
+  [ "$status" -ne 0 ] && [[ "$output" == *"no APP_b partition"* ]]
+  fixture_layout | sed 's/name="APP_b"/name="data"/' >"$dir/data.xml"
+  run python3 -I "$layout_tool" "$dir/data.xml" "$dir/out.xml"
+  [ "$status" -ne 0 ] && [[ "$output" == *"already has a partition named data"* ]]
+  fixture_layout | sed 's/C12A7328-F81F-11D2-BA4B-00A0C93EC93B/0FC63DAF-8483-4772-8E79-3D69D8477DE4/' >"$dir/esp.xml"
+  run python3 -I "$layout_tool" "$dir/esp.xml" "$dir/out.xml"
+  [ "$status" -ne 0 ] && [[ "$output" == *"esp is not an EFI system partition"* ]]
+  fixture_layout | sed '0,/APPSIZE/s/APPSIZE/8589934592/' >"$dir/size.xml"
+  run python3 -I "$layout_tool" "$dir/size.xml" "$dir/out.xml"
+  [ "$status" -ne 0 ] && [[ "$output" == *"APP's size is not the APPSIZE placeholder"* ]]
+  printf 'not xml' >"$dir/bad.xml"
+  run python3 -I "$layout_tool" "$dir/bad.xml" "$dir/out.xml"
+  [ "$status" -ne 0 ]
+  [ ! -e "$dir/out.xml" ]
+  rm -rf "$dir"
+}
+
+@test "the Jetson image is slot A's filesystem, and the ESP is /boot/efi" {
+  grep -q 'tegra) bash "$here/mkimage-tegra.sh"' "$repo/build/build.sh"
+  grep -q 'files=(\*.rootfs.ext4.zst)' "$repo/build/build.sh"
+  grep -q 's|^PARTLABEL=FLOCKOS  /boot/efi |PARTLABEL=esp      /boot/efi |' "$repo/build/customize.sh"
+  grep -q '^PARTLABEL=FLOCKOS  /boot/efi ' "$repo/overlay/etc/fstab"
 }
