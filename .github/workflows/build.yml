@@ -1,6 +1,6 @@
 # The FlockOS images, each built in the build container
 # (build/run-in-builder.sh): every target, variant and kernel, and the
-# amd64-efi installer stick carrying the base image. Called by ci.yml with
+# installer sticks of amd64-efi and arm64-efi carrying their base images. Called by ci.yml with
 # signing dev (throwaway keys, images and bundles trust only each other) and
 # by release.yml with signing release (the images trust the FlockOS root CA;
 # each bundle is sealed with a key of its build and gets its release
