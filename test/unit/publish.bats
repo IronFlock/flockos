@@ -39,6 +39,7 @@ teardown() { rm -rf "$tmp"; }
   [[ "$output" == *"gs://ironflock-downloads/staging/flockos/1.0.0/SHA256SUMS"* ]]
   [[ "$output" == *"--cache-control=public, max-age=0"* ]]
   [[ "$output" != *"gs://ironflock-downloads/flockos/"* ]]
+  [[ "$output" == *"dry run, nothing changed: would have staged 9 files"* ]]
 }
 
 @test "stage refuses a directory without release files" {

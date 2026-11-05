@@ -20,6 +20,15 @@ load_conf "$here/release.conf"
 STAGING=$BUCKET/staging/flockos
 LIVE=$BUCKET/flockos
 
+# done_ MESSAGE: what a step did, or would have done in a dry run.
+done_() {
+  if [ "${DRY_RUN:-0}" = 1 ]; then
+    log "dry run, nothing changed: would have $*"
+  else
+    log "$*"
+  fi
+}
+
 storage() {
   if [ "${DRY_RUN:-0}" = 1 ]; then
     printf '+ gcloud storage %s\n' "$*"
@@ -57,12 +66,13 @@ case "$cmd" in
     sums "$dir" >"$sums"
     files "$dir" | while read -r f; do put "$f" "$STAGING/$version/$(basename "$f")"; done
     put "$sums" "$STAGING/$version/SHA256SUMS"
-    log "staged $(wc -l <"$sums" | tr -d ' ') files to $STAGING/$version/"
+    done_ "staged $(wc -l <"$sums" | tr -d ' ') files to $STAGING/$version/"
     ;;
   promote)
     version=${2:?usage: publish.sh promote VERSION}
     if [ "${DRY_RUN:-0}" = 1 ]; then
       storage cp "$STAGING/$version/*" "$LIVE/$version/"
+      done_ "promoted $STAGING/$version/ to $LIVE/$version/"
       exit 0
     fi
     storage ls "$STAGING/$version/" | while read -r src; do
@@ -75,12 +85,12 @@ case "$cmd" in
         storage cp --quiet --cache-control="public, max-age=0" "$src" "$dest"
       fi
     done
-    log "promoted $STAGING/$version/ to $LIVE/$version/"
+    done_ "promoted $STAGING/$version/ to $LIVE/$version/"
     ;;
   catalog)
     file=${2:?usage: publish.sh catalog FILE}
     put "$file" "$LIVE/manifest.json"
-    log "published the catalog $LIVE/manifest.json"
+    done_ "published the catalog $LIVE/manifest.json"
     ;;
   check)
     version=${2:?usage: publish.sh check VERSION FILE} file=${3:?usage: publish.sh check VERSION FILE}
