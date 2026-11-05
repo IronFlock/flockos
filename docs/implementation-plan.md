@@ -96,7 +96,7 @@ decision), in progress.
 | 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |
 | 6.6 | Jetson hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 5 | 6.4, 6.5 | open |
 | 6.7 | Follow-up: Jetson RT kernel | flockos | 5 | 6.6, 4b.1 | open |
-| 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | done (#161; the arm64-efi installer in the follow-ups) |
+| 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | done (#161; arm64-efi installer #172) |
 | 7.2 | ReswarmOS migration guide and sunset | flockos, GCS, flasher, device-agent | 2 | 2.10 | open |
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
 | X.1 | Public install guides per target | website | 1 per target | 2.10, 5.4, 6.6 | open |
