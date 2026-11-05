@@ -43,7 +43,8 @@ archive-keyring package. `ID_LIKE` in os-release is `DISTRO_ID_LIKE`.
 `profiles/base/packages.<id>` adds what only one distribution has or names its
 own way; on Debian that is `systemd-repart` (Ubuntu 24.04 ships it in `systemd`)
 and the `firmware-*` packages. Ubuntu noble is the userspace of `jetson-orin`
-(ADR-0008); the nvidia variant is built on Debian only.
+(ADR-0008, `docs/targets/jetson-orin.md`), whose root tree is built so far
+(`just rootfs jetson-orin base`); the nvidia variant is built on Debian only.
 
 Artefacts land in `out/<image-id>/`:
 

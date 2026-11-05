@@ -33,6 +33,14 @@ load_conf "$src/targets/$TARGET/target.conf"
 # PREEMPT_RT on x86; EFI targets only, as the Pi boots its own kernels.
 [ "$KERNEL" = std ] || [ "$VARIANT" = base ] || die "the rt kernel is built for the base variant only"
 [ "$KERNEL" = std ] || [ "$BOOTLOADER" = grub-efi ] || die "the rt kernel is built for the EFI targets only; $TARGET boots with $BOOTLOADER"
+# Jetson (BOOTLOADER=tegra): the base variant, its GPU being the SoC's; the
+# root tree only until its partition layout and flash package exist (WP-6.2,
+# WP-6.4).
+if [ "$BOOTLOADER" = tegra ]; then
+  [ "$VARIANT" = base ] || die "$TARGET is built in the base variant only"
+  [ "${FLOCKOS_STAGES:-all}" = rootfs ] ||
+    die "$TARGET has no disk image yet: build its root tree (just rootfs $TARGET)"
+fi
 # The distribution (distros/<distro>/versions): its archive and the Docker
 # pins built for it. Debian 13 unless the target names another.
 DISTRO=${DISTRO:-debian-trixie}

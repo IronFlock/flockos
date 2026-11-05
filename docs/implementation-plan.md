@@ -90,7 +90,7 @@ decision), in progress.
 | 5.4 | Pi hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 4 | 5.2, 5.3 | open: needs a Pi 4 and a Pi 5 |
 | 5.5 | Follow-up: Raspberry Pi RT kernel built in CI | flockos | 8 | 5.4, 4b.1 | open |
 | 6.1 | BSP decision, download and cache | flockos | 2 | | done (#164, ADR-0008 accepted) |
-| 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | in progress (distribution layer) |
+| 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | in progress (root tree in CI; layout and flash dry run next) |
 | 6.3 | RAUC `custom` backend over `nvbootctrl`; health gate | flockos | 4 | 6.2 | open |
 | 6.4 | Orin Nano SD image and NX/AGX flash package | flockos | 5 | 6.3 | open |
 | 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |

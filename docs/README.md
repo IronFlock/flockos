@@ -8,7 +8,7 @@
 | [testing.md](testing.md) | Unit tests, the QEMU image test, the hardware checklist |
 | [signing.md](signing.md) | The RAUC PKI in Cloud KMS: creating it, how releases sign, renewal |
 | [manifest.schema.json](manifest.schema.json) | The release catalog `dl/flockos/manifest.json` the device-agent and FlockFlasher read (ADR-0009), with an [example](manifest.example.json) |
-| [targets/amd64-efi.md](targets/amd64-efi.md), [arm64-efi.md](targets/arm64-efi.md), [rpi-arm64.md](targets/rpi-arm64.md) | Target notes and tested hardware |
+| [targets/amd64-efi.md](targets/amd64-efi.md), [arm64-efi.md](targets/arm64-efi.md), [rpi-arm64.md](targets/rpi-arm64.md), [jetson-orin.md](targets/jetson-orin.md) | Target notes and tested hardware |
 | [current-state-audit.md](current-state-audit.md) | Evidence: what the `buildroot/` and `cubic/` trees, the published catalog, and the sibling repos do today |
 | [adr/](adr/) | Architecture decision records |
 
