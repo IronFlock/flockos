@@ -50,7 +50,7 @@ enroll_env() {
   echo agent >"$tmp/agent/device-config.flock"
   run bash "$lib/enroll"
   [ "$status" -eq 0 ]
-  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --shred-source" ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --shred-source --hostname-from-flock" ]
   [ -s "$tmp/state/enrolled" ]
 }
 
@@ -59,15 +59,19 @@ enroll_env() {
   echo agent >"$tmp/agent/device-config.flock"
   run bash "$lib/enroll"
   [ "$status" -eq 0 ]
-  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/agent/device-config.flock --shred-source" ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/agent/device-config.flock --shred-source --hostname-from-flock" ]
 }
 
-@test "enroll sets the hostname only when enroll.conf asks for it" {
+@test "enroll keeps the hostname when enroll.conf says hostname-from-flock=no" {
   enroll_env
   echo x >"$tmp/esp/a.flock"
-  printf 'hostname-from-flock=yes\n' >"$tmp/enroll.conf"
+  printf '# this device keeps its name\nhostname-from-flock=no\n' >"$tmp/enroll.conf"
   run bash "$lib/enroll"
   [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/a.flock --shred-source" ]
+  printf 'hostname-from-flock=yes\n' >"$tmp/enroll.conf"
+  rm "$tmp/init-calls"
+  run bash "$lib/enroll"
   [[ "$(cat "$tmp/init-calls")" == *"--hostname-from-flock"* ]]
 }
 

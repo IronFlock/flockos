@@ -32,9 +32,10 @@ if [ -z "$flock" ]; then
 fi
 
 args=(enroll -c "$flock" --shred-source)
-# /etc/flockos/enroll.conf: hostname-from-flock=yes sets the hostname from
-# the device name (master plan, open question 1; off unless set).
-if [ -f "$conf" ] && grep -qx 'hostname-from-flock=yes' "$conf"; then
+# The hostname comes from the device name in the .flock (ADR-0009), unless
+# /etc/flockos/enroll.conf (on /data, so it outlives updates) says
+# hostname-from-flock=no.
+if ! { [ -f "$conf" ] && grep -qx 'hostname-from-flock=no' "$conf"; }; then
   args+=(--hostname-from-flock)
 fi
 "$init" "${args[@]}"
