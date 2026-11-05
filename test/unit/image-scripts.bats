@@ -24,35 +24,60 @@ teardown() { rm -rf "$tmp"; }
   [ "$(cat "$tmp/home/file")" = keep ]
 }
 
-@test "enroll without a .flock leaves the device unenrolled" {
-  mkdir -p "$tmp/esp" "$tmp/state"
-  FLOCKOS_ESP=$tmp/esp FLOCKOS_STATE=$tmp/state run bash "$lib/enroll"
+# enroll runs a fake ironflock-init that records its arguments.
+enroll_env() {
+  mkdir -p "$tmp/esp" "$tmp/agent" "$tmp/state"
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
+  chmod +x "$tmp/ironflock-init"
+  export FLOCKOS_ESP=$tmp/esp FLOCKOS_AGENT_DIR=$tmp/agent FLOCKOS_STATE=$tmp/state \
+    FLOCKOS_INIT=$tmp/ironflock-init FLOCKOS_ENROLL_CONF=$tmp/enroll.conf
+}
+
+@test "enroll without any .flock leaves the device unenrolled" {
+  enroll_env
+  run bash "$lib/enroll"
   [ "$status" -eq 0 ]
   [[ "$output" == *"stays unenrolled"* ]]
+  [ ! -e "$tmp/init-calls" ]
   [ ! -e "$tmp/state/enrolled" ]
 }
 
-@test "enroll runs the installer with the newest .flock, then removes it from the ESP" {
-  mkdir -p "$tmp/esp" "$tmp/state"
+@test "enroll uses the newest .flock on the FLOCKOS partition and shreds it" {
+  enroll_env
   echo old >"$tmp/esp/old.flock"
   touch -d '2020-01-01' "$tmp/esp/old.flock"
   echo new >"$tmp/esp/new.flock"
-  printf '#!/bin/bash\necho "installer -c $2: $(cat "$2")" >%s/ran\n' "$tmp" >"$tmp/installer.sh"
-  FLOCKOS_ESP=$tmp/esp FLOCKOS_STATE=$tmp/state FLOCKOS_INSTALLER=$tmp/installer.sh run bash "$lib/enroll"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
   [ "$status" -eq 0 ]
-  [ "$(cat "$tmp/ran")" = "installer -c $tmp/state/enroll.flock: new" ]
-  [ ! -e "$tmp/esp/new.flock" ]
-  [ -e "$tmp/esp/old.flock" ]
-  [ -e "$tmp/state/enrolled" ]
-  [ "$(stat -c %a "$tmp/state/enroll.flock")" = 600 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --shred-source" ]
+  [ -s "$tmp/state/enrolled" ]
 }
 
-@test "enroll refuses a plain-http installer" {
-  mkdir -p "$tmp/esp" "$tmp/state"
+@test "enroll on a new slot uses the agent's own copy on /data" {
+  enroll_env
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/agent/device-config.flock --shred-source" ]
+}
+
+@test "enroll sets the hostname only when enroll.conf asks for it" {
+  enroll_env
   echo x >"$tmp/esp/a.flock"
-  FLOCKOS_ESP=$tmp/esp FLOCKOS_STATE=$tmp/state FLOCKOS_INSTALLER=http://example.com/i.sh run bash "$lib/enroll"
+  printf 'hostname-from-flock=yes\n' >"$tmp/enroll.conf"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$tmp/init-calls")" == *"--hostname-from-flock"* ]]
+}
+
+@test "enroll fails when ironflock-init fails, and does not mark the slot" {
+  enroll_env
+  echo x >"$tmp/esp/a.flock"
+  printf '#!/bin/bash\nexit 3\n' >"$tmp/ironflock-init"
+  run bash "$lib/enroll"
   [ "$status" -ne 0 ]
-  [ -e "$tmp/esp/a.flock" ]
+  [ ! -e "$tmp/state/enrolled" ]
 }
 
 @test "rauc-post-install ignores slots that are not root filesystems" {
