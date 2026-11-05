@@ -52,34 +52,65 @@ Done on 2026-11-05: the certificates and their fingerprints are in
 
 ## How a release run signs (WP-1.6)
 
-`release.yml` authenticates with workload identity as `flockos-release`, then
-signs through Google's PKCS#11 library `libkmsp11.so`:
+`release.yml` builds and signs in separate jobs, so the job that downloads and
+runs the build's packages never holds the release identity:
 
-```yaml
-# $KMS_PKCS11_CONFIG, written by the job (file mode 0600, owner only)
-tokens:
-  - key_ring: projects/record-1283/locations/europe-west1/keyRings/flockos-rauc
-    label: flockos-rauc
-```
+1. **`build`** (`build.yml` with `signing: release`) builds every image.
+   `build/signing.sh release` puts the root CA into the image as
+   `/etc/rauc/keyring.pem` and seals each bundle with a throwaway key made for
+   that build. The sealing CA travels next to the bundle as
+   `<name>.seal-ca.pem`.
+2. **`sign`** is the only job that authenticates as `flockos-release`, and only
+   on a release. `build/sign-in-builder.sh` runs `build/sign-bundles.sh` in the
+   build container. The script fetches Google's PKCS#11 library at the version
+   in `build/release.conf`, checks the tarball's SHA-256 and the library's
+   signature (Google's key in `build/keys/`), and writes the library's config
+   (mode 0600):
 
-```sh
-export RAUC_PKCS11_MODULE=/path/to/libkmsp11.so
-rauc bundle --cert pki/flockos-bundle-signer-<year>.pem \
-  --key 'pkcs11:token=flockos-rauc;object=bundle-signer' content/ bundle.raucb
-```
+   ```yaml
+   tokens:
+     - key_ring: projects/record-1283/locations/europe-west1/keyRings/flockos-rauc
+       label: flockos-rauc
+   ```
+
+   Each bundle is checked against its sealing CA, then re-signed with the
+   payload unchanged:
+
+   ```sh
+   export RAUC_PKCS11_MODULE=/path/to/libkmsp11.so
+   rauc --conf=<the sealing CA> resign --signing-keyring=pki/flockos-root-ca.pem \
+     --cert=pki/flockos-bundle-signer-<year>.pem \
+     --key='pkcs11:token=flockos-rauc;object=bundle-signer' sealed.raucb signed.raucb
+   ```
+
+   The signed bundle must verify as the device verifies it: against the root
+   CA, with `check-purpose=codesign` and the signing time. It must not verify
+   against the sealing CA any more. `SHA256SUMS` is rewritten, and the job
+   attests the SLSA build provenance of every image and bundle
+   (`actions/attest`).
+3. `tag` runs only after `sign`, so a tag always means signed bundles.
 
 The object is addressed by label (the key's name), not by id: OpenSC's libp11
-limits ids to 100 characters, which a KMS key version name exceeds. The library
-version and checksum are pinned in `tools.lock`.
+limits ids to 100 characters, which a KMS key version name exceeds. The newest
+`pki/flockos-bundle-signer-*.pem` signs; a certificate within 30 days of its
+expiry stops the release (see renewal below).
+
+**Dry runs** (`release.yml` on release pull requests through `ci.yml`, and
+manual runs) build exactly like a release. The sign step then uses a
+throwaway stand-in for the bundle signer, and attests nothing. Each dry-run
+bundle is checked to verify against the stand-in and not against the root CA.
+The workload identity is not available to them: the pool grants
+`release=<repo id>:release` only to a push of `release.yml` on `main` and to
+runs on `v*` tags. A release's signature is therefore first seen on the release
+run itself; `just sign-bundles dry-run` runs the same steps locally on a
+release build (`FLOCKOS_SIGNING=release just build …`).
 
 ## Pull requests and local builds
 
 Every other build signs with a throwaway CA and signer made by
 `build/signing.sh` and discarded with the build. Its image trusts only that
 throwaway CA, so a pull-request image never installs a release bundle and a
-release image never a pull-request bundle. Dry runs of `release.yml` on release
-pull requests sign the same way; the workload identity is not available to
-them.
+release image never a pull-request bundle.
 
 ## Renewing the signer certificate (every three years)
 
