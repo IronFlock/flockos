@@ -77,10 +77,12 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
    project owner on a branch. It creates the key, the `flockos-publisher`
    identity and its bucket permissions, and writes `pki/flockos-catalog.pub`
    for a pull request. Run it first without `--yes`: that shows every step and
-   changes nothing. At the end it prints the line for step 4.
+   changes nothing. At the end it prints the line for step 4. Done
+   2026-11-05 (`pki/flockos-catalog.pub`, [pki/README.md](../pki/README.md)).
 3. **The download proxy** serves `gs://ironflock-downloads/flockos/` under
    `https://instance-registry.ironflock.com/dl/flockos/` (registry-proxy
    v0.2.9, 2026-11-05). Without it, `promote` would stop before the tag.
+   Done.
 4. **The device-agent** trusts the catalog key: the line from step 2 goes into
    `FLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
    an agent release. `CATALOG_MIN_AGENT` names that release.
