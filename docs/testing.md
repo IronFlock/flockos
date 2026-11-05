@@ -10,6 +10,14 @@ CI has no GPU, no Raspberry Pi and no Jetson.
 | image in QEMU | `just qemu-test TARGET VARIANT` (`test/qemu/run.py`) | `image-test` job, under KVM |
 | hardware | the checklist below | a person with the device, evidence attached to the work-package issue |
 
+Next to these, `security.yml` scans the packages of every image (the `rootfs`
+job, on pull requests and every Monday): `just rootfs TARGET VARIANT KERNEL`
+builds the root tree, `trivy rootfs` writes the vulnerabilities with a fix as
+SARIF, which `security / report` counts and code scanning shows, and the
+CycloneDX SBOM of all packages as the artifact `rootfs-sbom-<image>`. Accepted
+findings go into `security/vex.openvex.json` or `.trivyignore.yaml` with a
+reason and an expiry date.
+
 ## Unit tests
 
 `test/unit/*.bats` cover the build library (`build/lib.sh`: configuration

@@ -18,6 +18,10 @@ TARGET=$1 VARIANT=$2 KERNEL=$3
 valid_target "$TARGET" || die "unknown target $TARGET"
 valid_variant "$VARIANT" || die "unknown variant $VARIANT"
 valid_kernel "$KERNEL" || die "unknown kernel $KERNEL"
+case "${FLOCKOS_STAGES:-all}" in
+  all | rootfs) ;;
+  *) die "FLOCKOS_STAGES must be all or rootfs" ;;
+esac
 
 : "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
 FLOCKOS_DIRTY=${FLOCKOS_DIRTY:-}
@@ -66,6 +70,13 @@ bash "$here/mkrootfs.sh"
 
 log "$NAME: customisation"
 bash "$here/customize.sh"
+
+# FLOCKOS_STAGES=rootfs: the root tree only (security.yml scans it): no disk
+# image, no bundle. The tree stays in $ROOT (FLOCKOS_WORK/<image-id>/rootfs).
+if [ "${FLOCKOS_STAGES:-all}" = rootfs ]; then
+  log "$NAME: root tree in $ROOT (FLOCKOS_STAGES=rootfs)"
+  exit 0
+fi
 
 log "$NAME: disk image"
 case "$BOOTLOADER" in

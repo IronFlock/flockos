@@ -14,6 +14,8 @@
 #                 what macOS needs (its bind mounts cannot hold a rootfs)
 #   FLOCKOS_OUT   artefact directory (default: out)
 #   FLOCKOS_SIGNING  dev (default: throwaway keys) or release (WP-1.6)
+#   FLOCKOS_STAGES   all (default) or rootfs: stop after the customisation
+#                    and leave the root tree in FLOCKOS_WORK/<image-id>/rootfs
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -60,6 +62,7 @@ docker run --rm --privileged \
   -e FLOCKOS_DIRTY="$dirty" \
   -e SOURCE_DATE_EPOCH="$epoch" \
   -e FLOCKOS_SIGNING="${FLOCKOS_SIGNING:-dev}" \
+  -e FLOCKOS_STAGES="${FLOCKOS_STAGES:-all}" \
   -e FLOCKOS_HOST_UID="$(id -u)" \
   -e FLOCKOS_HOST_GID="$(id -g)" \
   "$BUILDER_IMAGE" \

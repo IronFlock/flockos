@@ -90,13 +90,15 @@ images() {
   ' "$repo/.github/workflows/$1" | sort -u
 }
 
-@test "every image CI tests or scans is one build.yml builds" {
+@test "every image CI tests is one build.yml builds" {
   built=$(images build.yml image)
   [ "$(echo "$built" | wc -l)" -ge 6 ]
-  for job in image-test rootfs-scan; do
-    tested=$(images ci.yml "$job")
-    [ -n "$tested" ] || { echo "no images in ci.yml $job"; return 1; }
-    missing=$(comm -13 <(echo "$built") <(echo "$tested"))
-    [ -z "$missing" ] || { echo "ci.yml $job uses images build.yml does not build: $missing"; return 1; }
-  done
+  tested=$(images ci.yml image-test)
+  [ -n "$tested" ]
+  missing=$(comm -13 <(echo "$built") <(echo "$tested"))
+  [ -z "$missing" ] || { echo "ci.yml image-test uses images build.yml does not build: $missing"; return 1; }
+}
+
+@test "security.yml scans exactly the images build.yml builds" {
+  [ "$(images security.yml rootfs)" = "$(images build.yml image)" ]
 }
