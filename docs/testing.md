@@ -26,7 +26,7 @@ just test
 ## Image tests in QEMU
 
 `test/qemu/run.py` takes the artefacts of `just build` from `out/`, copies the
-disk image, grows the copy to 20 GiB and boots it with UEFI firmware (OVMF). The
+disk image, grows the copy to 20 GiB (32 GiB for `nvidia`) and boots it with UEFI firmware (OVMF). The
 image is the shipped one; the only change to the copy is one value in its
 `grubenv`, `FLOCKOS_CMDLINE=systemd.debug_shell=ttyS1`, which gives a root shell
 on the second serial port. The script drives that shell; the first serial port
@@ -46,6 +46,12 @@ Sequence:
    the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
    rule and agent unit exist, the `.flock` has left the FLOCKOS partition and the
    agent's copy is 0600.
+   For `nvidia`, on a VM without a GPU: the `nvidia` module and the driver
+   packages are at the pinned versions and the module is built for the running
+   kernel; no compiler, DKMS or kernel headers are left; nouveau is blacklisted
+   in the initramfs; neither nouveau nor nvidia is loaded and
+   `nvidia-persistenced` is not enabled; Docker lists the `nvidia` runtime;
+   `nvidia-ctk` and `nvidia-container-cli` run.
 2. **Reboot.** machine-id, SSH host key and the persistent journal survive.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked

@@ -18,7 +18,7 @@ stage:
 | Stage | Script | Result |
 |-------|--------|--------|
 | signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key: throwaway on every build except a release (ADR-0006, `docs/signing.md`) |
-| rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions` |
+| rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
 | customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
 | bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring |
@@ -96,6 +96,35 @@ unit; enroll puts them back without network. `/etc/flockos/enroll.conf` with
 Until the device-agent marks the slot good after reaching the platform
 (WP-2.4), `flockos-mark-good.service` does it once Docker runs.
 
+## The nvidia variant
+
+`nvidia` is `base` plus NVIDIA's driver for containers on amd64 (WP-4.1;
+master plan, section 3.7), in 8 GiB slots, with the RAUC compatible
+`flockos-amd64-efi-nvidia`. Everything comes at the versions pinned in
+`profiles/nvidia/versions`:
+
+- `nvidia-driver-cuda` and `firmware-nvidia-gsp` from NVIDIA's CUDA repository
+  for Debian 13: CUDA and NVML libraries, `nvidia-smi`, `nvidia-persistenced`,
+  headless (no X driver).
+- NVIDIA's open kernel modules (Turing and newer). Inside the tree,
+  `build/nvidia-modules.sh` installs the kernel headers and
+  `nvidia-kernel-open-dkms`, lets DKMS build the modules for the image's
+  kernel, wraps them in the package `flockos-nvidia-modules`, and purges DKMS,
+  the sources, the headers and the compiler again. The build fails when the
+  package set afterwards differs from the one before by anything but
+  `flockos-nvidia-modules`.
+- `nvidia-container-toolkit` from NVIDIA's libnvidia-container repository;
+  `ironflock-init bake` sees `nvidia-container-runtime` and adds the `nvidia`
+  runtime to Docker's `daemon.json`.
+
+Both repositories stay in the image's apt sources with their keys embedded
+(`profiles/nvidia/apt`). nouveau and nova-core are blacklisted, also in the
+initramfs. Without a GPU nothing of NVIDIA's runs: `nvidia-persistenced` is
+started by udev when the `nvidia` module loads, which happens only for an
+NVIDIA GPU, and `10-flockos-nvidia.preset` keeps it and `nvidia-powerd` (a
+notebook feature) from being enabled on a slot's first boot. The modules are
+unsigned; FlockOS 1.x boots without Secure Boot.
+
 ## Building locally
 
 Docker is the only requirement. On an arm64 Mac an amd64 image builds under
@@ -118,4 +147,5 @@ an image installs only bundles from the same build.
 hash seed and the FAT volume id are derived from it or from the image id. The
 Debian archive is not pinned to a snapshot, so two builds of one commit on
 different days can differ in package versions; `packages.tsv` records what went
-in. Docker CE and its companions are pinned in `profiles/base/versions`.
+in. Docker CE and its companions are pinned in `profiles/base/versions`, the
+NVIDIA packages in `profiles/nvidia/versions`.

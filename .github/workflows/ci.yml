@@ -27,9 +27,9 @@ defaults:
     shell: bash
 
 env:
-  # Debian image built and booted on every pull request (master plan, 3.8).
+  # Debian images built and booted on every pull request (master plan, 3.8):
+  # base, and nvidia without a GPU (WP-4.1), as the jobs' matrix.
   TARGET: amd64-efi
-  VARIANT: base
   # docker save of this image is loaded and run inside the VM.
   HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
 
@@ -77,6 +77,12 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [base, nvidia]
+    env:
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,6 +129,12 @@ jobs:
     timeout-minutes: 40
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [base, nvidia]
+    env:
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,6 +185,12 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [base, nvidia]
+    env:
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
