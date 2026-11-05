@@ -126,6 +126,9 @@ packages at the pinned versions, the Ubuntu, Docker and NVIDIA sources with
 the pins, kernel, initrd and `nvgpu`, the RAUC slots, units and masks, the
 baked agent and Docker's `nvidia` runtime. It also runs the tree's binaries in
 a chroot (`docs/targets/jetson-orin.md`). It needs root and an arm64 host.
+The `jetson-flash` job then makes the flash package from the image with
+NVIDIA's tools on an x86_64 runner (`build/tegra-flash-package.sh`): the dry
+run that the layout and the slot images pass the BSP's checks.
 
 ## Hardware checklist
 
