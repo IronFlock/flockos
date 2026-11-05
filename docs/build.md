@@ -21,7 +21,7 @@ stage:
 | rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages`, its per-architecture list, the target's `targets/<target>/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
 | customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` (EFI targets), `build/mkimage-rpi.sh` (Raspberry Pi: FLOCKOS with `autoboot.txt`, boot-a from `/boot/firmware`, an empty boot-b, slot A) | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
-| bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring; none for `rpi-arm64` until its A/B arrives (WP-5.2) |
+| bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring; on `rpi-arm64` with the boot partition as `boot.vfat` |
 
 Artefacts land in `out/<image-id>/`:
 

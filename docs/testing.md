@@ -82,8 +82,11 @@ reboot, `--only update` after the update. On failure the work directory with
 QEMU cannot boot the Pi firmware, so `rpi-arm64` has no image test. CI runs
 `sudo test/image/rpi-check.sh <image>.img.gz` on the arm64 runner instead: GPT
 layout, `autoboot.txt`, the boot files and `cmdline.txt` of boot-a, slot A's
-tree (os-release, units, RAUC, the baked agent, no passwords) and the image's
-own binaries in a chroot. It needs root and an arm64 host. The boot itself is
+tree (os-release, units, the RAUC tryboot backend and its slot groups, the
+baked agent, no passwords) and the image's own binaries in a chroot. The
+backend's logic is covered by `test/unit/rpi-tryboot.bats` against fixture
+`autoboot.txt` files and a fake firmware device tree; the update and fallback
+on a real Pi is the hardware checklist. It needs root and an arm64 host. The boot itself is
 the hardware checklist below (WP-5.4).
 
 ## Hardware checklist
