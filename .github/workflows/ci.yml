@@ -28,9 +28,9 @@ defaults:
 
 env:
   # Debian images built and booted on every pull request (master plan, 3.8):
-  # amd64-efi on x86 runners, arm64-efi on arm64 runners (WP-7.1), as the
-  # jobs' matrix.
-  VARIANT: base
+  # amd64-efi base and nvidia (without a GPU, WP-4.1) on x86 runners,
+  # arm64-efi base on arm64 runners (WP-7.1), as the jobs' matrix. NVIDIA's
+  # repositories of the nvidia variant are x86_64 only.
   # docker save of this image is loaded and run inside the VM.
   HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
 
@@ -74,7 +74,7 @@ jobs:
         run: just test
 
   build:
-    name: build (${{ matrix.target }})
+    name: build (${{ matrix.target }}, ${{ matrix.variant }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -84,13 +84,20 @@ jobs:
       matrix:
         include:
           - target: amd64-efi
+            variant: base
+            runner: ubuntu-latest
+            qemu: qemu-system-x86 ovmf
+          - target: amd64-efi
+            variant: nvidia
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
           - target: arm64-efi
+            variant: base
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
     env:
       TARGET: ${{ matrix.target }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,8 +105,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: IronFlock/workflows
-          # arm64 tools.lock entries: IronFlock/workflows#32; back to v1 once it is published.
-          ref: 79205180cac70b647ad71a1eed4a820b5d615df5
+          ref: v1
           path: .harness
           persist-credentials: false
           sparse-checkout: |
@@ -133,7 +139,7 @@ jobs:
   # update into slot B with the bundle of the same build, fallback of an
   # untested slot.
   image-test:
-    name: image-test (${{ matrix.target }})
+    name: image-test (${{ matrix.target }}, ${{ matrix.variant }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     # arm64 runners have no KVM: the arm64 image boots emulated (TCG).
@@ -145,13 +151,20 @@ jobs:
       matrix:
         include:
           - target: amd64-efi
+            variant: base
+            runner: ubuntu-latest
+            qemu: qemu-system-x86 ovmf
+          - target: amd64-efi
+            variant: nvidia
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
           - target: arm64-efi
+            variant: base
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
     env:
       TARGET: ${{ matrix.target }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -201,7 +214,7 @@ jobs:
   # Report-only: Debian always carries some unfixed CVEs; the release gate
   # comes with security.yml's rootfs input (master plan, section 3.8).
   rootfs-scan:
-    name: rootfs-scan (${{ matrix.target }})
+    name: rootfs-scan (${{ matrix.target }}, ${{ matrix.variant }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -212,19 +225,25 @@ jobs:
       matrix:
         include:
           - target: amd64-efi
+            variant: base
+            runner: ubuntu-latest
+            qemu: qemu-system-x86 ovmf
+          - target: amd64-efi
+            variant: nvidia
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
           - target: arm64-efi
+            variant: base
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
     env:
       TARGET: ${{ matrix.target }}
+      VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: IronFlock/workflows
-          # arm64 tools.lock entries: IronFlock/workflows#32; back to v1 once it is published.
-          ref: 79205180cac70b647ad71a1eed4a820b5d615df5
+          ref: v1
           path: .harness
           persist-credentials: false
           sparse-checkout: |
