@@ -96,10 +96,12 @@ check "the L4T pins are kept" grep -q "Pin: version $L4T_PACKAGE_VERSION" "$root
 check "RAUC: compatible, the custom backend, APP and APP_b" \
   bash -c "c='$root/etc/rauc/system.conf'; grep -qx compatible=flockos-jetson-orin-base \$c && grep -qx bootloader=custom \$c && grep -qx device=/dev/disk/by-partlabel/APP \$c && grep -qx device=/dev/disk/by-partlabel/APP_b \$c"
 check "no repart.d (NVIDIA's flash writes the layout)" test ! -e "$root/usr/lib/repart.d"
-for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enroll.service ssh.service \
+for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service systemd-timesyncd.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
+check "no unit marks the slot good at boot (the device-agent does, once online)" \
+  test ! -e "$root/usr/lib/systemd/system/flockos-mark-good.service"
 for unit in rauc-mark-good.service nv-l4t-bootloader-config.service nv-rootfs-validation-config.service; do
   check "$unit is masked" bash -c "[ \"\$(systemctl --root='$root' is-enabled $unit)\" = masked ]"
 done

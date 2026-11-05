@@ -151,13 +151,13 @@ if [ "$VARIANT" = installer ]; then
   # The installer runs on the console and nothing else: no device services,
   # no /data, no slots, no SSH.
   systemctl --root="$ROOT" enable flockos-installer.service NetworkManager.service
-  systemctl --root="$ROOT" disable flockos-ssh-hostkeys.service flockos-mark-good.service \
+  systemctl --root="$ROOT" disable flockos-ssh-hostkeys.service \
     flockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
-  systemctl --root="$ROOT" mask flockos-enroll.service flockos-mark-good.service \
+  systemctl --root="$ROOT" mask flockos-enroll.service \
     flockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
     systemd-repart.service
 else
-  systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service flockos-mark-good.service \
+  systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
     flockos-enroll.service ssh.service docker.service NetworkManager.service systemd-timesyncd.service
   # The device's own enroll settings live on /data, so they outlive updates.
   mkdir -p "$ROOT/etc/flockos"
@@ -170,8 +170,9 @@ if [ "$KERNEL" = rt ]; then
 fi
 # Nothing changes the OS behind RAUC's back, nothing asks questions on the
 # console, nothing fetches firmware metadata on its own (sections 3.9, 3.10).
-# rauc-mark-good would mark every slot good at boot: the health gate is
-# flockos-mark-good (Phase 1) and the device-agent (Phase 2). sshd-keygen
+# rauc-mark-good would mark every slot good at boot: the health gate is the
+# device-agent, which marks the slot good once it has reached the platform
+# (device-agent 1.6.0, #202); a slot it never marks falls back. sshd-keygen
 # would make host keys in /etc/ssh on every slot; they live on /data.
 # NetworkManager owns the network: systemd-networkd and its wait unit would
 # hold network-online.target for two minutes and fail.
@@ -185,7 +186,7 @@ ln -sfn /dev/null "$ROOT/etc/systemd/system-generators/systemd-ssh-generator"
 if [ "$VARIANT" = installer ]; then
   systemctl --root="$ROOT" is-enabled flockos-installer.service >/dev/null || die "flockos-installer.service is not enabled"
 else
-  for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enroll.service; do
+  for unit in flockos-ssh-hostkeys.service flockos-enroll.service; do
     systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
   done
   [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||

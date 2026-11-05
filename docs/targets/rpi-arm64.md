@@ -56,7 +56,7 @@ with rootfs-b. An update goes like this:
    tryboot flag with `vcmailbox` and records the slot as being tried
    (`/data/rauc/flockos-rpi-tryboot.state`).
 3. The next reboot starts the new slot from the `[tryboot]` section. Once it is
-   marked good (`flockos-mark-good`, later the device-agent), the backend swaps
+   marked good (by the device-agent, once it reaches the platform), the backend swaps
    the two `boot_partition` values: the new slot is the primary.
 4. If the new slot does not come up and the device reboots (kernel panic,
    watchdog, power cycle), the flag is gone and the old primary starts again.
@@ -96,8 +96,8 @@ Pi-specific items of the hardware checklist (`docs/testing.md`, WP-5.4):
    first boot reaches the console on HDMI and on `serial0`.
 2. `rauc status` shows slot A booted, B bad, primary A.
 3. `rauc install` of the next build's bundle, then `systemctl reboot`: the
-   device comes up on B (`rauc status`: booted B), and after the mark-good
-   `autoboot.txt` has `boot_partition=3` in `[all]`.
+   device comes up on B (`rauc status`: booted B), and after the agent's
+   mark-good `autoboot.txt` has `boot_partition=3` in `[all]`.
 4. Fallback: install again (into A), then break that slot's boot before the
    reboot, for example by adding `init=/bin/false` to `cmdline.txt` on its
    boot partition. The tryboot panics, `panic=10` reboots, and the device is

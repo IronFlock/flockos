@@ -88,8 +88,10 @@ boot entry is needed) with its modules built in. `grub.cfg`
 first slot in `ORDER` that is good and not yet tried, sets its `_TRY` flag in
 `grubenv`, and boots that slot's `/vmlinuz` with `root=PARTUUID=…` and
 `rauc.slot=A|B`. A slot that is never marked good is skipped on the next boot.
-Until the device-agent marks the slot good after reaching the platform (Phase 2),
-`flockos-mark-good.service` does it once Docker runs.
+The device-agent marks the booted slot good once it has reached the platform
+(device-agent 1.6.0); nothing in the image does it at boot. A device that never
+reaches the platform keeps booting its good slot: when every slot has been
+tried, GRUB starts over with the first good one.
 
 `FLOCKOS_CMDLINE` in `grubenv` appends kernel parameters on both slots, for
 diagnosis in the field (`grub-editenv /boot/efi/EFI/BOOT/grubenv set
@@ -120,8 +122,8 @@ from the device name in the `.flock` (ADR-0009), made into a valid hostname by
 `/etc/flockos/enroll.conf`, which links to `/data/flockos/enroll.conf` and so
 outlives updates.
 
-Until the device-agent marks the slot good after reaching the platform
-(WP-2.4), `flockos-mark-good.service` does it once Docker runs.
+The device-agent marks the booted slot good once it has reached the platform
+(WP-2.4, device-agent 1.6.0); a slot it never marks falls back.
 
 ## The nvidia variant
 

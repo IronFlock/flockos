@@ -418,6 +418,19 @@ class Runner:
     def booted(self):
         return self.rauc_status().get("booted")
 
+    def mark_good(self, name, slot):
+        """What the device-agent does once it has reached the platform: mark
+        the booted slot good. Nothing in the image does it at boot, and the
+        test .flock's agent never reaches a platform, so the test stands in."""
+        env = self.vm.run("grub-editenv /boot/efi/EFI/BOOT/grubenv list")
+        if f"{name}_TRY=1" not in env.split():
+            raise TestFailure(f"slot {name} was marked good before the agent's turn:\n{env}")
+        self.vm.run("rauc status mark-good")
+        env = self.vm.run("grub-editenv /boot/efi/EFI/BOOT/grubenv list").split()
+        state = self._slots().get(slot, {}).get("boot_status")
+        if f"{name}_OK=1" not in env or f"{name}_TRY=0" not in env or state != "good":
+            raise TestFailure(f"slot {name} is not good after rauc status mark-good: {state}, {env}")
+
     def first_boot(self):
         self.vm.wait_shell(self.boot_timeout)
         self.wait_running()
@@ -456,8 +469,7 @@ class Runner:
         status = self.rauc_status()
         if status.get("booted") != "A" or status.get("compatible") != self.image_id:
             raise TestFailure(f"rauc status: {status}")
-        if self._slots().get("rootfs.0", {}).get("boot_status") != "good":
-            raise TestFailure(f"slot A was not marked good: {status}")
+        self.mark_good("A", "rootfs.0")
         self.vm.run("! systemctl is-enabled rauc-mark-good.service 2>/dev/null | grep -qx enabled")
         root = self.vm.run("docker info --format '{{.DockerRootDir}}'").strip()
         if root != "/opt/ironflock/device-agent/docker-apps":
@@ -589,9 +601,7 @@ class Runner:
             self.enrolled(first=False)
         if self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip() != self.host_key:
             raise TestFailure("the SSH host key changed with the update")
-        state = self._slots().get("rootfs.1", {}).get("boot_status")
-        if state != "good":
-            raise TestFailure(f"slot B was not marked good: {state}")
+        self.mark_good("B", "rootfs.1")
 
     def _slots(self):
         out = {}
@@ -601,7 +611,8 @@ class Runner:
         return out
 
     def fallback(self):
-        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={self.vm.debug_cmdline} flockos.no-mark-good'")
+        """A slot nobody marks good (the agent never reached the platform)
+        is tried once; the next boot falls back to the good slot."""
         self.install_bundle()
         primary = self.rauc_status().get("boot_primary")
         if primary != "rootfs.0":
@@ -617,7 +628,6 @@ class Runner:
         self.wait_running()
         if self.booted() != "B":
             raise TestFailure(f"booted {self.booted()}: an untested slot A must fall back to B")
-        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={self.vm.debug_cmdline}'")
         self.vm.run("rauc status mark-good")
 
 
