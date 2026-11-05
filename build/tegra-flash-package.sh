@@ -79,9 +79,12 @@ printf '%s\n' "$uuid_b" >"$bl/l4t-rootfs-uuid.txt_b_ext"
 slot_bytes=$(size_bytes "$SLOT_SIZE_BASE")
 (
   cd "$l4t"
+  # "-r 1": l4t_initrd_flash.func declares -r with an argument (getopts
+  # "r:") though it takes none; without one, -r swallows the next option
+  # and getopts stops at its value, dropping every option after it.
   BOARDID=$board_id BOARDSKU=$board_sku FAB=000 ROOTFS_AB=1 \
-    ./tools/kernel_flash/l4t_initrd_flash.sh --no-flash -r \
+    ./tools/kernel_flash/l4t_initrd_flash.sh --no-flash \
     --external-device nvme0n1 -c "$layout" -S "$slot_bytes" \
-    --external-only "$board" external
+    --external-only -r 1 "$board" external
 )
 log "flash package: $kf/images"
