@@ -85,7 +85,8 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
    Done.
 4. **The device-agent** trusts the catalog key: the line from step 2 goes into
    `FLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
-   an agent release. `CATALOG_MIN_AGENT` names that release.
+   an agent release. `CATALOG_MIN_AGENT` names that release: device-agent
+   1.6.1 (#204).
 
 ## Not yet
 
