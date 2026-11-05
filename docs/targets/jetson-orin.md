@@ -2,9 +2,13 @@
 
 NVIDIA Jetson AGX Orin, Orin NX and Orin Nano on Jetson Linux r39.2.1 (JetPack
 7.2.1) with an Ubuntu 24.04 userspace (ADR-0008; Phase 6). Work in progress:
-CI builds and checks the root tree (WP-6.2). The partition layout, the flash
-package and the SD image are still to come (WP-6.2, WP-6.4), as are the RAUC
-backend (WP-6.3) and the QSPI lane (WP-6.5).
+CI builds slot A's filesystem image and the RAUC bundle and checks the root
+tree (WP-6.2). Still to come:
+
+- the flash dry run (WP-6.2);
+- the flash package and the SD image (WP-6.4);
+- the RAUC backend (WP-6.3);
+- the QSPI lane (WP-6.5).
 
 | | |
 |---|---|
@@ -15,6 +19,8 @@ backend (WP-6.3) and the QSPI lane (WP-6.5).
 | GPU in containers | `nvidia-container-toolkit` 1.19.1 from NVIDIA's `common` repository; Docker's `nvidia` runtime (device-init's bake adds it); `nv-load-gpu-libs` links the board's `libcuda` and writes the container CSVs on each boot |
 | Consoles | `ttyTCU0`, 115200 8N1 (the debug header), and the display (`tty0`) |
 | Slot size | 8 GiB (`base`); only the base variant |
+| Disk | NVIDIA's NVMe layout for rootfs A/B, plus `data` (see below); written by NVIDIA's flash tools |
+| Image | `<image-id>-<version>.rootfs.ext4.zst`, slot A's filesystem (APP), and the bundle `<image-id>-<version>.raucb` |
 
 ## Packages and pins
 
@@ -78,9 +84,41 @@ The rest of the command line is NVIDIA's for the Orin modules (`TEGRA_CMDLINE`
 in `target.conf`, from `CMDLINE_ADD` of `p3701.conf.common` and
 `p3767.conf.common`). L4TLauncher fills in `${cbootargs}`.
 
+## Partition layout
+
+NVIDIA's flash tools partition and write a Jetson's disk; FlockOS does not
+make a disk image for it. `build/tegra-layout.py` takes the BSP's
+`tools/kernel_flash/flash_l4t_t234_nvme_rootfs_ab.xml` and adds FlockOS's
+`data` partition after `APP_b`. That partition grows to the end of the disk
+(allocation attribute `0x808`, as NVIDIA's single-slot layout grows `APP`) and
+is mounted at `/data` (`PARTLABEL=data`). NVIDIA's layout files are under
+NVIDIA's licence, so the layout is generated from the BSP when the flash
+package is made, never copied into this repository. The script refuses a
+layout of another shape, so a BSP that changes it fails instead of flashing
+something unexpected. The partitions:
+
+| Partition | Content |
+|-----------|---------|
+| `A_kernel`, `B_kernel`, `A_kernel-dtb`, `B_kernel-dtb`, recovery | NVIDIA's, from the BSP (the fallback when the root slot does not boot) |
+| `esp` | the EFI system partition with L4TLauncher; `/boot/efi`, where the `.flock` to enroll with goes |
+| `APP`, `APP_b` | root slots A and B (`SLOT_SIZE_BASE`) |
+| `data` | `/data`, to the end of the disk |
+
+The ESP keeps NVIDIA's name `esp`, because `flash.sh` makes its image only
+under that name. On the other targets that role belongs to `FLOCKOS`, so the
+build points `/boot/efi` in this target's `/etc/fstab` at `PARTLABEL=esp`.
+
+The build's image is slot A's filesystem, `<image-id>-<version>.rootfs.ext4.zst`
+(`build/mkimage-tegra.sh`), with an `extlinux.conf` that boots slot A. The
+flash package takes it for `APP`, and a copy pointed at slot B for `APP_b`
+(`tegra-extlinux`); NVIDIA's tools' `-r` option reuses prebuilt slot images,
+so `flash.sh` does not rebuild them from a tree with its own kernel and
+command line.
+
 ## Tests
 
-`just rootfs jetson-orin base` builds the tree. On an arm64 host,
+`just build jetson-orin base` builds the image and leaves the tree in
+`<work>/flockos-jetson-orin-base/rootfs`. On an arm64 host,
 `sudo test/image/jetson-rootfs-check.sh <work>/flockos-jetson-orin-base/rootfs`
 checks it: the versions, the sources and pins, kernel, initrd and `nvgpu`,
 units and masks, the baked agent and the `nvidia` runtime. It also runs the
@@ -90,11 +128,9 @@ CI runs both on every pull request (`jetson-rootfs` in `ci.yml`).
 
 ## Open points
 
-- The partition layout. It is generated from the BSP's
-  `flash_l4t_t234_nvme_rootfs_ab.xml` with a `data` partition added, because
-  NVIDIA's layout files are under NVIDIA's licence and are not copied here.
-  A flash dry run with the BSP's tools also belongs to the layout part of
-  WP-6.2.
+- The flash dry run: NVIDIA's `l4t_initrd_flash.sh --no-flash` with this
+  layout and the slot images, on an x86_64 runner with the BSP cached
+  (WP-6.2's last part).
 - `/etc/nv_boot_control.conf`, which `nvbootctrl` needs. NVIDIA's flash tools
   write it for the module (WP-6.4).
 - The licence review of what the image redistributes, before the first
