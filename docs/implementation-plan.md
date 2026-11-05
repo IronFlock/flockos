@@ -72,7 +72,7 @@ decision), in progress.
 | 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
 | 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done (device-agent #202 in 1.6.0, the catalog key in 1.6.1); the images' only health gate since flockos-mark-good went |
 | 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009) |
-| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | in progress (#170) |
+| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | done (#170; catalog key 2026-11-05); the first release waits for an agent release with the key |
 | 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | blocked on 2.6 |
 | 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | blocked on 2.4 |
 | 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | blocked on 2.5 |
@@ -90,7 +90,7 @@ decision), in progress.
 | 5.4 | Pi hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 4 | 5.2, 5.3 | open: needs a Pi 4 and a Pi 5 |
 | 5.5 | Follow-up: Raspberry Pi RT kernel built in CI | flockos | 8 | 5.4, 4b.1 | open |
 | 6.1 | BSP decision, download and cache | flockos | 2 | | done (#164, ADR-0008 accepted) |
-| 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | in progress (root tree in CI; layout and flash dry run next) |
+| 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | in progress (image and layout; flash dry run next) |
 | 6.3 | RAUC `custom` backend over `nvbootctrl`; health gate | flockos | 4 | 6.2 | open |
 | 6.4 | Orin Nano SD image and NX/AGX flash package | flockos | 5 | 6.3 | open |
 | 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |

@@ -137,6 +137,12 @@ case "$BOOTLOADER" in
       die "no nvgpu module for $kver (nvidia-l4t-kernel-nvgpu)"
     [ ! -e "$ROOT/opt/nvidia/l4t-packages/.nv-l4t-disable-boot-fw-update-in-preinstall" ] ||
       die "the L4T preinstall marker is still in the tree"
+    # --- /boot/efi is NVIDIA's ESP --------------------------------------------
+    # flash.sh makes the ESP's image only for a partition named "esp", so the
+    # layout keeps that name; it is the device's /boot/efi, as FLOCKOS is on
+    # the other targets (the .flock to enroll with goes there).
+    grep -q '^PARTLABEL=FLOCKOS  /boot/efi ' "$ROOT/etc/fstab" || die "/etc/fstab has no FLOCKOS line to point at the ESP"
+    sed -i 's|^PARTLABEL=FLOCKOS  /boot/efi |PARTLABEL=esp      /boot/efi |' "$ROOT/etc/fstab"
     ;;
   *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
 esac

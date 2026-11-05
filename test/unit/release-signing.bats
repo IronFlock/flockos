@@ -124,3 +124,14 @@ print(len(entries))
   [ "$status" -eq 0 ]
   [ "$output" = 6 ]
 }
+
+@test "release.yml's build names its artifacts apart from ci.yml's (a release pull request runs both in one run)" {
+  wf=$repo/.github/workflows
+  grep -A6 'uses: ./.github/workflows/build.yml' "$wf/release.yml" | grep -qx '      prefix: release-image'
+  grep -q 'pattern: release-image-\*' "$wf/release.yml"
+  ! grep -qE 'pattern: image-|name: image-' "$wf/release.yml"
+  ! grep -A6 'uses: ./.github/workflows/build.yml' "$wf/ci.yml" | grep -q 'prefix:'
+  # every artifact build.yml uploads or downloads carries the prefix
+  ! grep -E '^\s+name: image-' "$wf/build.yml"
+  [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 3 ]
+}

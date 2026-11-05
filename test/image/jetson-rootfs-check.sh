@@ -96,6 +96,8 @@ check "the L4T pins are kept" grep -q "Pin: version $L4T_PACKAGE_VERSION" "$root
 check "RAUC: compatible, the custom backend, APP and APP_b" \
   bash -c "c='$root/etc/rauc/system.conf'; grep -qx compatible=flockos-jetson-orin-base \$c && grep -qx bootloader=custom \$c && grep -qx device=/dev/disk/by-partlabel/APP \$c && grep -qx device=/dev/disk/by-partlabel/APP_b \$c"
 check "no repart.d (NVIDIA's flash writes the layout)" test ! -e "$root/usr/lib/repart.d"
+check "fstab: /boot/efi is NVIDIA's ESP, /data the layout's data partition" \
+  bash -c "grep -q '^PARTLABEL=esp  *[/]boot[/]efi  *vfat ' '$root/etc/fstab' && grep -q '^PARTLABEL=data  *[/]data ' '$root/etc/fstab' && ! grep -q '^PARTLABEL=FLOCKOS' '$root/etc/fstab'"
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service systemd-timesyncd.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
