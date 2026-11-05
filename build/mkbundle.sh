@@ -2,6 +2,8 @@
 # Stage 4: the RAUC bundle (master plan, section 3.5; ADR-0006): slot A's
 # filesystem image in a verity bundle, compatible with this image only, signed
 # with the build's signer (throwaway on pull requests, Cloud KMS on releases).
+# On the Raspberry Pi the bundle also carries the boot partition (boot.vfat):
+# RAUC writes both images of a slot group in one install (WP-5.2).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=build/lib.sh
@@ -19,6 +21,12 @@ content=$WORK/bundle
 rm -rf "$content"
 mkdir -p "$content"
 ln "$rootfs" "$content/rootfs.ext4" 2>/dev/null || cp --sparse=always "$rootfs" "$content/rootfs.ext4"
+boot=$WORK/image/input/boot-a.vfat
+boot_image=""
+if [ -f "$boot" ]; then
+  ln "$boot" "$content/boot.vfat" 2>/dev/null || cp "$boot" "$content/boot.vfat"
+  boot_image=$'\n[image.boot]\nfilename=boot.vfat'
+fi
 cat >"$content/manifest.raucm" <<MANIFEST
 [update]
 compatible=$IMAGE_ID
@@ -31,6 +39,7 @@ format=verity
 
 [image.rootfs]
 filename=rootfs.ext4
+$boot_image
 MANIFEST
 
 bundle=$OUT/$NAME.raucb

@@ -62,19 +62,13 @@ case "$BOOTLOADER" in
   *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
 esac
 
-# The Pi's bundle holds its boot partition as well, with the A/B backend
-# (WP-5.2); until then rpi-arm64 builds the image only.
-if [ "$BOOTLOADER" != rpi ]; then
-  log "$NAME: RAUC bundle"
-  bash "$here/mkbundle.sh"
-fi
+log "$NAME: RAUC bundle"
+bash "$here/mkbundle.sh"
 
 log "$NAME: checksums"
 (
   cd "$OUT"
-  files=(*.img.gz)
-  [ "$BOOTLOADER" = rpi ] || files+=(*.raucb)
-  sha256sum -- "${files[@]}" >SHA256SUMS
+  sha256sum -- *.img.gz *.raucb >SHA256SUMS
   cat SHA256SUMS
 )
 chown -R "${FLOCKOS_HOST_UID:-0}:${FLOCKOS_HOST_GID:-0}" "$OUT"
