@@ -84,8 +84,23 @@ if [ "$VARIANT" = nvidia ]; then
   for p in nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1; do
     pin "$p" "$NVIDIA_CONTAINER_TOOLKIT_VERSION"
   done
+  # The command line pins only what is listed; apt's solver would take the
+  # newest version of every other binary of the driver (exact-version
+  # dependencies, no backtracking). These pins hold every binary of NVIDIA's
+  # source packages at the profile's version, in the build and on the device.
+  pref=$WORK/flockos-nvidia.pref
+  {
+    for p in nvidia-graphics-drivers nvidia-kmod-open nvidia-modprobe nvidia-persistenced; do
+      printf 'Package: src:%s\nPin: version %s\nPin-Priority: 1001\n\n' "$p" "$NVIDIA_DRIVER_VERSION"
+    done
+    for p in libnvidia-container nvidia-container-toolkit; do
+      printf 'Package: src:%s\nPin: version %s\nPin-Priority: 1001\n\n' "$p" "$NVIDIA_CONTAINER_TOOLKIT_VERSION"
+    done
+  } >"$pref"
   # shellcheck disable=SC2016 # "$1" is mmdebstrap's, the tree's path
   hooks+=(
+    --setup-hook='mkdir -p "$1/etc/apt/preferences.d"'
+    --setup-hook="copy-in $pref /etc/apt/preferences.d"
     --customize-hook="upload $here/nvidia-modules.sh /tmp/flockos-nvidia-modules.sh"
     --chrooted-customize-hook="bash /tmp/flockos-nvidia-modules.sh $NVIDIA_DRIVER_VERSION"
     --customize-hook='rm -f "$1/tmp/flockos-nvidia-modules.sh"'
