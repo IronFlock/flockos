@@ -295,6 +295,45 @@ jobs:
           compression-level: 0
           retention-days: 3
 
+  # The flash dry run of jetson-orin (WP-6.2): NVIDIA's
+  # l4t_initrd_flash.sh --no-flash with FlockOS's partition layout and the
+  # slot image just built, offline for an Orin Nano 8GB developer kit, on an
+  # x86_64 runner (NVIDIA's flashing host). The BSP tarball is cached by its
+  # pin (targets/jetson-orin/bsp.conf).
+  jetson-flash:
+    needs: [jetson-rootfs]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/flockos-bsp-cache
+          key: l4t-bsp-${{ hashFiles('targets/jetson-orin/bsp.conf') }}
+      - name: fetch and unpack the BSP
+        run: |
+          sudo mkdir -p /mnt/l4t
+          sudo build/fetch-bsp.sh "$HOME/flockos-bsp-cache" /mnt/l4t
+          sudo chown -R "$(id -u):$(id -g)" "$HOME/flockos-bsp-cache"
+          df -h / /mnt
+      - name: NVIDIA's flashing prerequisites
+        run: sudo /mnt/l4t/Linux_for_Tegra/tools/l4t_flash_prerequisites.sh
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-jetson-orin-base
+          path: image
+      - name: tegra-flash-package (offline, Orin Nano 8GB developer kit)
+        run: sudo build/tegra-flash-package.sh /mnt/l4t/Linux_for_Tegra image/flockos-jetson-orin-base-*.rootfs.ext4.zst jetson-orin-nano-devkit 3767 0003
+      - name: what the package holds
+        if: ${{ always() }}
+        run: |
+          sudo find /mnt/l4t/Linux_for_Tegra/tools/kernel_flash/images -maxdepth 2 -printf '%M %10s %p\n' | sort -k3 | head -80 || true
+          sudo cat /mnt/l4t/Linux_for_Tegra/tools/kernel_flash/images/external/flash.cfg 2>/dev/null || true
+
   workflows:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1
 
@@ -322,13 +361,13 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, pki-tool, build, image-test, rpi-check, install-test, jetson-rootfs, workflows, intent, release-build]
+    needs: [gate, pki-tool, build, image-test, rpi-check, install-test, jetson-rootfs, jetson-flash, workflows, intent, release-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rpi-check.result }} ${{ needs.install-test.result }} ${{ needs.jetson-rootfs.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rpi-check.result }} ${{ needs.install-test.result }} ${{ needs.jetson-rootfs.result }} ${{ needs.jetson-flash.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
           RELEASE_BUILD: ${{ needs.release-build.result }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |
