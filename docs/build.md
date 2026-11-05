@@ -90,8 +90,11 @@ On the device `flockos-enroll.service` runs `ironflock-init enroll` on the first
 boot of every slot and whenever a `.flock` lies on the FLOCKOS partition: with
 the newest `.flock` there (removed afterwards), else with the agent's own copy
 on `/data`. An A/B update brings a slot without the SSH user and the agent's
-unit; enroll puts them back without network. `/etc/flockos/enroll.conf` with
-`hostname-from-flock=yes` also sets the hostname.
+unit; enroll puts them back without network. Enroll also sets the hostname
+from the device name in the `.flock` (ADR-0009), made into a valid hostname by
+`ironflock-init`. A device keeps its hostname with `hostname-from-flock=no` in
+`/etc/flockos/enroll.conf`, which links to `/data/flockos/enroll.conf` and so
+outlives updates.
 
 Until the device-agent marks the slot good after reaching the platform
 (WP-2.4), `flockos-mark-good.service` does it once Docker runs.
