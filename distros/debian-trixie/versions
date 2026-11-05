@@ -1,0 +1,18 @@
+# The Debian 13 (trixie) userspace: every target's distribution unless its
+# target.conf names another (DISTRO). Plain KEY=value data. Packages follow
+# the archive and its security updates at build time; the build records every
+# installed version in packages.tsv.
+DISTRO_ID=debian
+DISTRO_ID_LIKE=debian
+DISTRO_SUITE=trixie
+DISTRO_MIRROR=http://deb.debian.org/debian
+DISTRO_SECURITY_MIRROR=http://deb.debian.org/debian-security
+DISTRO_COMPONENTS="main contrib non-free non-free-firmware"
+DISTRO_KEYRING=/usr/share/keyrings/debian-archive-keyring.gpg
+
+# Docker CE (download.docker.com, released 2026-10-20) and its companions.
+DOCKER_MIRROR=https://download.docker.com/linux/debian
+DOCKER_CE_VERSION=5:29.9.2-1~debian.13~trixie
+CONTAINERD_VERSION=2.4.2-1~debian.13~trixie
+BUILDX_VERSION=0.38.0-1~debian.13~trixie
+COMPOSE_VERSION=5.6.1-1~debian.13~trixie

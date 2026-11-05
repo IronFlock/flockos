@@ -1,18 +1,5 @@
-# Pinned versions of the base profile. Plain KEY=value data.
-# Debian packages follow the trixie archive and its security updates at build
-# time; the build records every installed version in packages.tsv.
-
-DEBIAN_SUITE=trixie
-DEBIAN_MIRROR=http://deb.debian.org/debian
-DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security
-DEBIAN_COMPONENTS="main contrib non-free non-free-firmware"
-
-# Docker CE (download.docker.com, released 2026-10-20) and its companions.
-DOCKER_MIRROR=https://download.docker.com/linux/debian
-DOCKER_CE_VERSION=5:29.9.2-1~debian.13~trixie
-CONTAINERD_VERSION=2.4.2-1~debian.13~trixie
-BUILDX_VERSION=0.38.0-1~debian.13~trixie
-COMPOSE_VERSION=5.6.1-1~debian.13~trixie
+# Pinned versions of the base profile. Plain KEY=value data. The
+# distribution, its mirrors and the Docker CE pins are in distros/<distro>/.
 
 # device-init (IronFlock/device-init): ironflock-init bakes the agent and the
 # host defaults into the image and enrolls the device (WP-2.1 to WP-2.3). The
