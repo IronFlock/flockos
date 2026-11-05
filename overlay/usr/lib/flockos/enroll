@@ -1,49 +1,44 @@
 #!/bin/bash
-# Enroll the device from a .flock file (master plan, section 3.4).
+# Enroll this root slot for the device (master plan, section 3.4; WP-2.3).
 #
-# Phase 1: runs the public device-init installer, which verifies its own
-# signatures, with the newest *.flock on the FLOCKOS partition. Phase 2
-# replaces this with `ironflock-init enroll` from the image. Without a .flock
-# the device stays unenrolled and is reachable on the console only.
+# Runs on the first boot of every slot (a fresh flash, and after every A/B
+# update, which brings a slot without the SSH user and the agent's unit) and
+# whenever a new .flock lies on the FLOCKOS partition. The .flock is the newest
+# *.flock on the FLOCKOS partition, else the agent's own copy on /data. With
+# neither the device stays unenrolled, reachable on the console only.
+# `ironflock-init enroll` needs no network: the agent comes from the image or
+# from /data.
 set -euo pipefail
 
-# FLOCKOS_ESP, FLOCKOS_STATE, FLOCKOS_INSTALLER: for the unit tests only.
+# FLOCKOS_ESP, FLOCKOS_AGENT_DIR, FLOCKOS_STATE, FLOCKOS_INIT: for the unit
+# tests only.
 esp=${FLOCKOS_ESP:-/boot/efi}
-state=${FLOCKOS_STATE:-/data/ironflock}
-installer=${FLOCKOS_INSTALLER:-https://instance-registry.ironflock.com/dl/device-init/install.sh}
+agent_dir=${FLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}
+state=${FLOCKOS_STATE:-/var/lib/flockos}
+init=${FLOCKOS_INIT:-/usr/sbin/ironflock-init}
+conf=${FLOCKOS_ENROLL_CONF:-/etc/flockos/enroll.conf}
 
 flock=""
 for f in "$esp"/*.flock; do
   [ -f "$f" ] || continue
   if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
 done
+if [ -z "$flock" ] && [ -f "$agent_dir/device-config.flock" ]; then
+  flock=$agent_dir/device-config.flock
+fi
 if [ -z "$flock" ]; then
-  echo "enroll: no .flock file on the FLOCKOS partition; the device stays unenrolled"
+  echo "enroll: no .flock on the FLOCKOS partition and none on /data: the device stays unenrolled"
   exit 0
 fi
 
-mkdir -p "$state"
-umask 077
-cp "$flock" "$state/enroll.flock"
-
-script=$(mktemp)
-trap 'rm -f "$script"' EXIT
-case "$installer" in
-  https://*) curl -fsSL --proto '=https' --retry 5 --retry-all-errors -o "$script" "$installer" ;;
-  /*) cp "$installer" "$script" ;;
-  *)
-    echo "enroll: installer must be an https URL" >&2
-    exit 1
-    ;;
-esac
-bash "$script" -c "$state/enroll.flock"
-
-# The .flock holds the device's secret: it leaves the FAT partition once the
-# device is enrolled (the copy on /data is 0600).
-if command -v shred >/dev/null 2>&1; then
-  shred -u "$flock"
-else
-  rm -f "$flock"
+args=(enroll -c "$flock" --shred-source)
+# /etc/flockos/enroll.conf: hostname-from-flock=yes sets the hostname from
+# the device name (master plan, open question 1; off unless set).
+if [ -f "$conf" ] && grep -qx 'hostname-from-flock=yes' "$conf"; then
+  args+=(--hostname-from-flock)
 fi
-touch "$state/enrolled"
-echo "enroll: device enrolled from $(basename "$flock")"
+"$init" "${args[@]}"
+
+mkdir -p "$state"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$state/enrolled"
+echo "enroll: this slot is enrolled from $(basename "$flock")"
