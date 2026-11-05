@@ -270,9 +270,27 @@ class VM:
                 self.transcript.flush()
                 self.buf += chunk
 
-    def wait_shell(self, timeout):
-        """Wait until the debug shell answers; returns its boot id."""
+    def kernel_starts(self):
+        """How many kernels have started on the console so far."""
+        try:
+            with open(self.console, "rb") as fh:
+                return fh.read().count(b"Linux version ")
+        except FileNotFoundError:
+            return 0
+
+    def wait_shell(self, timeout, starts_before=0):
+        """Wait until the debug shell answers; returns its boot id.
+
+        Nothing is typed before a kernel newer than starts_before runs: on
+        arm64 the firmware and GRUB read the shell's virtio console as a
+        keyboard, and a ping during GRUB's menu stops the boot."""
         deadline = time.time() + timeout
+        while self.kernel_starts() <= starts_before:
+            if self.proc.poll() is not None:
+                raise TestFailure(f"qemu exited with {self.proc.returncode}")
+            if time.time() > deadline:
+                raise TestFailure(f"no kernel started within {timeout}s (see console.log)")
+            time.sleep(1)
         n = 0
         while time.time() < deadline:
             n += 1
@@ -302,6 +320,7 @@ class VM:
 
     def reboot(self, timeout):
         old = self.run("cat /proc/sys/kernel/random/boot_id").strip()
+        starts = self.kernel_starts()
         self._send("systemctl reboot\r")
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -310,7 +329,7 @@ class VM:
             # answer the ping and die before the next command (a wide window
             # when the VM is emulated): wait on for the new one.
             try:
-                new = self.wait_shell(max(10, deadline - time.time()))
+                new = self.wait_shell(max(10, deadline - time.time()), starts)
             except TestFailure as e:
                 log(f"reboot: {e}; waiting on")
                 continue
