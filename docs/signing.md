@@ -43,7 +43,12 @@ service account with `roles/cloudkms.signerVerifier` on the signer key and
 root CA certificate and the signer certificate with `tools/rauc-pki` (a small Go
 program that has KMS sign the certificates; only SHA-256 digests leave the
 machine), disables the CA key version, and verifies the chain with `openssl`.
-The two certificates then go into `pki/` with a pull request.
+The two certificates then go into `pki/` with a pull request. IAM can take a
+minute to know a service account it has just created; the script retries the
+bindings for two minutes, and a run that stops anyway is simply run again.
+
+Done on 2026-11-05: the certificates and their fingerprints are in
+[`pki/`](../pki/README.md).
 
 ## How a release run signs (WP-1.6)
 
