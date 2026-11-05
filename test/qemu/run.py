@@ -284,7 +284,7 @@ class VM:
             if self._read_until(rb"__PING_" + tag.encode(), 5):
                 self.run("stty -echo; PS1=; PS2=; export PS1 PS2 SYSTEMD_PAGER= PAGER=cat SYSTEMD_COLORS=0 "
                          "COLUMNS=1000 TERM=dumb", timeout=10, check=False)
-                return self.run("cat /proc/sys/kernel/random/boot_id").strip()
+                return self.run("cat /proc/sys/kernel/random/boot_id", timeout=30).strip()
         raise TestFailure(f"no shell on the second serial port after {timeout}s (see console.log)")
 
     def run(self, command, timeout=120, check=True):
@@ -306,8 +306,14 @@ class VM:
         deadline = time.time() + timeout
         while time.time() < deadline:
             time.sleep(5)
-            # The old shell may still answer while the system goes down.
-            new = self.wait_shell(max(10, deadline - time.time()))
+            # The old shell may still answer while the system goes down, or
+            # answer the ping and die before the next command (a wide window
+            # when the VM is emulated): wait on for the new one.
+            try:
+                new = self.wait_shell(max(10, deadline - time.time()))
+            except TestFailure as e:
+                log(f"reboot: {e}; waiting on")
+                continue
             if new != old:
                 return new
         raise TestFailure("the VM did not reboot")
