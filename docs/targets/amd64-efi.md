@@ -32,3 +32,21 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 - `nvidia` on a GPU host (WP-4.2): `nvidia-smi` on the host and
   `docker run --rm --gpus all nvidia/cuda:<version>-base-ubuntu24.04 nvidia-smi`
   in a container, before and after an A/B update between two `nvidia` builds.
+
+## Installer stick
+
+For sealed IPCs that cannot boot a USB-flashed system disk: flash the
+`installer` image with FlockFlasher, put `installer.conf` and the `.flock` on
+its FLOCKOS partition, boot the IPC from the stick. Example for a box with one
+NVMe and no keyboard:
+
+```ini
+# installer.conf
+disk=largest
+confirm=no
+after=poweroff
+```
+
+The installer leaves out the stick itself, read-only, loop and too-small disks,
+and USB disks unless `allow-usb=yes`. When it is done the box powers off; remove
+the stick and power on. Hardware acceptance is WP-3.3.

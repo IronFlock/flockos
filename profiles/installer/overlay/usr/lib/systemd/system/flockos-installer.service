@@ -1,0 +1,19 @@
+[Unit]
+Description=FlockOS installer: write FlockOS to an internal disk
+Documentation=https://github.com/IronFlock/flockos/blob/main/docs/master-plan.md
+After=local-fs.target boot-efi.mount systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/flockos/installer
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -201,6 +201,100 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # The installer stick (WP-3.2) carries the base image just built.
+  build-installer:
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    # The installer stick of amd64-efi, carrying the base image built above.
+    env:
+      TARGET: amd64-efi
+      VARIANT: base
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: v1
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just (tools.lock)
+        run: '"$HARNESS/scripts/install-tool.sh" just'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-${{ env.TARGET }}-${{ env.VARIANT }}
+          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}
+      - name: just build ${{ env.TARGET }} installer
+        env:
+          FLOCKOS_WORK: /mnt/flockos-work
+        run: |
+          sudo mkdir -p /mnt/flockos-work
+          just build "$TARGET" installer
+      - name: upload the installer image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ env.TARGET }}-installer
+          path: out/flockos-${{ env.TARGET }}-installer/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  # The stick installs to a blank NVMe unattended; the NVMe then boots alone.
+  install-test:
+    needs: [build-installer]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      TARGET: amd64-efi
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-${{ env.TARGET }}-installer
+          path: out/flockos-${{ env.TARGET }}-installer
+      - name: install QEMU, OVMF and mtools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf mtools
+      - name: give the runner KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: QEMU install test
+        run: |
+          sudo mkdir -p /mnt/flockos-install
+          sudo chown "$(id -u):$(id -g)" /mnt/flockos-install
+          python3 -I test/qemu/run.py --target "$TARGET" --variant installer --work /mnt/flockos-install --keep
+      - name: console and shell logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qemu-logs-${{ env.TARGET }}-installer
+          path: |
+            /mnt/flockos-install/console-installer.log
+            /mnt/flockos-install/console.log
+            /mnt/flockos-install/shell.log
+            /mnt/flockos-install/flockos-installer.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The packages of the built image against the vulnerability database
   # (trivy rootfs over slot A, mounted read-only) and its CycloneDX SBOM.
   # Report-only: Debian always carries some unfixed CVEs; the release gate
@@ -339,13 +433,13 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, pki-tool, build, image-test, rootfs-scan, rpi-check, workflows, intent, release-build]
+    needs: [gate, pki-tool, build, image-test, rootfs-scan, rpi-check, build-installer, install-test, workflows, intent, release-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.rpi-check.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.rpi-check.result }} ${{ needs.build-installer.result }} ${{ needs.install-test.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
           RELEASE_BUILD: ${{ needs.release-build.result }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |

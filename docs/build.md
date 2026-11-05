@@ -19,9 +19,9 @@ stage:
 |-------|--------|--------|
 | signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key: throwaway on every build except a release (ADR-0006, `docs/signing.md`) |
 | rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages`, its per-architecture list, the target's `targets/<target>/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
-| customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`), package manifest, timestamps clamped to the commit time |
+| customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`; not into the installer), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` (EFI targets), `build/mkimage-rpi.sh` (Raspberry Pi: FLOCKOS with `autoboot.txt`, boot-a from `/boot/firmware`, an empty boot-b, slot A) | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
-| bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring; on `rpi-arm64` with the boot partition as `boot.vfat` |
+| bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring (none for the installer); on `rpi-arm64` with the boot partition as `boot.vfat` |
 
 Artefacts land in `out/<image-id>/`:
 
@@ -124,6 +124,26 @@ started by udev when the `nvidia` module loads, which happens only for an
 NVIDIA GPU, and `10-flockos-nvidia.preset` keeps it and `nvidia-powerd` (a
 notebook feature) from being enabled on a slot's first boot. The modules are
 unsigned; FlockOS 1.x boots without Secure Boot.
+
+## The installer variant
+
+`just build amd64-efi installer` builds the FlockOS installer stick (master plan,
+section 3.6) from the base image built before it (`just build amd64-efi base`;
+`FLOCKOS_INSTALLER_PAYLOADS` names more variants). It is the base system plus
+`profiles/installer` (the installer program, `efibootmgr`, its own `fstab`),
+with the base image embedded as `/usr/share/flockos/payload/<image>.img.zst`
+and its raw size next to it. It has no RAUC bundle, no slot B, no `/data`, no
+SSH and no device services, and its GPT names differ (`flockos-installer-esp`,
+`flockos-installer`), so a disk it installed and the stick never collide; its
+FAT label is `FLOCKOS` as on every image, for FlockFlasher.
+
+On boot `flockos-installer.service` runs on the console: it reads
+`installer.conf` and the `.flock` from the stick's FLOCKOS partition, picks the
+target disk (`disk=largest`, `/dev/<name>` or `by-id:<id>`; never the stick,
+read-only, loop or too small disks; USB disks only with `allow-usb=yes`), asks
+unless `confirm=no`, writes the image, copies the `.flock` to the new FLOCKOS
+partition, adds a UEFI boot entry, and powers off (`after=reboot` reboots). The
+log is `flockos-installer.log` on the stick.
 
 ## Building locally
 
