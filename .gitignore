@@ -13,6 +13,9 @@
 *.pem
 *.key
 *.p12
+# except the public certificates of the RAUC PKI (pki/README.md)
+!pki/flockos-root-ca.pem
+!pki/flockos-bundle-signer-*.pem
 
 # Editor and OS noise
 .DS_Store

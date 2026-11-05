@@ -4,9 +4,10 @@
 # and the signed catalog, and sets the tag last (a tag means "devices can get
 # it"). Nothing is built, signed or published from a laptop.
 #
-# Phase 0 (docs/master-plan.md): only `verify` and `tag` exist. The build,
-# sign, stage, e2e and promote jobs arrive with Phases 1 and 2 and slot in
-# between them, each `needs` the one before, and `tag` needs the last.
+# `build` builds every image as a release build (build.yml), `sign` gives
+# the bundles their release signature (WP-1.6). The stage, e2e and promote
+# jobs (WP-2.6) slot in after `sign`, each `needs` the one before, and `tag`
+# needs the last.
 #
 # A no-release merge starts nothing: `paths` holds only VERSION, and when a
 # no-release pull request touches it anyway the jobs are skipped by its merge
@@ -74,12 +75,75 @@ jobs:
           mv .harness "$RUNNER_TEMP/harness"
           "$RUNNER_TEMP/harness/scripts/release.sh" mode
 
-  # Phase 1 adds here: build (matrix target x variant x kernel) with SBOM and
-  # provenance, sign (Cloud KMS via PKCS#11, throwaway key on dry runs),
-  # stage, e2e, promote.
+  # Every image as a release build (build.yml): the images trust the FlockOS
+  # root CA, and each bundle is sealed with a throwaway key of its build. No
+  # job of the build holds the release identity.
+  build:
+    needs: [verify]
+    if: needs.verify.outputs.mode != 'released'
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+    with:
+      signing: release
+
+  # The release signature (docs/signing.md). Only a release run gets the
+  # workload identity flockos-release: the pool grants it to a push of
+  # release.yml on main (a release merge) and to runs on v* tags. This job
+  # re-signs every bundle with the bundle signer in Cloud KMS through PKCS#11
+  # and checks it against the FlockOS root CA (build/sign-bundles.sh), then
+  # attests the provenance of every image and bundle. A dry run does the same
+  # with a throwaway stand-in for the signer and attests nothing.
+  sign:
+    needs: [verify, build]
+    if: needs.verify.outputs.mode != 'released'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-*
+          path: dl
+      - name: one directory per image, as the build left it
+        run: |
+          mkdir out
+          for d in dl/image-*; do mv "$d" "out/flockos-${d#dl/image-}"; done
+          ls -l out/*/
+      - name: authenticate the bundle signer (release only)
+        if: env.MODE == 'release'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+      - name: sign the bundles (${{ env.MODE }})
+        run: build/sign-in-builder.sh "$MODE" out
+      - name: attest the provenance of the images and bundles (release only)
+        if: env.MODE == 'release'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            out/*/*.img.gz
+            out/*/*.raucb
+      - name: upload the signed images and bundles
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ env.MODE }}
+          path: out/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   tag:
-    needs: [verify]
+    needs: [verify, sign]
     if: needs.verify.outputs.mode == 'release'
     uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
     permissions:
