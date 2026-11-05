@@ -71,3 +71,13 @@ teardown() { rm -rf "$tmp"; }
   [ "$status" -eq 0 ]
   [ "$output" = "$(printf 'a\nb')" ]
 }
+
+@test "uuid_for derives a version-4 UUID from the image id and a name" {
+  IMAGE_ID=flockos-amd64-efi-base
+  a=$(uuid_for rootfs-a)
+  [ "$a" = "$(uuid_for rootfs-a)" ]
+  [ "$a" != "$(uuid_for rootfs-b)" ]
+  [[ "$a" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$ ]]
+  IMAGE_ID=flockos-rpi-arm64-base
+  [ "$a" != "$(uuid_for rootfs-a)" ]
+}

@@ -102,3 +102,11 @@ image_id() {
   [ "$3" = rt ] && id="$id-rt"
   printf '%s' "$id"
 }
+
+# uuid_for NAME: a UUID derived from $IMAGE_ID and NAME, so every build of a
+# target has the same partition and filesystem ids.
+uuid_for() {
+  local h
+  h=$(printf 'flockos:%s:%s' "${IMAGE_ID:?}" "$1" | sha256sum | cut -c1-32)
+  printf '%s-%s-4%s-8%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}"
+}

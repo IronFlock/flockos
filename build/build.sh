@@ -18,10 +18,6 @@ TARGET=$1 VARIANT=$2 KERNEL=$3
 valid_target "$TARGET" || die "unknown target $TARGET"
 valid_variant "$VARIANT" || die "unknown variant $VARIANT"
 valid_kernel "$KERNEL" || die "unknown kernel $KERNEL"
-case "$VARIANT" in
-  base | installer) ;;
-  nvidia) die "the nvidia variant arrives with Phase 4 (WP-4.1)" ;;
-esac
 [ "$KERNEL" = std ] || die "the rt kernel arrives with Phase 4b (WP-4b.1)"
 
 : "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
@@ -30,6 +26,7 @@ FLOCKOS_SIGNING=${FLOCKOS_SIGNING:-dev}
 
 load_conf "$src/targets/$TARGET/target.conf"
 load_conf "$src/profiles/base/versions"
+[ -f "$src/profiles/$VARIANT/versions" ] && load_conf "$src/profiles/$VARIANT/versions"
 [ "$(dpkg --print-architecture)" = "$ARCH" ] || die "target $TARGET is $ARCH; this build container is $(dpkg --print-architecture)"
 
 IMAGE_ID=$(image_id "$TARGET" "$VARIANT" "$KERNEL")
@@ -68,7 +65,11 @@ log "$NAME: customisation"
 bash "$here/customize.sh"
 
 log "$NAME: disk image"
-bash "$here/mkimage.sh"
+case "$BOOTLOADER" in
+  grub-efi) bash "$here/mkimage.sh" ;;
+  rpi) bash "$here/mkimage-rpi.sh" ;;
+  *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
+esac
 
 if [ "$VARIANT" != installer ]; then
   log "$NAME: RAUC bundle"

@@ -6,13 +6,14 @@
 
 The image under test is the artefact from `just build`, unchanged except for
 one value in the FLOCKOS partition's grubenv of the test copy:
-FLOCKOS_CMDLINE asks systemd for a root debug shell on the second serial
-port (systemd.debug_shell=ttyS1), which this script drives. grubenv lives on
-the FLOCKOS partition, so the shell is there on both slots, before and after
-an update.
+FLOCKOS_CMDLINE asks systemd for a root debug shell, which this script drives:
+on the second serial port on amd64 (ttyS1), on a virtio console on arm64
+(hvc0; QEMU's virt machine has one UART). grubenv lives on the FLOCKOS
+partition, so the shell is there on both slots, before and after an update.
 
 Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (partitions grown, /data
-layout, identity, SSH policy, RAUC slot A good, Docker, fwupd); reboot
+layout, identity, SSH policy, RAUC slot A good, Docker, fwupd); for nvidia
+the driver, its modules and the container runtime without a GPU; reboot
 (state persists); update into slot B with the bundle of the same build;
 fallback: an update into slot A that is never marked good falls back to B.
 
@@ -37,7 +38,28 @@ import time
 import uuid
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEBUG_CMDLINE = "systemd.debug_shell=ttyS1"
+# The guest device of the debug shell per architecture (see the docstring).
+# systemd starts a getty on a virtio console by itself; on the test's hvc0 it
+# would take the terminal from the shell.
+DEBUG_SHELL = {"amd64": "ttyS1", "arm64": "hvc0"}
+HOST_ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(os.uname().machine)
+
+
+def debug_cmdline(arch):
+    tty = DEBUG_SHELL[arch]
+    extra = f" systemd.mask=serial-getty@{tty}.service" if tty.startswith("hvc") else ""
+    return f"systemd.debug_shell={tty}{extra}"
+
+
+def pick_accel(arch):
+    """KVM on Linux, Hypervisor.framework on an arm64 Mac, else emulation."""
+    if arch == HOST_ARCH and os.access("/dev/kvm", os.R_OK | os.W_OK):
+        return "kvm"
+    if arch == HOST_ARCH == "arm64" and sys.platform == "darwin":
+        return "hvf"
+    return "tcg"
+
+
 FIRMWARE = {
     "amd64": [
         ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
@@ -149,8 +171,9 @@ def set_test_cmdline(disk, workdir, cmdline):
 
 
 class VM:
-    def __init__(self, arch, disk, workdir, kvm, stick=None, nvme=False):
-        self.arch, self.disk, self.workdir, self.kvm = arch, disk, workdir, kvm
+    def __init__(self, arch, disk, workdir, accel, stick=None, nvme=False):
+        self.arch, self.disk, self.workdir, self.accel = arch, disk, workdir, accel
+        self.debug_cmdline = debug_cmdline(arch)
         # stick: an image attached as a USB stick (booted first); nvme: the
         # disk is an NVMe drive instead of virtio.
         self.stick, self.nvme = stick, nvme
@@ -177,7 +200,10 @@ class VM:
             cmd += ["-machine", "q35", "-device", "i6300esb"]
         else:
             cmd += ["-machine", "virt"]
-        cmd += ["-accel", "kvm", "-cpu", "host"] if self.kvm else ["-accel", "tcg", "-cpu", "max"]
+        # Emulated arm64: QEMU's own pointer-authentication algorithm is far
+        # faster to emulate than the architected one.
+        cpu = "host" if self.accel != "tcg" else ("max,pauth-impdef=on" if self.arch == "arm64" else "max")
+        cmd += ["-accel", self.accel, "-cpu", cpu]
         cmd += ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}"]
         if vars_template:
             cmd += ["-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}"]
@@ -190,11 +216,18 @@ class VM:
             cmd += ["-device", "qemu-xhci", "-drive", f"if=none,id=stick,file={self.stick},format=raw,cache=unsafe",
                     "-device", "usb-storage,drive=stick,bootindex=0"]
         cmd += [
-            "-nic", "user,model=virtio-net-pci",
+            # No option ROM: the UEFI firmware has its own virtio-net driver, and
+            # the iPXE ROMs are only a recommendation of the QEMU packages.
+            "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0,romfile=",
             "-serial", f"file:{self.console}",
-            "-serial", f"unix:{self.sock_path},server=on,wait=off",
             "-device", "virtio-rng-pci",
         ]
+        if self.arch == "amd64":
+            cmd += ["-serial", f"unix:{self.sock_path},server=on,wait=off"]
+        else:
+            cmd += ["-device", "virtio-serial-pci",
+                    "-chardev", f"socket,id=shell,path={self.sock_path},server=on,wait=off",
+                    "-device", "virtconsole,chardev=shell"]
         log("qemu: " + " ".join(cmd))
         self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
         deadline = time.time() + 30
@@ -204,8 +237,20 @@ class VM:
             if time.time() > deadline:
                 raise TestFailure("qemu made no serial socket")
             time.sleep(0.2)
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(self.sock_path)
+        # The socket file exists from bind(); QEMU listens a moment later, or
+        # has exited on a bad option.
+        while True:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                self.sock.connect(self.sock_path)
+                break
+            except ConnectionRefusedError:
+                self.sock.close()
+                if self.proc.poll() is not None:
+                    raise TestFailure(f"qemu exited with {self.proc.returncode}")
+                if time.time() > deadline:
+                    raise TestFailure("qemu does not accept on its serial socket")
+                time.sleep(0.2)
         self.sock.setblocking(False)
 
     def wait_exit(self, timeout):
@@ -254,9 +299,27 @@ class VM:
                 self.transcript.flush()
                 self.buf += chunk
 
-    def wait_shell(self, timeout):
-        """Wait until the debug shell on ttyS1 answers; returns its boot id."""
+    def kernel_starts(self):
+        """How many kernels have started on the console so far."""
+        try:
+            with open(self.console, "rb") as fh:
+                return fh.read().count(b"Linux version ")
+        except FileNotFoundError:
+            return 0
+
+    def wait_shell(self, timeout, starts_before=0):
+        """Wait until the debug shell answers; returns its boot id.
+
+        Nothing is typed before a kernel newer than starts_before runs: on
+        arm64 the firmware and GRUB read the shell's virtio console as a
+        keyboard, and a ping during GRUB's menu stops the boot."""
         deadline = time.time() + timeout
+        while self.kernel_starts() <= starts_before:
+            if self.proc.poll() is not None:
+                raise TestFailure(f"qemu exited with {self.proc.returncode}")
+            if time.time() > deadline:
+                raise TestFailure(f"no kernel started within {timeout}s (see console.log)")
+            time.sleep(1)
         n = 0
         while time.time() < deadline:
             n += 1
@@ -268,7 +331,7 @@ class VM:
             if self._read_until(rb"__PING_" + tag.encode(), 5):
                 self.run("stty -echo; PS1=; PS2=; export PS1 PS2 SYSTEMD_PAGER= PAGER=cat SYSTEMD_COLORS=0 "
                          "COLUMNS=1000 TERM=dumb", timeout=10, check=False)
-                return self.run("cat /proc/sys/kernel/random/boot_id").strip()
+                return self.run("cat /proc/sys/kernel/random/boot_id", timeout=30).strip()
         raise TestFailure(f"no shell on the second serial port after {timeout}s (see console.log)")
 
     def run(self, command, timeout=120, check=True):
@@ -286,12 +349,19 @@ class VM:
 
     def reboot(self, timeout):
         old = self.run("cat /proc/sys/kernel/random/boot_id").strip()
+        starts = self.kernel_starts()
         self._send("systemctl reboot\r")
         deadline = time.time() + timeout
         while time.time() < deadline:
             time.sleep(5)
-            # The old shell may still answer while the system goes down.
-            new = self.wait_shell(max(10, deadline - time.time()))
+            # The old shell may still answer while the system goes down, or
+            # answer the ping and die before the next command (a wide window
+            # when the VM is emulated): wait on for the new one.
+            try:
+                new = self.wait_shell(max(10, deadline - time.time()), starts)
+            except TestFailure as e:
+                log(f"reboot: {e}; waiting on")
+                continue
             if new != old:
                 return new
         raise TestFailure("the VM did not reboot")
@@ -418,6 +488,42 @@ class Runner:
         if first:
             self.vm.run(f"test ! -e /boot/efi/{self.flock}")
 
+    def nvidia(self):
+        """An nvidia image (WP-4.1) on a VM without a GPU: the driver and the
+        open modules at the pinned version, built for the image's kernel; no
+        compiler, DKMS or headers left; nouveau blacklisted in the initramfs;
+        the nvidia runtime in Docker; nothing of NVIDIA's runs, so nothing
+        fails (wait_running checked that)."""
+        nv = load_conf(os.path.join(REPO, "profiles", "nvidia", "versions"))
+        driver = nv["NVIDIA_DRIVER_VERSION"]
+        modver = driver.rsplit("-", 1)[0]
+        got = self.vm.run("modinfo -F version nvidia").strip()
+        if got != modver:
+            raise TestFailure(f"the nvidia module is version {got!r}, not {modver}")
+        kver = self.vm.run("uname -r").strip()
+        vermagic = self.vm.run("modinfo -F vermagic nvidia").split()
+        if not vermagic or vermagic[0] != kver:
+            raise TestFailure(f"the nvidia module is built for {vermagic[:1]}, the kernel is {kver}")
+        want = {"nvidia-driver-cuda": driver, "flockos-nvidia-modules": driver, "firmware-nvidia-gsp": driver,
+                "nvidia-container-toolkit": nv["NVIDIA_CONTAINER_TOOLKIT_VERSION"]}
+        out = self.vm.run("dpkg-query -W -f '${Package} ${Version}\\n' " + " ".join(want))
+        have = dict(line.split() for line in out.splitlines() if len(line.split()) == 2)
+        for pkg, ver in want.items():
+            if have.get(pkg) != ver:
+                raise TestFailure(f"{pkg} is {have.get(pkg)!r}, not {ver}")
+        self.vm.run("for t in cc gcc g++ make dkms; do if command -v $t; then exit 1; fi; done")
+        self.vm.run("test ! -e /var/lib/dkms && ! ls -d /usr/src/linux-headers-* /usr/src/nvidia-* 2>/dev/null")
+        self.vm.run("test -x /usr/bin/nvidia-smi && test -x /usr/bin/nvidia-container-runtime")
+        self.vm.run(f"test -n \"$(ls /lib/firmware/nvidia/{modver}/gsp_*.bin)\"")
+        self.vm.run("modprobe -c | grep -qx 'blacklist nouveau'")
+        self.vm.run("lsinitramfs /initrd.img | grep -q 'etc/modprobe.d/nvidia.conf'", timeout=180)
+        self.vm.run("! lsmod | grep -qE '^(nvidia|nouveau) '")
+        self.vm.run("! systemctl -q is-enabled nvidia-persistenced.service nvidia-powerd.service")
+        runtimes = self.vm.run("docker info --format '{{json .Runtimes}}'")
+        if '"nvidia"' not in runtimes:
+            raise TestFailure(f"Docker has no nvidia runtime: {runtimes}")
+        self.vm.run("nvidia-ctk --version && nvidia-container-cli --version")
+
     def reboot_persists(self):
         self.vm.reboot(self.boot_timeout)
         self.wait_running()
@@ -465,7 +571,7 @@ class Runner:
         return out
 
     def fallback(self):
-        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={DEBUG_CMDLINE} flockos.no-mark-good'")
+        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={self.vm.debug_cmdline} flockos.no-mark-good'")
         self.install_bundle()
         primary = self.rauc_status().get("boot_primary")
         if primary != "rootfs.0":
@@ -481,14 +587,14 @@ class Runner:
         self.wait_running()
         if self.booted() != "B":
             raise TestFailure(f"booted {self.booted()}: an untested slot A must fall back to B")
-        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={DEBUG_CMDLINE}'")
+        self.vm.run(f"grub-editenv /boot/efi/EFI/BOOT/grubenv set 'FLOCKOS_CMDLINE={self.vm.debug_cmdline}'")
         self.vm.run("rauc status mark-good")
 
 
 INSTALLER_CONF = "confirm=no\nafter=poweroff\n"
 
 
-def install_test(args, conf, arch, version, kvm, boot_timeout, port):
+def install_test(args, conf, arch, version, accel, boot_timeout, port):
     """WP-3.2: the installer stick (USB) writes the base image to a blank
     NVMe unattended and powers off; the NVMe then boots alone like a flashed
     disk."""
@@ -510,14 +616,14 @@ def install_test(args, conf, arch, version, kvm, boot_timeout, port):
     with open(conf_file, "w") as fh:
         fh.write(INSTALLER_CONF)
     subprocess.run(["mcopy", "-n", "-o", "-i", f"{stick}@@{offset}", conf_file, "::/installer.conf"], check=True)
-    set_test_cmdline(stick, workdir, DEBUG_CMDLINE)
+    set_test_cmdline(stick, workdir, debug_cmdline(arch))
     # The installer hands the stick's .flock to the new disk, which enrolls with it.
     flock = None if args.no_flock else put_test_flock(stick, workdir)
     log(f"stick: {installer_id}-{version}, installer.conf {INSTALLER_CONF!r}; blank 20 GiB NVMe")
 
     results = []
     ok = False
-    vm = VM(arch, nvme, workdir, kvm, stick=stick, nvme=True)
+    vm = VM(arch, nvme, workdir, accel, stick=stick, nvme=True)
     try:
         log("--- install from the stick")
         start = time.time()
@@ -538,10 +644,10 @@ def install_test(args, conf, arch, version, kvm, boot_timeout, port):
         log(f"ok   install from the stick ({time.time() - start:.0f}s)")
 
         # Boot the NVMe alone, with the UEFI variables the installer wrote.
-        set_test_cmdline(nvme, workdir, DEBUG_CMDLINE)
+        set_test_cmdline(nvme, workdir, debug_cmdline(arch))
         if os.path.exists(vm.sock_path):
             os.remove(vm.sock_path)
-        vm2 = VM(arch, nvme, workdir, kvm, nvme=True)
+        vm2 = VM(arch, nvme, workdir, accel, nvme=True)
         runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1", flock=flock)
         try:
             vm2.start(conf["QEMU_SYSTEM"], port)
@@ -572,7 +678,7 @@ def main():
     ap.add_argument("--kernel", default="std")
     ap.add_argument("--out", default=os.path.join(REPO, "out"))
     ap.add_argument("--work")
-    ap.add_argument("--disk-size", default="20G")
+    ap.add_argument("--disk-size", help="virtual disk size (default 20G; 32G for nvidia's 8 GiB slots)")
     ap.add_argument("--docker-image-tar", help="docker save output of hello-world, loaded and run in the VM")
     ap.add_argument("--keep", action="store_true", help="keep the work directory")
     ap.add_argument("--only", choices=["boot", "update"], help="stop after this part")
@@ -585,10 +691,10 @@ def main():
     with open(os.path.join(REPO, "VERSION")) as fh:
         version = fh.read().strip()
     if args.variant == "installer":
-        kvm = os.access("/dev/kvm", os.R_OK | os.W_OK) and arch == {"x86_64": "amd64", "aarch64": "arm64"}.get(os.uname().machine)
+        accel = pick_accel(arch)
         server, port = serve(tempfile.mkdtemp(prefix="flockos-http-"))
         try:
-            sys.exit(0 if install_test(args, conf, arch, version, kvm, 300 if kvm else 1500, port) else 1)
+            sys.exit(0 if install_test(args, conf, arch, version, accel, 300 if accel != "tcg" else 1500, port) else 1)
         finally:
             server.shutdown()
     artefacts = os.path.join(args.out, image_id)
@@ -607,9 +713,10 @@ def main():
     log(f"work directory {workdir}")
     with gzip.open(img_gz, "rb") as src, open(disk, "wb") as dst:
         shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
-    size = {"G": 1024**3, "M": 1024**2}[args.disk_size[-1]] * int(args.disk_size[:-1])
+    disk_size = args.disk_size or ("32G" if args.variant == "nvidia" else "20G")
+    size = {"G": 1024**3, "M": 1024**2}[disk_size[-1]] * int(disk_size[:-1])
     os.truncate(disk, size)
-    set_test_cmdline(disk, workdir, DEBUG_CMDLINE)
+    set_test_cmdline(disk, workdir, debug_cmdline(arch))
     flock = None if args.no_flock else put_test_flock(disk, workdir)
 
     serve_dir = os.path.join(workdir, "http")
@@ -619,15 +726,17 @@ def main():
         shutil.copy(args.docker_image_tar, serve_dir)
     server, port = serve(serve_dir)
 
-    kvm = os.access("/dev/kvm", os.R_OK | os.W_OK) and arch == {"x86_64": "amd64", "aarch64": "arm64"}.get(os.uname().machine)
-    boot_timeout = 300 if kvm else 1500
-    log(f"accelerator: {'kvm' if kvm else 'tcg (slow)'}")
-    vm = VM(arch, disk, workdir, kvm)
+    accel = pick_accel(arch)
+    boot_timeout = 300 if accel != "tcg" else 1500
+    log(f"accelerator: {accel}{' (slow)' if accel == 'tcg' else ''}")
+    vm = VM(arch, disk, workdir, accel)
     runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout, flock=flock)
     ok = False
     try:
         vm.start(conf["QEMU_SYSTEM"], port)
         runner.step("first boot: partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
+        if args.variant == "nvidia":
+            runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
         runner.step("reboot: machine-id, host key, journal persist", runner.reboot_persists)
         if args.only != "boot":
             runner.step("update into slot B", runner.update_to_b)

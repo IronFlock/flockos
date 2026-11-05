@@ -1,0 +1,34 @@
+#!/bin/sh
+# Points a Raspberry Pi cmdline.txt at a root slot (WP-5.2): its root= and
+# rauc.slot=. rauc-post-install runs it on the boot partition RAUC has just
+# written, whose cmdline.txt came from the bundle and names slot A.
+#   rpi-cmdline FILE PARTUUID BOOTNAME
+set -eu
+[ "$#" -eq 3 ] || {
+  echo "usage: rpi-cmdline FILE PARTUUID BOOTNAME" >&2
+  exit 2
+}
+file=$1 partuuid=$2 slot=$3
+case "$partuuid" in
+  *[!0-9a-fA-F-]* | '') echo "rpi-cmdline: not a PARTUUID: $partuuid" >&2 && exit 1 ;;
+esac
+case "$slot" in
+  A | B) ;;
+  *) echo "rpi-cmdline: not a slot: $slot" >&2 && exit 1 ;;
+esac
+[ -s "$file" ] || {
+  echo "rpi-cmdline: $file is missing" >&2
+  exit 1
+}
+line=$(head -n 1 "$file")
+for key in root rauc.slot; do
+  case " $line " in
+    *" $key="*) ;;
+    *) echo "rpi-cmdline: $file has no $key=" >&2 && exit 1 ;;
+  esac
+done
+line=$(printf '%s\n' "$line" | sed -E \
+  -e "s/(^| )root=[^ ]+/\1root=PARTUUID=$partuuid/" \
+  -e "s/(^| )rauc\.slot=[^ ]+/\1rauc.slot=$slot/")
+printf '%s\n' "$line" >"$file.new"
+mv "$file.new" "$file"

@@ -13,12 +13,13 @@ UEFI x86 edge PCs and industrial PCs (master plan, sections 3.2 and 3.7).
 | Disk | GPT: `FLOCKOS` (ESP, 256 MiB), `rootfs-a`; `rootfs-b` and `data` made on the first boot |
 | Watchdog | systemd uses a hardware watchdog when the board has one (60 s) |
 | Firmware updates | fwupd (lane 3); board UEFI only where the vendor publishes capsules (section 3.10) |
+| GPU (`nvidia`) | NVIDIA driver from the CUDA repository with the open kernel modules: Turing (RTX 20, T4) and newer; older GPUs need the proprietary modules, which FlockOS does not ship. Containers get the GPU through the `nvidia` runtime (`docker run --gpus all`) or CDI |
 
 ## Tested hardware
 
 | Board | UEFI version | Date | Result | Notes |
 |-------|--------------|------|--------|-------|
-| QEMU q35 + OVMF (CI) | Ubuntu 24.04 `ovmf` | every pull request | `image-test` | KVM on GitHub runners |
+| QEMU q35 + OVMF (CI) | Ubuntu 24.04 `ovmf` | every pull request | `image-test` | KVM on GitHub runners; `base` and `nvidia` (no GPU) |
 
 Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 
@@ -28,6 +29,9 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
   is needed; on boards that hide USB boot, enable it in the firmware setup.
 - Some IPC firmware enables a hardware watchdog in setup; FlockOS feeds it from
   systemd once booted.
+- `nvidia` on a GPU host (WP-4.2): `nvidia-smi` on the host and
+  `docker run --rm --gpus all nvidia/cuda:<version>-base-ubuntu24.04 nvidia-smi`
+  in a container, before and after an A/B update between two `nvidia` builds.
 
 ## Installer stick
 
