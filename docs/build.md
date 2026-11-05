@@ -153,9 +153,11 @@ unsigned; FlockOS 1.x boots without Secure Boot.
 
 ## The installer variant
 
-`just build amd64-efi installer` builds the FlockOS installer stick (master plan,
-section 3.6) from the base image built before it (`just build amd64-efi base`;
-`FLOCKOS_INSTALLER_PAYLOADS` names more variants). It is the base system plus
+`just build amd64-efi installer` (or `arm64-efi installer`) builds the FlockOS
+installer stick of that target (master plan, section 3.6) from the base image
+built before it (`just build amd64-efi base`; `FLOCKOS_INSTALLER_PAYLOADS`
+names more variants). The boot entry it writes names the target's loader
+(`BOOTX64.EFI`, `BOOTAA64.EFI`). It is the base system plus
 `profiles/installer` (the installer program, `efibootmgr`, its own `fstab`),
 with the base image embedded as `/usr/share/flockos/payload/<image>.img.zst`
 and its raw size next to it. It has no RAUC bundle, no slot B, no `/data`, no

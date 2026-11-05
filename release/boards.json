@@ -19,7 +19,7 @@
     "reflasher": false,
     "model": "arm64-efi",
     "modelname": "ARM64 machine with UEFI",
-    "images": ["flockos-arm64-efi-base", "flockos-arm64-efi-base-rt"]
+    "images": ["flockos-arm64-efi-base", "flockos-arm64-efi-base-rt", "flockos-arm64-efi-installer"]
   },
   {
     "architecture": "arm64",

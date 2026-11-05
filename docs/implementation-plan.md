@@ -55,24 +55,24 @@ decision), in progress.
 | 0.2 | Secrets hygiene | flockos, legacy repo, GCS | 1 | | done (VM password rotation is an owner action) |
 | 0.3 | Harness skeleton, docs, legacy tag, v0.9.0 | flockos | 2 | 0.1 | done |
 | 0.4 | `shell-gate.yml` in the harness | workflows | 2 | | done (#158) |
-| 0.5 | RAUC PKI in Cloud KMS and `docs/signing.md` | GCP, flockos | 2 | | open: the owner runs the ceremony |
+| 0.5 | RAUC PKI in Cloud KMS and `docs/signing.md` | GCP, flockos | 2 | | done (ceremony 2026-11-05, #167) |
 | 0.6 | Security scan switches from report-only to blocking | flockos | 0.5 | 0.3 | open (due 2026-11-18) |
 | 1.1 | Build framework and `base` rootfs | flockos | 3 | 0.3 | done (#155) |
 | 1.2 | `amd64-efi` target: GRUB, partitions, disk image | flockos | 3 | 1.1 | done (#155) |
 | 1.3 | Shared overlay: `/data` redirections, os-release, enroll placeholder | flockos | 2 | 1.1 | done (#155) |
 | 1.4 | RAUC integration and bundle build | flockos | 3 | 1.2, 1.3 | done (#155) |
 | 1.5 | QEMU test harness and `image-test` job | flockos | 3 | 1.4 | done (#155) |
-| 1.6 | Release signing through KMS/PKCS#11; `build` and `sign` jobs | flockos | 2 | 0.5, 1.4 | blocked on 0.5 |
+| 1.6 | Release signing through KMS/PKCS#11; `build` and `sign` jobs | flockos | 2 | 0.5, 1.4 | done (#168); the KMS signature is first used by the first release |
 | 1.7 | fwupd in the image | flockos | 1 | 1.3 | done (#155) |
-| 1.8 | Rootfs vulnerability scan and SBOM in `security.yml` | flockos, workflows | 1 | 1.1 | open |
+| 1.8 | Rootfs vulnerability scan and SBOM in `security.yml` | flockos, workflows | 1 | 1.1 | done (#169, the harness's rootfs-recipe input) |
 | 1.9 | Hardware acceptance on an x86 IPC; target and testing docs | flockos, hardware | 2 | 1.5 | open: needs an x86 IPC |
 | 2.0 | Decisions before Phase 2 (hostname, channels, first firmware lane) | all | 0.5 | | done (ADR-0009) |
 | 2.1 | `ironflock-init bake` | device-init | 2 | 2.0 | done (device-init 1.4.9) |
 | 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e |
 | 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
-| 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | open |
-| 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | open |
-| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | blocked on 1.6 |
+| 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done in device-agent #202; in the next agent release |
+| 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009) |
+| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | in progress (#170) |
 | 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | blocked on 2.6 |
 | 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | blocked on 2.4 |
 | 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | blocked on 2.5 |
@@ -96,7 +96,7 @@ decision), in progress.
 | 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |
 | 6.6 | Jetson hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 5 | 6.4, 6.5 | open |
 | 6.7 | Follow-up: Jetson RT kernel | flockos | 5 | 6.6, 4b.1 | open |
-| 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | done (#161); open: the arm64-efi installer |
+| 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | done (#161; arm64-efi installer #172) |
 | 7.2 | ReswarmOS migration guide and sunset | flockos, GCS, flasher, device-agent | 2 | 2.10 | open |
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
 | X.1 | Public install guides per target | website | 1 per target | 2.10, 5.4, 6.6 | open |

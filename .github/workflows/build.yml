@@ -1,6 +1,6 @@
 # The FlockOS images, each built in the build container
 # (build/run-in-builder.sh): every target, variant and kernel, and the
-# amd64-efi installer stick carrying the base image. Called by ci.yml with
+# installer sticks of amd64-efi and arm64-efi carrying their base images. Called by ci.yml with
 # signing dev (throwaway keys, images and bundles trust only each other) and
 # by release.yml with signing release (the images trust the FlockOS root CA;
 # each bundle is sealed with a key of its build and gets its release
@@ -115,15 +115,25 @@ jobs:
           compression-level: 0
           retention-days: 3
 
-  # The installer stick of amd64-efi, carrying the base image built above.
+  # The installer sticks of the EFI targets, each carrying its target's base
+  # image built above.
   installer:
+    name: installer (${{ matrix.target }})
     needs: [image]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: amd64-efi
+            runner: ubuntu-latest
+          - target: arm64-efi
+            runner: ubuntu-24.04-arm
     env:
-      TARGET: amd64-efi
+      TARGET: ${{ matrix.target }}
       VARIANT: base
       FLOCKOS_SIGNING: ${{ inputs.signing }}
     steps:
