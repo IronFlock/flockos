@@ -71,6 +71,10 @@ test:
 build TARGET="amd64-efi" VARIANT="base" KERNEL="std":
     build/run-in-builder.sh {{ TARGET }} {{ VARIANT }} {{ KERNEL }}
 
+# Build only an image's root tree (no disk image, no bundle), for the rootfs scan; in ROOTFS_WORK when set (the harness)
+rootfs TARGET="amd64-efi" VARIANT="base" KERNEL="std":
+    FLOCKOS_STAGES=rootfs FLOCKOS_WORK="${ROOTFS_WORK:-${FLOCKOS_WORK:-flockos-work}}" build/run-in-builder.sh {{ TARGET }} {{ VARIANT }} {{ KERNEL }}
+
 # Re-sign a release build's sealed bundles in out/ (dry-run: a throwaway stand-in signer)
 sign-bundles MODE="dry-run":
     build/sign-in-builder.sh {{ MODE }}

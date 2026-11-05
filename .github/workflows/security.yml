@@ -1,7 +1,7 @@
 # Security screening from the shared IronFlock CI harness: secrets (gitleaks),
-# semgrep, configuration, licences, and the Go module of tools/rauc-pki
-# (govulncheck, SBOM). The scan of the built root filesystem runs in ci.yml
-# (`rootfs-scan`), where the image is built; master plan, section 3.8.
+# semgrep, configuration, licences, the Go module of tools/rauc-pki
+# (govulncheck, SBOM), and the packages of every FlockOS image (the
+# harness's rootfs-recipe input below; master plan, section 3.8; WP-1.8).
 #
 # Report-only for the first two weeks, as the harness README asks; then set
 #   fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
@@ -13,7 +13,8 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Mondays 06:41 UTC: catch findings against unchanged code.
+    # Mondays 06:41 UTC: catch findings against unchanged code, and against
+    # the packages of unchanged images.
     - cron: "41 6 * * 1"
   workflow_dispatch:
 
@@ -37,3 +38,19 @@ jobs:
       fail-on: ""
       # Public repository: findings also go to the Security tab.
       code-scanning: true
+      # The packages of every image (WP-1.8): `just rootfs` builds each
+      # image's root tree in ROOTFS_WORK (no disk image), and the harness
+      # scans it with trivy rootfs: SARIF of the vulnerabilities with a fix,
+      # counted by `security / report` and shown in code scanning, and the
+      # CycloneDX SBOM as the artifact security-rootfs-sbom-<name>. The images
+      # of build.yml (test/unit/release-signing.bats checks it).
+      rootfs-recipe: rootfs
+      rootfs-matrix: >-
+        [
+          {"name": "amd64-efi-base", "args": "amd64-efi base std", "path": "flockos-amd64-efi-base/rootfs"},
+          {"name": "amd64-efi-base-rt", "args": "amd64-efi base rt", "path": "flockos-amd64-efi-base-rt/rootfs"},
+          {"name": "amd64-efi-nvidia", "args": "amd64-efi nvidia std", "path": "flockos-amd64-efi-nvidia/rootfs"},
+          {"name": "arm64-efi-base", "args": "arm64-efi base std", "path": "flockos-arm64-efi-base/rootfs", "runner": "ubuntu-24.04-arm"},
+          {"name": "arm64-efi-base-rt", "args": "arm64-efi base rt", "path": "flockos-arm64-efi-base-rt/rootfs", "runner": "ubuntu-24.04-arm"},
+          {"name": "rpi-arm64-base", "args": "rpi-arm64 base std", "path": "flockos-rpi-arm64-base/rootfs", "runner": "ubuntu-24.04-arm"}
+        ]

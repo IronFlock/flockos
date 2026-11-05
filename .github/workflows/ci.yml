@@ -205,97 +205,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The packages of the built image against the vulnerability database
-  # (trivy rootfs over slot A, mounted read-only) and its CycloneDX SBOM.
-  # Report-only: Debian always carries some unfixed CVEs; the release gate
-  # comes with security.yml's rootfs input (master plan, section 3.8).
-  rootfs-scan:
-    name: rootfs-scan (${{ matrix.target }}, ${{ matrix.variant }})
-    needs: [build]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: amd64-efi
-            variant: base
-            runner: ubuntu-latest
-            rootfs-part: 2
-          - target: amd64-efi
-            variant: nvidia
-            runner: ubuntu-latest
-            rootfs-part: 2
-          - target: arm64-efi
-            variant: base
-            runner: ubuntu-24.04-arm
-            rootfs-part: 2
-          - target: rpi-arm64
-            variant: base
-            runner: ubuntu-24.04-arm
-            rootfs-part: 4
-    env:
-      TARGET: ${{ matrix.target }}
-      VARIANT: ${{ matrix.variant }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: v1
-          path: .harness
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-            tools.lock
-          sparse-checkout-cone-mode: false
-      - name: move harness out of the workspace
-        run: |
-          mv .harness "$RUNNER_TEMP/harness"
-          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: image-${{ env.TARGET }}-${{ env.VARIANT }}
-          path: image
-      - name: install trivy (tools.lock)
-        run: '"$HARNESS/scripts/install-tool.sh" trivy'
-      - name: mount slot A read-only
-        env:
-          ROOTFS_PART: ${{ matrix.rootfs-part }}
-        run: |
-          sudo mkdir -p /mnt/scan /mnt/rootfs
-          gunzip -c image/*.img.gz | sudo dd of=/mnt/scan/disk.img bs=16M conv=sparse status=none
-          dev=$(sudo losetup --find --show --partscan --read-only /mnt/scan/disk.img)
-          sudo mount -o ro "${dev}p${ROOTFS_PART}" /mnt/rootfs
-          echo "LOOPDEV=$dev" >> "$GITHUB_ENV"
-      - name: trivy rootfs
-        run: |
-          mkdir -p scan
-          name=$(basename image/*.img.gz .img.gz)
-          sudo env "PATH=$PATH" trivy rootfs --quiet --scanners vuln --format cyclonedx --output "scan/$name.sbom.cdx.json" /mnt/rootfs
-          sudo env "PATH=$PATH" trivy rootfs --quiet --scanners vuln --format sarif --output "scan/$name.rootfs.sarif" /mnt/rootfs
-          sudo env "PATH=$PATH" trivy rootfs --quiet --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --format table /mnt/rootfs | tee scan/summary.txt
-          sudo chown -R "$(id -u):$(id -g)" scan
-          {
-            echo "### Root filesystem scan (HIGH and CRITICAL with a fix available)"
-            echo '```'
-            tail -n 60 scan/summary.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: unmount
-        if: ${{ always() }}
-        run: |
-          sudo umount /mnt/rootfs || true
-          [ -z "${LOOPDEV:-}" ] || sudo losetup -d "$LOOPDEV" || true
-      - name: upload SBOM and findings
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: rootfs-scan-${{ env.TARGET }}-${{ env.VARIANT }}
-          path: scan/
-          if-no-files-found: error
-          retention-days: 30
-
   # The Raspberry Pi image without a Pi (no QEMU for its firmware boot):
   # layout, autoboot.txt, the boot files and cmdline.txt of boot-a, slot A's
   # tree, and the image's own binaries in a chroot on the arm64 runner. The
@@ -344,13 +253,13 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, pki-tool, build, image-test, rootfs-scan, rpi-check, install-test, workflows, intent, release-build]
+    needs: [gate, pki-tool, build, image-test, rpi-check, install-test, workflows, intent, release-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rootfs-scan.result }} ${{ needs.rpi-check.result }} ${{ needs.install-test.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
+          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rpi-check.result }} ${{ needs.install-test.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
           RELEASE_BUILD: ${{ needs.release-build.result }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |
