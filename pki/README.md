@@ -1,6 +1,7 @@
-# FlockOS RAUC certificates
+# FlockOS public keys
 
-Public certificates of the FlockOS RAUC PKI (ADR-0006, [docs/signing.md](../docs/signing.md)).
+Public certificates of the FlockOS RAUC PKI (ADR-0006, [docs/signing.md](../docs/signing.md))
+and the public key of the release catalog (ADR-0009, [docs/release.md](../docs/release.md)).
 The private keys never leave Cloud KMS.
 
 | File | What | Valid |
@@ -19,5 +20,24 @@ version is disabled between certificate issues.
 
 Check a copy with `openssl x509 -in <file> -noout -fingerprint -sha256` and the
 chain with `openssl verify -CAfile flockos-root-ca.pem flockos-bundle-signer-2026.pem`.
-Until release signing is wired into `release.yml` (WP-1.6), every build still
-signs with throwaway keys.
+Release builds trust the root CA, and `release.yml` signs their bundles with the
+bundle signer (WP-1.6); every other build signs with throwaway keys.
+
+## The catalog key
+
+`flockos-catalog.pub` verifies the signed catalog `dl/flockos/manifest.json`
+(ADR-0009). The device-agent checks the catalog with it (`FLOCKOS_CATALOG_PUBLIC_KEYS`),
+and so does `release.yml` before it moves a release (`tools/catalog verify`).
+
+| | |
+|---|---|
+| Key | `ironflock-release/flockos-catalog`, version 1: Ed25519 (`EC_SIGN_ED25519`), software protection, as the agent's `agent-update` key |
+| Signer | only `flockos-release`, the release identity (`roles/cloudkms.signerVerifier` on this key) |
+| Raw public key (base64, the agent's form) | `wFLa1T7iHYi20X8JVu/O6JUzBGmW2+tjo7QVMuxsmQg=` |
+| SHA-256 of the DER public key | `e47e098ac89eefa24e62f607703063010c9f0b4e4c78243fe44f72be8d7a4927` |
+
+Created by `tools/release-setup.sh` on 2026-11-05 (WP-2.6), with the publisher
+identity `flockos-publisher`. Check a copy against Cloud KMS with
+`gcloud kms keys versions get-public-key 1 --key flockos-catalog --keyring ironflock-release --location europe-west1 --project record-1283`,
+and get the agent's form with
+`openssl pkey -pubin -in flockos-catalog.pub -outform DER | tail -c 32 | base64`.
