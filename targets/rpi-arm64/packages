@@ -1,0 +1,13 @@
+# Packages of the rpi-arm64 target, on top of profiles/base/packages, from the
+# Raspberry Pi archive (build/mkrootfs.sh pins that archive below Debian
+# except for these and what only it has).
+# Kernels: rpi-v8 for Pi 4, 400 and CM4 (kernel8.img), rpi-2712 for Pi 5 and
+# CM5 (kernel_2712.img); the firmware picks by model.
+linux-image-rpi-v8
+linux-image-rpi-2712
+# start4.elf and friends; its kernel and initramfs hooks fill /boot/firmware
+raspi-firmware
+# the bootloader EEPROM of Pi 4 and Pi 5 (rpi-eeprom-update, WP-5.3)
+rpi-eeprom
+# WiFi firmware with the Pi boards' NVRAM files (the archive's build)
+firmware-brcm80211

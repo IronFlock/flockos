@@ -19,8 +19,7 @@ valid_target "$TARGET" || die "unknown target $TARGET"
 valid_variant "$VARIANT" || die "unknown variant $VARIANT"
 valid_kernel "$KERNEL" || die "unknown kernel $KERNEL"
 case "$VARIANT" in
-  base) ;;
-  nvidia) die "the nvidia variant arrives with Phase 4 (WP-4.1)" ;;
+  base | nvidia) ;;
   installer) die "the installer variant arrives with Phase 3 (WP-3.2)" ;;
 esac
 [ "$KERNEL" = std ] || die "the rt kernel arrives with Phase 4b (WP-4b.1)"
@@ -31,6 +30,7 @@ FLOCKOS_SIGNING=${FLOCKOS_SIGNING:-dev}
 
 load_conf "$src/targets/$TARGET/target.conf"
 load_conf "$src/profiles/base/versions"
+[ -f "$src/profiles/$VARIANT/versions" ] && load_conf "$src/profiles/$VARIANT/versions"
 [ "$(dpkg --print-architecture)" = "$ARCH" ] || die "target $TARGET is $ARCH; this build container is $(dpkg --print-architecture)"
 
 IMAGE_ID=$(image_id "$TARGET" "$VARIANT" "$KERNEL")
@@ -56,15 +56,25 @@ log "$NAME: customisation"
 bash "$here/customize.sh"
 
 log "$NAME: disk image"
-bash "$here/mkimage.sh"
+case "$BOOTLOADER" in
+  grub-efi) bash "$here/mkimage.sh" ;;
+  rpi) bash "$here/mkimage-rpi.sh" ;;
+  *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
+esac
 
-log "$NAME: RAUC bundle"
-bash "$here/mkbundle.sh"
+# The Pi's bundle holds its boot partition as well, with the A/B backend
+# (WP-5.2); until then rpi-arm64 builds the image only.
+if [ "$BOOTLOADER" != rpi ]; then
+  log "$NAME: RAUC bundle"
+  bash "$here/mkbundle.sh"
+fi
 
 log "$NAME: checksums"
 (
   cd "$OUT"
-  sha256sum -- *.img.gz *.raucb >SHA256SUMS
+  files=(*.img.gz)
+  [ "$BOOTLOADER" = rpi ] || files+=(*.raucb)
+  sha256sum -- "${files[@]}" >SHA256SUMS
   cat SHA256SUMS
 )
 chown -R "${FLOCKOS_HOST_UID:-0}:${FLOCKOS_HOST_GID:-0}" "$OUT"
