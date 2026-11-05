@@ -1,6 +1,7 @@
 # ADR-0008: Jetson Orin on Jetson Linux r39.2.1 (JetPack 7.2.1), Ubuntu 24.04
 
-Status: proposed, 2026-11-05 (WP-6.1). Needs the owner's acceptance before WP-6.2.
+Status: accepted, 2026-11-05 (WP-6.1), on one condition: the licence review below passes
+before FlockOS publishes a Jetson image.
 
 ## Context
 
@@ -29,7 +30,7 @@ Sources: NVIDIA's [Jetson Linux](https://developer.nvidia.com/embedded/jetson-li
 index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
 [JetPack 7.2 notes](https://github.com/OE4T/meta-tegra/blob/master/docs/release-notes/JetPack-7.2-L4T-R39.2.0-Notes.md).
 
-## Decision (proposed)
+## Decision
 
 1. `jetson-orin` is built on **Jetson Linux r39.2.1** with an **Ubuntu 24.04** (noble)
    userspace, pinned per FlockOS release (`L4T_VERSION` in the target).
@@ -65,14 +66,16 @@ index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
   re-checked there.
 - The RT kernel follow-up (WP-6.7) is evaluated on r39.2.1.
 
-## Open before acceptance
+## Condition and open points
 
-- Licence review of what the image redistributes: the `nvidia-l4t-*` packages and the
-  BSP's bootloader binaries are under NVIDIA's Jetson software licence, not an open
-  source licence. The images carry them as NVIDIA's own SDK Manager images do, but this
-  needs a legal check before FlockOS publishes Jetson images.
-- Which Orin modules and carrier boards FlockOS supports first: the master plan says the
-  Orin Nano developer kit (SD image) and Orin NX (flash package).
+- Condition: a licence review of what the image redistributes. The `nvidia-l4t-*`
+  packages and the BSP's bootloader binaries are under NVIDIA's Jetson software licence,
+  not an open source licence. The images carry them as NVIDIA's own SDK Manager images
+  do, but a legal check must pass before FlockOS publishes a Jetson image (the release
+  of WP-6.6). Building and testing in CI does not wait for it.
+- First modules and carrier boards: the master plan's Orin Nano developer kit (SD image)
+  and Orin NX (flash package), unless the hardware available for the acceptance tests
+  says otherwise (master plan, open question 3).
 
 ## When to revisit
 

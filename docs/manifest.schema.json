@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/IronFlock/flockos/blob/main/docs/manifest.schema.json",
+  "title": "FlockOS release manifest (dl/flockos/manifest.json payload), schema 1",
+  "description": "The document the release pipeline signs and publishes as dl/flockos/manifest.json (ADR-0009). Published inside the device-agent's envelope: {\"payload\": \"<base64 of this document>\", \"signature\": \"<base64 Ed25519 signature>\"}, at most 64 KiB, signed over the message \"flockos-manifest:v1\\nflockos/manifest.json\\n<sha256 hex of the payload>\". The device-agent reads channels, releases and images; FlockFlasher reads boards. Readers ignore fields they do not know; a change that breaks a reader raises schema.",
+  "type": "object",
+  "required": ["schema", "issued_at", "channels", "releases", "boards"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": 1 },
+    "issued_at": {
+      "description": "When the pipeline signed this document (UTC). A reader refuses a document older than the one it last accepted.",
+      "$ref": "#/$defs/time"
+    },
+    "channels": {
+      "description": "The FlockOS version each channel offers. Test devices follow test, all others production. Promoting a release moves production to its version.",
+      "type": "object",
+      "required": ["production"],
+      "additionalProperties": false,
+      "properties": {
+        "production": { "$ref": "#/$defs/version" },
+        "test": { "$ref": "#/$defs/version" }
+      }
+    },
+    "releases": {
+      "description": "The releases a channel names, by version; no others.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/version" },
+      "additionalProperties": { "$ref": "#/$defs/release" }
+    },
+    "boards": {
+      "description": "FlockFlasher's view of the production release, in the shape it already parses (SupportedBoard). A target that fits several boards (rpi-arm64: Pi 4, 400, 5, CM4, CM5) lists its images under each.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/board" }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "url": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["url", "sha256", "size"],
+      "properties": {
+        "url": { "$ref": "#/$defs/url" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "release": {
+      "type": "object",
+      "required": ["build_id", "buildtime", "min_agent", "images"],
+      "additionalProperties": false,
+      "properties": {
+        "build_id": {
+          "description": "BUILD_ID of the release's os-release: <UTC build time>Z-g<commit>.",
+          "type": "string",
+          "pattern": "^[0-9]{8}T[0-9]{6}Z-g[0-9a-f]{7,40}$"
+        },
+        "buildtime": { "$ref": "#/$defs/time" },
+        "min_agent": {
+          "description": "The oldest device-agent that may install this release's bundles. An older agent updates itself first.",
+          "$ref": "#/$defs/version"
+        },
+        "images": {
+          "description": "Every image of the release, by IMAGE_ID (os-release), which is also the RAUC compatible.",
+          "type": "object",
+          "propertyNames": { "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" },
+          "additionalProperties": { "$ref": "#/$defs/image" }
+        }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["target", "variant", "kernel", "architecture", "image"],
+      "additionalProperties": false,
+      "properties": {
+        "target": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+        "variant": { "enum": ["base", "nvidia", "installer"] },
+        "kernel": { "enum": ["std", "rt"] },
+        "architecture": { "enum": ["amd64", "arm64"] },
+        "image": {
+          "description": "The raw disk image, <image-id>-<version>.img.gz, as FlockFlasher writes it.",
+          "$ref": "#/$defs/artifact"
+        },
+        "bundle": {
+          "description": "The RAUC bundle, <image-id>-<version>.raucb. The device-agent downloads it, checks size and sha256, and hands it to RAUC, which checks the signature and compatible. The installer has none.",
+          "allOf": [
+            { "$ref": "#/$defs/artifact" },
+            {
+              "type": "object",
+              "required": ["compatible"],
+              "properties": { "compatible": { "type": "string" } }
+            }
+          ]
+        }
+      },
+      "if": { "properties": { "variant": { "const": "installer" } } },
+      "then": { "not": { "required": ["bundle"] } },
+      "else": { "required": ["bundle"] }
+    },
+    "board": {
+      "description": "FlockFlasher's SupportedBoard (src/types/index.ts).",
+      "type": "object",
+      "required": ["architecture", "board", "boardname", "cpu", "docs", "reflasher", "model", "modelname", "latestImages"],
+      "properties": {
+        "architecture": { "enum": ["amd64", "arm64"] },
+        "board": { "type": "string" },
+        "boardname": { "type": "string" },
+        "cpu": { "type": "string" },
+        "docs": { "$ref": "#/$defs/url" },
+        "reflasher": { "type": "boolean" },
+        "model": { "type": "string" },
+        "modelname": { "type": "string" },
+        "latestImages": {
+          "description": "One entry per image of the board, base first: FlockFlasher before WP-2.7 takes latestImages[0].",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/imageInfo" }
+        }
+      }
+    },
+    "imageInfo": {
+      "description": "FlockFlasher's ImageInfo, plus image_id, variant and kernel for its variant choice (WP-2.7).",
+      "type": "object",
+      "required": ["buildtime", "download", "file", "osname", "osvariant", "sha256", "size", "update", "version", "image_id", "variant", "kernel"],
+      "properties": {
+        "buildtime": { "$ref": "#/$defs/time" },
+        "download": { "$ref": "#/$defs/url" },
+        "file": {
+          "description": "The last path segment of download.",
+          "type": "string",
+          "pattern": "^[^/]+\\.img\\.gz$"
+        },
+        "osname": { "const": "FlockOS" },
+        "osvariant": {
+          "description": "How FlockFlasher writes it: always image, a raw image with the .flock copied onto its FLOCKOS partition (ADR-0004).",
+          "const": "image"
+        },
+        "sha256": {
+          "description": "Of the .img.gz file, as download serves it.",
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "description": "Of the .img.gz file, in bytes.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "update": {
+          "description": "The RAUC bundle's URL; empty for the installer.",
+          "anyOf": [{ "$ref": "#/$defs/url" }, { "const": "" }]
+        },
+        "version": { "$ref": "#/$defs/version" },
+        "image_id": { "type": "string", "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" },
+        "variant": { "enum": ["base", "nvidia", "installer"] },
+        "kernel": { "enum": ["std", "rt"] }
+      }
+    }
+  }
+}
