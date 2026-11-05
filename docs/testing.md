@@ -115,8 +115,9 @@ the hardware checklist below (WP-5.4).
 
 ## Jetson root tree checks
 
-`jetson-orin` has no disk image yet (WP-6.2). CI builds its root tree with
-`just rootfs jetson-orin base` on the arm64 runner and runs
+`jetson-orin` has no disk image of FlockOS's own: NVIDIA's flash tools write
+its disk (WP-6.2). CI builds slot A's filesystem image and the bundle with
+`just build jetson-orin base` on the arm64 runner and runs
 `sudo test/image/jetson-rootfs-check.sh <tree>`. The script checks the L4T
 packages at the pinned versions, the Ubuntu, Docker and NVIDIA sources with
 the pins, kernel, initrd and `nvgpu`, the RAUC slots, units and masks, the
