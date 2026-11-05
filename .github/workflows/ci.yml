@@ -326,8 +326,15 @@ jobs:
         with:
           name: image-jetson-orin-base
           path: image
+      # NVIDIA's l4t_initrd_flash.sh looks for Jetsons on the USB buses even
+      # with --no-flash and fails where there is no bus at all, as on the
+      # runner: in a mount namespace of its own it sees one empty bus.
       - name: tegra-flash-package (offline, Orin Nano 8GB developer kit)
-        run: sudo build/tegra-flash-package.sh /mnt/l4t/Linux_for_Tegra image/flockos-jetson-orin-base-*.rootfs.ext4.zst jetson-orin-nano-devkit 3767 0003
+        run: |
+          # shellcheck disable=SC2016 # "$@" belongs to the inner bash
+          sudo unshare -m bash -c 'mount -t tmpfs flockos-no-usb /sys/bus/usb/devices && mkdir /sys/bus/usb/devices/usb1 && exec "$@"' bash \
+            build/tegra-flash-package.sh /mnt/l4t/Linux_for_Tegra image/flockos-jetson-orin-base-*.rootfs.ext4.zst \
+            jetson-orin-nano-devkit 3767 0003
       - name: what the package holds
         if: ${{ always() }}
         run: |
