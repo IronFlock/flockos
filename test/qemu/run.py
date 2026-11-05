@@ -38,12 +38,16 @@ import uuid
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # The guest device of the debug shell per architecture (see the docstring).
+# systemd starts a getty on a virtio console by itself; on the test's hvc0 it
+# would take the terminal from the shell.
 DEBUG_SHELL = {"amd64": "ttyS1", "arm64": "hvc0"}
 HOST_ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(os.uname().machine)
 
 
 def debug_cmdline(arch):
-    return f"systemd.debug_shell={DEBUG_SHELL[arch]}"
+    tty = DEBUG_SHELL[arch]
+    extra = f" systemd.mask=serial-getty@{tty}.service" if tty.startswith("hvc") else ""
+    return f"systemd.debug_shell={tty}{extra}"
 FIRMWARE = {
     "amd64": [
         ("/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_VARS_4M.fd"),
@@ -181,7 +185,10 @@ class VM:
             cmd += ["-machine", "q35", "-device", "i6300esb"]
         else:
             cmd += ["-machine", "virt"]
-        cmd += ["-accel", self.accel, "-cpu", "host" if self.accel != "tcg" else "max"]
+        # Emulated arm64: QEMU's own pointer-authentication algorithm is far
+        # faster to emulate than the architected one.
+        cpu = "host" if self.accel != "tcg" else ("max,pauth-impdef=on" if self.arch == "arm64" else "max")
+        cmd += ["-accel", self.accel, "-cpu", cpu]
         cmd += ["-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}"]
         if vars_template:
             cmd += ["-drive", f"if=pflash,format=raw,unit=1,file={vars_copy}"]
