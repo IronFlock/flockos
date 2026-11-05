@@ -12,7 +12,8 @@ on the second serial port on amd64 (ttyS1), on a virtio console on arm64
 partition, so the shell is there on both slots, before and after an update.
 
 Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (partitions grown, /data
-layout, identity, SSH policy, RAUC slot A good, Docker, fwupd); reboot
+layout, identity, SSH policy, RAUC slot A good, Docker, fwupd); for nvidia
+the driver, its modules and the container runtime without a GPU; reboot
 (state persists); update into slot B with the bundle of the same build;
 fallback: an update into slot A that is never marked good falls back to B.
 
@@ -458,6 +459,42 @@ class Runner:
         if first:
             self.vm.run(f"test ! -e /boot/efi/{self.flock}")
 
+    def nvidia(self):
+        """An nvidia image (WP-4.1) on a VM without a GPU: the driver and the
+        open modules at the pinned version, built for the image's kernel; no
+        compiler, DKMS or headers left; nouveau blacklisted in the initramfs;
+        the nvidia runtime in Docker; nothing of NVIDIA's runs, so nothing
+        fails (wait_running checked that)."""
+        nv = load_conf(os.path.join(REPO, "profiles", "nvidia", "versions"))
+        driver = nv["NVIDIA_DRIVER_VERSION"]
+        modver = driver.rsplit("-", 1)[0]
+        got = self.vm.run("modinfo -F version nvidia").strip()
+        if got != modver:
+            raise TestFailure(f"the nvidia module is version {got!r}, not {modver}")
+        kver = self.vm.run("uname -r").strip()
+        vermagic = self.vm.run("modinfo -F vermagic nvidia").split()
+        if not vermagic or vermagic[0] != kver:
+            raise TestFailure(f"the nvidia module is built for {vermagic[:1]}, the kernel is {kver}")
+        want = {"nvidia-driver-cuda": driver, "flockos-nvidia-modules": driver, "firmware-nvidia-gsp": driver,
+                "nvidia-container-toolkit": nv["NVIDIA_CONTAINER_TOOLKIT_VERSION"]}
+        out = self.vm.run("dpkg-query -W -f '${Package} ${Version}\\n' " + " ".join(want))
+        have = dict(line.split() for line in out.splitlines() if len(line.split()) == 2)
+        for pkg, ver in want.items():
+            if have.get(pkg) != ver:
+                raise TestFailure(f"{pkg} is {have.get(pkg)!r}, not {ver}")
+        self.vm.run("for t in cc gcc g++ make dkms; do if command -v $t; then exit 1; fi; done")
+        self.vm.run("test ! -e /var/lib/dkms && ! ls -d /usr/src/linux-headers-* /usr/src/nvidia-* 2>/dev/null")
+        self.vm.run("test -x /usr/bin/nvidia-smi && test -x /usr/bin/nvidia-container-runtime")
+        self.vm.run(f"test -n \"$(ls /lib/firmware/nvidia/{modver}/gsp_*.bin)\"")
+        self.vm.run("modprobe -c | grep -qx 'blacklist nouveau'")
+        self.vm.run("lsinitramfs /initrd.img | grep -q 'etc/modprobe.d/nvidia.conf'", timeout=180)
+        self.vm.run("! lsmod | grep -qE '^(nvidia|nouveau) '")
+        self.vm.run("! systemctl -q is-enabled nvidia-persistenced.service nvidia-powerd.service")
+        runtimes = self.vm.run("docker info --format '{{json .Runtimes}}'")
+        if '"nvidia"' not in runtimes:
+            raise TestFailure(f"Docker has no nvidia runtime: {runtimes}")
+        self.vm.run("nvidia-ctk --version && nvidia-container-cli --version")
+
     def reboot_persists(self):
         self.vm.reboot(self.boot_timeout)
         self.wait_running()
@@ -532,7 +569,7 @@ def main():
     ap.add_argument("--kernel", default="std")
     ap.add_argument("--out", default=os.path.join(REPO, "out"))
     ap.add_argument("--work")
-    ap.add_argument("--disk-size", default="20G")
+    ap.add_argument("--disk-size", help="virtual disk size (default 20G; 32G for nvidia's 8 GiB slots)")
     ap.add_argument("--docker-image-tar", help="docker save output of hello-world, loaded and run in the VM")
     ap.add_argument("--keep", action="store_true", help="keep the work directory")
     ap.add_argument("--only", choices=["boot", "update"], help="stop after this part")
@@ -560,7 +597,8 @@ def main():
     log(f"work directory {workdir}")
     with gzip.open(img_gz, "rb") as src, open(disk, "wb") as dst:
         shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
-    size = {"G": 1024**3, "M": 1024**2}[args.disk_size[-1]] * int(args.disk_size[:-1])
+    disk_size = args.disk_size or ("32G" if args.variant == "nvidia" else "20G")
+    size = {"G": 1024**3, "M": 1024**2}[disk_size[-1]] * int(disk_size[:-1])
     os.truncate(disk, size)
     set_test_cmdline(disk, workdir, debug_cmdline(arch))
     flock = None if args.no_flock else put_test_flock(disk, workdir)
@@ -587,6 +625,8 @@ def main():
     try:
         vm.start(conf["QEMU_SYSTEM"], port)
         runner.step("first boot: partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
+        if args.variant == "nvidia":
+            runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
         runner.step("reboot: machine-id, host key, journal persist", runner.reboot_persists)
         if args.only != "boot":
             runner.step("update into slot B", runner.update_to_b)
