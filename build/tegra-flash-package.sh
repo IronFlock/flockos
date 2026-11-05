@@ -144,4 +144,17 @@ slot_bytes=$(size_bytes "$SLOT_SIZE_BASE")
     --external-device nvme0n1 -c "$layout" -S "$slot_bytes" \
     --external-only "$board" external
 )
-log "flash package: $kf/images"
+# --- what the package holds: FlockOS's layout -------------------------------
+# flash.idx lists each partition: "<n>, <dev>:<name>, <start>, <size>, <file>,
+# <file size>, <fixed|expand>-<reserved>-<gpt entry>, <sha1>".
+idx=$kf/images/external/flash.idx
+[ -f "$idx" ] || die "the package has no flash index ($idx)"
+for slot in APP APP_b; do
+  grep -qE "^[0-9]+, [0-9]+:[0-9]+:$slot, [0-9]+, $slot_bytes, " "$idx" ||
+    die "the package's $slot is not $SLOT_SIZE_BASE ($slot_bytes bytes)"
+done
+grep -qE '^[0-9]+, [0-9]+:[0-9]+:data, [0-9]+, [0-9]+, , , expand-' "$idx" ||
+  die "the package's data partition does not grow to the end of the disk"
+grep -qx 'external_device=nvme0n1' "$kf/images/external/flash.cfg" ||
+  die "the package does not flash nvme0n1"
+log "flash package: $kf/images (APP and APP_b $SLOT_SIZE_BASE, data to the end of nvme0n1)"
