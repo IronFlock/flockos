@@ -345,3 +345,41 @@ func mustKey(t *testing.T, text string) ed25519.PublicKey {
 	must(t, err)
 	return k
 }
+
+func TestMoveAPublishedReleaseToProduction(t *testing.T) {
+	key, pub, _ := keyFile(t)
+	t0 := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	first := catalogFor(t, nil, "1.0.0", "test", t0)
+	second := catalogFor(t, &first, "1.0.1", "test", t0.Add(time.Hour))
+	tmp := t.TempDir()
+	payload, manifest := filepath.Join(tmp, "p.json"), filepath.Join(tmp, "m.json")
+	data, err := json.MarshalIndent(second, "", "  ")
+	must(t, err)
+	must(t, os.WriteFile(payload, data, 0o644))
+	must(t, run([]string{"sign", "-payload", payload, "-key-file", key, "-pubkey", pub, "-o", manifest}, os.Stdout))
+
+	oldNow := now
+	t.Cleanup(func() { now = oldNow })
+	now = func() time.Time { return t0.Add(2 * time.Hour) }
+	boards := filepath.Join(repoRoot, "release", "boards.json")
+	var out bytes.Buffer
+	must(t, run([]string{"build", "-version", "1.0.1", "-channel", "production", "-boards", boards, "-previous", manifest, "-pubkey", pub}, &out))
+	var c Catalog
+	must(t, json.Unmarshal(out.Bytes(), &c))
+	if c.Channels["production"] != "1.0.1" || c.Channels["test"] != "1.0.1" || len(c.Releases) != 1 {
+		t.Fatalf("channels %v, releases %v", c.Channels, keys(c.Releases))
+	}
+	if c.Releases["1.0.1"].BuildID != second.Releases["1.0.1"].BuildID {
+		t.Fatal("the release moved changed")
+	}
+	if c.Boards[0].LatestImages[0].Version != "1.0.1" {
+		t.Fatal("FlockFlasher's boards do not show the new production release")
+	}
+
+	if err := run([]string{"build", "-version", "9.9.9", "-channel", "production", "-boards", boards, "-previous", manifest, "-pubkey", pub}, &out); err == nil {
+		t.Fatal("moved a release the catalog does not have")
+	}
+	if err := run([]string{"build", "-version", "1.0.1", "-channel", "production", "-boards", boards}, &out); err == nil {
+		t.Fatal("built without -dir and without -previous")
+	}
+}

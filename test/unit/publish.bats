@@ -95,8 +95,19 @@ needs() {
   run grep -E 'service_account:' "$repo/.github/workflows/release.yml"
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -v -E 'flockos-(release|publisher)@record-1283\.iam\.gserviceaccount\.com'
-  # Every authentication step is guarded by the release mode.
-  run awk '/uses: google-github-actions\/auth@/ { print prev } { prev = $0 }' "$repo/.github/workflows/release.yml"
+  # Every authentication step is guarded by the release mode, but in the
+  # production job, which runs on a release tag only.
+  run awk '/^  [a-z][a-z-]*:$/ { job = $1 } /uses: google-github-actions\/auth@/ && job != "production:" { print prev } { prev = $0 }' \
+    "$repo/.github/workflows/release.yml"
   [ -n "$output" ]
   ! echo "$output" | grep -v "if: env.MODE == 'release'"
+  grep -q "if: needs.verify.outputs.mode == 'tag' && inputs.promote-production" "$repo/.github/workflows/release.yml"
+}
+
+@test "release.yml: a run on a tag builds nothing" {
+  for job in build sign e2e stage promote; do
+    run awk -v job="  $job:" '$0 == job { f = 1; next } f && /^  [a-z][a-z-]*:$/ { exit } f && /^    if:/ { print; exit }' \
+      "$repo/.github/workflows/release.yml"
+    [[ "$output" == *"mode == 'release' || needs.verify.outputs.mode == 'dry-run'"* ]] || { echo "$job: $output"; return 1; }
+  done
 }

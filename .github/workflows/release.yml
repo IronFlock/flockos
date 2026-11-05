@@ -21,6 +21,13 @@ on:
     paths: [VERSION]
   workflow_call:
   workflow_dispatch:
+    inputs:
+      promote-production:
+        description: >-
+          On a release tag only: move the production channel of the catalog to
+          this release (the release must be in the catalog; nothing is built).
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -80,7 +87,7 @@ jobs:
   # job of the build holds the release identity.
   build:
     needs: [verify]
-    if: needs.verify.outputs.mode != 'released'
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
@@ -96,7 +103,7 @@ jobs:
   # with a throwaway stand-in for the signer and attests nothing.
   sign:
     needs: [verify, build]
-    if: needs.verify.outputs.mode != 'released'
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -150,7 +157,7 @@ jobs:
   # release image accepts: it boots and reboots only.
   e2e:
     needs: [verify, sign]
-    if: needs.verify.outputs.mode != 'released'
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -203,7 +210,7 @@ jobs:
   # (flockos-publisher: the FlockOS trees of the download bucket only).
   stage:
     needs: [verify, sign]
-    if: needs.verify.outputs.mode != 'released'
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -240,7 +247,7 @@ jobs:
   # nothing.
   promote:
     needs: [verify, stage, e2e]
-    if: needs.verify.outputs.mode != 'released'
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -329,6 +336,61 @@ jobs:
           if [ "$MODE" = release ]; then
             build/publish.sh check "$version" manifest.json
           fi
+
+  # Production promotion (docs/release.md): run by hand on a release's tag
+  # (gh workflow run release.yml --ref v<version> -f promote-production=true).
+  # The release's files are published already; the catalog's production
+  # channel moves to it, signed with the catalog key as flockos-release and
+  # published as flockos-publisher, then checked through the download proxy.
+  # The workload identity pool gives both identities to runs on v* tags.
+  production:
+    needs: [verify]
+    if: needs.verify.outputs.mode == 'tag' && inputs.promote-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: tools/catalog/go.mod
+          cache: false
+      - name: the published catalog
+        run: |
+          curl -fsS --retry 5 -o previous.json https://storage.googleapis.com/ironflock-downloads/flockos/manifest.json
+      - name: authenticate the catalog signer
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+      - name: move production to this release, sign
+        run: |
+          . build/lib.sh
+          load_conf build/release.conf
+          version=$(tr -d '[:space:]' < VERSION)
+          pub=$PWD/pki/flockos-catalog.pub
+          cd tools/catalog
+          go run . build -version "$version" -channel production -boards ../../release/boards.json \
+            -previous ../../previous.json -pubkey "$pub" -o ../../payload.json
+          go run . sign -payload ../../payload.json -kms-key "$CATALOG_KMS_KEY" -pubkey "$pub" -o ../../manifest.json
+          go run . verify -pubkey "$pub" ../../manifest.json >/dev/null
+          cd ../..
+          jq '{issued_at, channels, releases: (.releases | keys)}' payload.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: authenticate the publisher
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: publish the catalog, check
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          build/publish.sh catalog manifest.json
+          build/publish.sh check "$version" manifest.json
 
   tag:
     needs: [verify, promote]

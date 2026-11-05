@@ -19,6 +19,7 @@ or published from a laptop.
 | `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
+| `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `flockos-release`, `flockos-publisher` |
 
 The workload identity pool gives the two FlockOS identities only to a push of
 `release.yml` on `main` and to runs on `v*` tags. `flockos-publisher` can write
@@ -46,6 +47,28 @@ the two FlockOS trees of the download bucket and nothing else.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
 
+## Moving a release to production
+
+A release goes to the test channel. Once it has proven itself on test devices,
+production moves to it, without a rebuild:
+
+```sh
+gh workflow run release.yml --ref v<version> -f promote-production=true
+```
+
+That run of `release.yml` on the release's tag (mode `tag`) runs only the
+`production` job:
+
+1. It reads the published catalog and verifies it with `pki/flockos-catalog.pub`.
+2. It moves `production` to the tag's version, which must already be in the
+   catalog: the same files, the same bundles. FlockFlasher's boards follow.
+3. It signs the catalog with the catalog key as `flockos-release`.
+4. It publishes the catalog as `flockos-publisher`.
+5. It checks the catalog through the download proxy.
+
+The pool gives both identities to runs on `v*` tags. Nothing else of
+`release.yml` runs on a tag.
+
 ## Before the first release (once)
 
 1. **The RAUC PKI:** `tools/rauc-pki/ceremony.sh --yes` ([signing.md](signing.md)).
@@ -55,19 +78,15 @@ the two FlockOS trees of the download bucket and nothing else.
    identity and its bucket permissions, and writes `pki/flockos-catalog.pub`
    for a pull request. Run it first without `--yes`: that shows every step and
    changes nothing. At the end it prints the line for step 4.
-3. **The download proxy** must serve `gs://ironflock-downloads/flockos/` under
-   `https://instance-registry.ironflock.com/dl/flockos/`, as it serves
-   `device-init/` and `staging/`. Without it, `promote` stops before the tag.
+3. **The download proxy** serves `gs://ironflock-downloads/flockos/` under
+   `https://instance-registry.ironflock.com/dl/flockos/` (registry-proxy
+   v0.2.9, 2026-11-05). Without it, `promote` would stop before the tag.
 4. **The device-agent** trusts the catalog key: the line from step 2 goes into
    `FLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
    an agent release. `CATALOG_MIN_AGENT` names that release.
 
 ## Not yet
 
-- **Production promotion.** Moving `production` to the version on `test`
-  without a rebuild would be a manual run of `release.yml` on the release's
-  tag, which the pool allows. It is not built yet; until then a release
-  reaches production only as the first one.
 - **The e2e on the platform.** The plan's end-to-end test enrolls the staged
   image into the test flock, checks it online through the API, and updates
   from the previous release to this one and back through the agent's

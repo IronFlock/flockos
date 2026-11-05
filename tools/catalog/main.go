@@ -4,6 +4,8 @@
 //
 //	catalog build  -dir OUT -repo . -version V -channel test|production -url BASE
 //	               -min-agent V -boards release/boards.json [-previous manifest.json -pubkey KEY] -o payload.json
+//	catalog build  -version V -channel production -boards release/boards.json -previous manifest.json -pubkey KEY -o payload.json
+//	               (no -dir: a release of the published catalog moves to the channel, without a rebuild)
 //	catalog sign   -payload payload.json (-kms-key VERSION | -key-file key.pem) -pubkey KEY -o manifest.json
 //	catalog verify -pubkey KEY manifest.json
 //
@@ -75,12 +77,14 @@ func run(args []string, stdout io.Writer) error {
 
 	switch args[0] {
 	case "build":
-		if *dir == "" || *version == "" || *url == "" || *minAgent == "" || *boards == "" {
-			return errors.New("build needs -dir, -version, -url, -min-agent and -boards")
+		if *version == "" || *boards == "" {
+			return errors.New("build needs -version and -boards")
 		}
-		rel, err := buildRelease(*dir, *repo, *version, *url, *minAgent)
-		if err != nil {
-			return err
+		if *dir != "" && (*url == "" || *minAgent == "") {
+			return errors.New("build -dir needs -url and -min-agent")
+		}
+		if *dir == "" && *previous == "" {
+			return errors.New("build needs -dir, or -previous to move one of its releases to a channel")
 		}
 		var defs []BoardDef
 		if err := readJSON(*boards, &defs); err != nil {
@@ -103,6 +107,18 @@ func run(args []string, stdout io.Writer) error {
 			prev = &Catalog{}
 			if err := json.Unmarshal(p, prev); err != nil {
 				return fmt.Errorf("the previous catalog: %w", err)
+			}
+		}
+		var rel Release
+		if *dir != "" {
+			var err error
+			if rel, err = buildRelease(*dir, *repo, *version, *url, *minAgent); err != nil {
+				return err
+			}
+		} else {
+			var ok bool
+			if rel, ok = prev.Releases[*version]; !ok {
+				return fmt.Errorf("the published catalog has no release %s to move to %s", *version, *channel)
 			}
 		}
 		c, err := merge(prev, *version, *channel, rel, defs, now())
