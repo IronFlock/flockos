@@ -1,0 +1,17 @@
+# Additions of the nvidia variant to profiles/base/packages (WP-4.1; master
+# plan, section 3.7). amd64 only. Versions are pinned in profiles/nvidia/versions.
+# The open kernel modules are built in the image by build/nvidia-modules.sh,
+# which installs and then purges DKMS, the kernel headers and the compiler.
+
+# CUDA driver userspace (libcuda, NVML, nvidia-smi, nvidia-persistenced),
+# headless: no X driver, no nvidia-settings
+nvidia-driver-cuda
+nvidia-kernel-support
+# GSP firmware the open modules load (Turing and newer)
+firmware-nvidia-gsp
+
+# GPUs in containers: nvidia-container-runtime and the CDI generator
+nvidia-container-toolkit
+nvidia-container-toolkit-base
+libnvidia-container-tools
+libnvidia-container1

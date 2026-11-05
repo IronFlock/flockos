@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Stage 1: the root filesystem tree in $ROOT, with mmdebstrap (master plan,
 # section 3.3). Debian 13 minbase plus the profile's packages, Docker CE from
-# download.docker.com at the pinned versions; no Recommends.
+# download.docker.com at the pinned versions; no Recommends. The nvidia
+# variant adds NVIDIA's repositories, its driver and container toolkit at the
+# versions of profiles/nvidia/versions, and builds the open kernel modules in
+# the tree (build/nvidia-modules.sh).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
@@ -39,7 +42,9 @@ SOURCES
   sed -e 's/^$/./' -e 's/^/ /' "$profile/apt/docker.asc"
 } >"$sources/docker.sources"
 
-mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH")
+variant_profile=$src/profiles/$VARIANT
+mapfile -t packages < <(read_list "$profile/packages" "$profile/packages.$ARCH" \
+  "$variant_profile/packages" "$variant_profile/packages.$ARCH")
 pin() { # pin PACKAGE VERSION: replace PACKAGE with PACKAGE=VERSION
   local i found=0
   for i in "${!packages[@]}"; do
@@ -56,6 +61,39 @@ pin containerd.io "$CONTAINERD_VERSION"
 pin docker-buildx-plugin "$BUILDX_VERSION"
 pin docker-compose-plugin "$COMPOSE_VERSION"
 
+# flat_source NAME URI KEY: a deb822 source for a flat repository (no suite,
+# no components) with KEY embedded in Signed-By.
+flat_source() {
+  {
+    echo "Types: deb"
+    echo "URIs: $2/"
+    echo "Suites: /"
+    echo "Signed-By:"
+    sed -e 's/^$/./' -e 's/^/ /' "$3"
+  } >"$sources/$1.sources"
+}
+hooks=()
+if [ "$VARIANT" = nvidia ]; then
+  [ "$ARCH" = amd64 ] || die "the nvidia variant is built for amd64 only"
+  : "${NVIDIA_CUDA_MIRROR:?}" "${NVIDIA_CTK_MIRROR:?}" "${NVIDIA_DRIVER_VERSION:?}" "${NVIDIA_CONTAINER_TOOLKIT_VERSION:?}"
+  flat_source cuda "$NVIDIA_CUDA_MIRROR" "$variant_profile/apt/cuda.asc"
+  flat_source nvidia-container-toolkit "$NVIDIA_CTK_MIRROR" "$variant_profile/apt/nvidia-container-toolkit.asc"
+  for p in nvidia-driver-cuda nvidia-kernel-support firmware-nvidia-gsp; do
+    pin "$p" "$NVIDIA_DRIVER_VERSION"
+  done
+  for p in nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1; do
+    pin "$p" "$NVIDIA_CONTAINER_TOOLKIT_VERSION"
+  done
+  # shellcheck disable=SC2016 # "$1" is mmdebstrap's, the tree's path
+  hooks+=(
+    --customize-hook="upload $here/nvidia-modules.sh /tmp/flockos-nvidia-modules.sh"
+    --chrooted-customize-hook="bash /tmp/flockos-nvidia-modules.sh $NVIDIA_DRIVER_VERSION"
+    --customize-hook='rm -f "$1/tmp/flockos-nvidia-modules.sh"'
+  )
+fi
+
+# Debian first, then the others (Docker, and NVIDIA's for nvidia).
+mapfile -t other_sources < <(find "$sources" -name '*.sources' ! -name debian.sources | sort)
 rm -rf "$ROOT"
 mmdebstrap \
   --mode=root \
@@ -66,12 +104,13 @@ mmdebstrap \
   --aptopt='Acquire::Retries "5"' \
   --include="$(join_by , "${packages[@]}")" \
   --skip=check/empty \
+  "${hooks[@]}" \
   "$DEBIAN_SUITE" "$ROOT" \
-  "$sources/debian.sources" "$sources/docker.sources"
+  "$sources/debian.sources" "${other_sources[@]}"
 
 # The sources the device keeps (mmdebstrap writes its own file).
 rm -f "$ROOT/etc/apt/sources.list"
 rm -f "$ROOT"/etc/apt/sources.list.d/*
-cp "$sources/debian.sources" "$sources/docker.sources" "$ROOT/etc/apt/sources.list.d/"
+cp "$sources"/*.sources "$ROOT/etc/apt/sources.list.d/"
 chmod 0644 "$ROOT"/etc/apt/sources.list.d/*.sources
 log "rootfs: $(du -sh --apparent-size "$ROOT" | cut -f1), ${#packages[@]} packages requested"
