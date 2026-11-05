@@ -53,7 +53,10 @@ Sequence:
    in the initramfs; neither nouveau nor nvidia is loaded and
    `nvidia-persistenced` is not enabled; Docker lists the `nvidia` runtime;
    `nvidia-ctk` and `nvidia-container-cli` run.
-2. **Reboot.** machine-id, SSH host key and the persistent journal survive.
+2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
+   an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
+   `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
+   `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked
    good, keeps machine-id, host key and `/data`, and is enrolled again from the

@@ -22,6 +22,7 @@ copy_tree() {
 copy_tree "$src/overlay"
 [ -d "$target_dir/overlay" ] && copy_tree "$target_dir/overlay"
 [ "$VARIANT" != base ] && [ -d "$src/profiles/$VARIANT/overlay" ] && copy_tree "$src/profiles/$VARIANT/overlay"
+[ "$KERNEL" = rt ] && copy_tree "$src/profiles/kernel-rt/overlay"
 
 if [ "$VARIANT" != installer ]; then
   # --- RAUC ----------------------------------------------------------------
@@ -137,6 +138,11 @@ if [ "$VARIANT" = installer ]; then
 else
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service flockos-mark-good.service \
     flockos-enroll.service ssh.service docker.service NetworkManager.service systemd-timesyncd.service
+fi
+if [ "$KERNEL" = rt ]; then
+  systemctl --root="$ROOT" enable flockos-rt-tuning.service
+  mkdir -p "$ROOT/etc/flockos"
+  ln -sfn /data/flockos/rt.conf "$ROOT/etc/flockos/rt.conf"
 fi
 # Nothing changes the OS behind RAUC's back, nothing asks questions on the
 # console, nothing fetches firmware metadata on its own (sections 3.9, 3.10).

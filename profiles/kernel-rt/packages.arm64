@@ -1,0 +1,2 @@
+# The PREEMPT_RT kernel axis on arm64-efi: replaces linux-image-arm64.
+linux-image-rt-arm64

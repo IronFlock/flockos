@@ -473,6 +473,26 @@ class Runner:
             self.enrolled(first=True)
         self.vm.run("echo flockos-test > /data/flockos-test-marker")
 
+    def rt_kernel(self):
+        """An -rt image (WP-4b.1): the PREEMPT_RT kernel, and a new rt.conf
+        written into grubenv by flockos-rt-tuning (applied at the next boot,
+        which reboot_persists checks)."""
+        version = self.vm.run("uname -v")
+        if "PREEMPT_RT" not in version:
+            raise TestFailure(f"not a PREEMPT_RT kernel: {version.strip()}")
+        self.vm.run("systemctl is-active flockos-rt-tuning.service")
+        self.vm.run("printf 'isolate=1\\nirq=0\\n' > /data/flockos/rt.conf")
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            env = self.vm.run("grub-editenv /boot/efi/EFI/BOOT/grubenv list")
+            if "isolcpus=managed_irq,domain,1" in env:
+                break
+            time.sleep(2)
+        else:
+            raise TestFailure(f"rt.conf did not reach grubenv:\n{env}")
+        self.vm.run("test -e /run/flockos/rt-reboot-required")
+        self.rt_pending = True
+
     def enrolled(self, first):
         """The slot is enrolled from the test .flock: SSH user, sudo rule,
         the agent's unit; on the first boot the .flock left the FLOCKOS
@@ -527,6 +547,11 @@ class Runner:
     def reboot_persists(self):
         self.vm.reboot(self.boot_timeout)
         self.wait_running()
+        if getattr(self, "rt_pending", False):
+            cmdline = self.vm.run("cat /proc/cmdline")
+            for want in ("isolcpus=managed_irq,domain,1", "nohz_full=1", "irqaffinity=0"):
+                if want not in cmdline:
+                    raise TestFailure(f"{want} is not on the kernel command line after the reboot: {cmdline}")
         if self.vm.run("cat /etc/machine-id").strip() != self.machine_id:
             raise TestFailure("machine-id changed across a reboot")
         if self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip() != self.host_key:
@@ -735,6 +760,8 @@ def main():
     try:
         vm.start(conf["QEMU_SYSTEM"], port)
         runner.step("first boot: partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
+        if args.kernel == "rt":
+            runner.step("rt kernel: PREEMPT_RT, tuning from rt.conf into grubenv", runner.rt_kernel)
         if args.variant == "nvidia":
             runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
         runner.step("reboot: machine-id, host key, journal persist", runner.reboot_persists)

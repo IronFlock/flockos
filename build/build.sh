@@ -18,13 +18,16 @@ TARGET=$1 VARIANT=$2 KERNEL=$3
 valid_target "$TARGET" || die "unknown target $TARGET"
 valid_variant "$VARIANT" || die "unknown variant $VARIANT"
 valid_kernel "$KERNEL" || die "unknown kernel $KERNEL"
-[ "$KERNEL" = std ] || die "the rt kernel arrives with Phase 4b (WP-4b.1)"
 
 : "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
 FLOCKOS_DIRTY=${FLOCKOS_DIRTY:-}
 FLOCKOS_SIGNING=${FLOCKOS_SIGNING:-dev}
 
 load_conf "$src/targets/$TARGET/target.conf"
+# The rt kernel (section 3.11): base only, as NVIDIA's modules do not support
+# PREEMPT_RT on x86; EFI targets only, as the Pi boots its own kernels.
+[ "$KERNEL" = std ] || [ "$VARIANT" = base ] || die "the rt kernel is built for the base variant only"
+[ "$KERNEL" = std ] || [ "$BOOTLOADER" = grub-efi ] || die "the rt kernel is built for the EFI targets only; $TARGET boots with $BOOTLOADER"
 load_conf "$src/profiles/base/versions"
 [ -f "$src/profiles/$VARIANT/versions" ] && load_conf "$src/profiles/$VARIANT/versions"
 [ "$(dpkg --print-architecture)" = "$ARCH" ] || die "target $TARGET is $ARCH; this build container is $(dpkg --print-architecture)"

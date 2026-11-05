@@ -1,0 +1,10 @@
+# Applies a new rt.conf from the platform as soon as it is written.
+[Unit]
+Description=FlockOS: watch /data/flockos/rt.conf
+
+[Path]
+PathChanged=/data/flockos/rt.conf
+Unit=flockos-rt-tuning-reload.service
+
+[Install]
+WantedBy=multi-user.target

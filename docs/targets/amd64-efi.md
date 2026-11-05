@@ -6,7 +6,7 @@ UEFI x86 edge PCs and industrial PCs (master plan, sections 3.2 and 3.7).
 |---|---|
 | Boot | UEFI only (no legacy BIOS), GRUB from the removable-media path `EFI/BOOT/BOOTX64.EFI`, no Secure Boot in 1.x |
 | A/B | RAUC `grub` backend, `grubenv` on the FLOCKOS partition, `rauc.slot=` on the kernel command line |
-| Kernel | Debian 13 `linux-image-amd64` (6.12 LTS), `amd64-microcode`, `intel-microcode` |
+| Kernel | Debian 13 `linux-image-amd64` (6.12 LTS), `amd64-microcode`, `intel-microcode`; `-rt` images: `linux-image-rt-amd64` (PREEMPT_RT) with `flockos-rt-tuning` |
 | Firmware blobs | `firmware-linux-free`, `firmware-misc-nonfree`, `-realtek`, `-iwlwifi`, `-atheros`, `-brcm80211`, `-mediatek` |
 | Consoles | screen (`tty0`) and first serial port (`ttyS0`, 115200 8N1) |
 | Slot size | 4 GiB (`base`), 8 GiB (`nvidia`) |
@@ -50,3 +50,14 @@ after=poweroff
 The installer leaves out the stick itself, read-only, loop and too-small disks,
 and USB disks unless `allow-usb=yes`. When it is done the box powers off; remove
 the stick and power on. Hardware acceptance is WP-3.3.
+
+## Real-time latency
+
+The figure per hardware class comes from `cyclictest -m -Sp99 -i200 -h400` for
+one hour under Docker load on the isolated CPUs (WP-4b.2), with C-states and
+SMIs set as noted. QEMU only proves that the `-rt` image boots and applies its
+tuning.
+
+| Board | Firmware settings | Isolated CPUs | Max latency | Date |
+|-------|-------------------|---------------|-------------|------|
+| — | — | — | — | — |
