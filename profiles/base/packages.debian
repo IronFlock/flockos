@@ -1,0 +1,12 @@
+# The base packages a Debian image adds (DISTRO_ID=debian): systemd-repart,
+# which Ubuntu 24.04 ships in systemd itself, and Debian's firmware packages
+# for the kernel to load (lane 1; Ubuntu's linux-firmware, Jetson's
+# nvidia-l4t-firmware).
+systemd-repart
+firmware-linux-free
+firmware-misc-nonfree
+firmware-realtek
+firmware-iwlwifi
+firmware-atheros
+firmware-brcm80211
+firmware-mediatek

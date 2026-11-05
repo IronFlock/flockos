@@ -18,10 +18,32 @@ stage:
 | Stage | Script | Result |
 |-------|--------|--------|
 | signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key. Throwaway by default; a release build (`FLOCKOS_SIGNING=release`) puts the FlockOS root CA into the image and seals the bundle with a throwaway key for `release.yml`'s sign job (ADR-0006, `docs/signing.md`) |
-| rootfs | `build/mkrootfs.sh` | Debian 13 minbase tree from `mmdebstrap` with `profiles/base/packages`, its per-architecture list, the target's `targets/<target>/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `profiles/base/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
+| rootfs | `build/mkrootfs.sh` | minbase tree of the target's distribution (see below) from `mmdebstrap` with `profiles/base/packages`, its per-distribution and per-architecture lists, the target's `targets/<target>/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `distros/<distro>/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
 | customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`; not into the installer), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` (EFI targets), `build/mkimage-rpi.sh` (Raspberry Pi: FLOCKOS with `autoboot.txt`, boot-a from `/boot/firmware`, an empty boot-b, slot A) | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
 | bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring (none for the installer); on `rpi-arm64` with the boot partition as `boot.vfat` |
+
+### The distribution
+
+A target's `target.conf` may name its distribution as `DISTRO`; without one it
+is `debian-trixie`, the userspace of every image so far. `distros/<distro>/versions`
+holds what `mkrootfs.sh` needs of it, as plain `KEY=value` data:
+
+| Key | Debian 13 (`debian-trixie`) | Ubuntu 24.04 (`ubuntu-noble`) |
+|-----|-----------------------------|-------------------------------|
+| `DISTRO_ID`, `DISTRO_ID_LIKE` | `debian`, `debian` | `ubuntu`, `ubuntu debian` |
+| `DISTRO_SUITE` | `trixie` | `noble` |
+| `DISTRO_MIRROR`, `DISTRO_SECURITY_MIRROR` | deb.debian.org | ports.ubuntu.com (arm64) |
+| `DISTRO_KEYRING` | `debian-archive-keyring.gpg` | `ubuntu-archive-keyring.gpg` |
+| `DOCKER_MIRROR` and the Docker pins | `linux/debian`, `~debian.13~trixie` | `linux/ubuntu`, `~ubuntu.24.04~noble` |
+
+The device keeps the distribution's sources as
+`/etc/apt/sources.list.d/<id>.sources`, signed by the keyring of its
+archive-keyring package. `ID_LIKE` in os-release is `DISTRO_ID_LIKE`.
+`profiles/base/packages.<id>` adds what only one distribution has or names its
+own way; on Debian that is `systemd-repart` (Ubuntu 24.04 ships it in `systemd`)
+and the `firmware-*` packages. Ubuntu noble is the userspace of `jetson-orin`
+(ADR-0008); the nvidia variant is built on Debian only.
 
 Artefacts land in `out/<image-id>/`:
 
@@ -196,7 +218,7 @@ an image installs only bundles from the same build.
 
 `SOURCE_DATE_EPOCH` is the commit time; file times, filesystem UUIDs, the ext4
 hash seed and the FAT volume id are derived from it or from the image id. The
-Debian archive is not pinned to a snapshot, so two builds of one commit on
-different days can differ in package versions; `packages.tsv` records what went
-in. Docker CE and its companions are pinned in `profiles/base/versions`, the
-NVIDIA packages in `profiles/nvidia/versions`.
+distribution's archive is not pinned to a snapshot, so two builds of one commit
+on different days can differ in package versions; `packages.tsv` records what
+went in. Docker CE and its companions are pinned in `distros/<distro>/versions`,
+the NVIDIA packages in `profiles/nvidia/versions`.

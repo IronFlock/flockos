@@ -4,6 +4,8 @@
 # COMMIT is the git commit the image is built from, EPOCH its time
 # (SOURCE_DATE_EPOCH). VERSION keeps the legacy v<ver>-g<sha>-<buildtime>
 # shape the device-agent parses until it reads IMAGE_ID/IMAGE_VERSION/BUILD_ID.
+# ID_LIKE is the distribution's (DISTRO_ID_LIKE of distros/<distro>/versions,
+# debian when unset).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=build/lib.sh
@@ -11,6 +13,10 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 [ "$#" -eq 6 ] || die "usage: osrelease.sh VERSION TARGET VARIANT KERNEL COMMIT EPOCH"
 version=$1 target=$2 variant=$3 kernel=$4 commit=$5 epoch=$6
+id_like=${DISTRO_ID_LIKE:-debian}
+[[ "$id_like" =~ ^[a-z0-9]+( [a-z0-9]+)*$ ]] || die "not an ID_LIKE list: $id_like"
+# os-release quotes a value with spaces; a single ID stays bare.
+[[ "$id_like" == *" "* ]] && id_like="\"$id_like\""
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]] || die "not a version: $version"
 valid_target "$target" || die "unknown target $target"
 valid_variant "$variant" || die "unknown variant $variant"
@@ -27,7 +33,7 @@ detail="$target, $variant"
 cat <<OSR
 NAME="FlockOS"
 ID=flockos
-ID_LIKE=debian
+ID_LIKE=$id_like
 PRETTY_NAME="FlockOS $version ($detail)"
 VERSION_ID="$version"
 VERSION="v$version-g$short-$stamp"

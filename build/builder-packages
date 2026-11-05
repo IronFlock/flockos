@@ -1,6 +1,8 @@
 # Packages of the build container (build/in-builder.sh installs them).
 mmdebstrap
+# the archive keys of the distributions in distros/ (Signed-By of their sources)
 debian-archive-keyring
+ubuntu-keyring
 ca-certificates
 genimage
 rauc

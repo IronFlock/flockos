@@ -27,11 +27,20 @@ esac
 FLOCKOS_DIRTY=${FLOCKOS_DIRTY:-}
 FLOCKOS_SIGNING=${FLOCKOS_SIGNING:-dev}
 
+unset DISTRO
 load_conf "$src/targets/$TARGET/target.conf"
 # The rt kernel (section 3.11): base only, as NVIDIA's modules do not support
 # PREEMPT_RT on x86; EFI targets only, as the Pi boots its own kernels.
 [ "$KERNEL" = std ] || [ "$VARIANT" = base ] || die "the rt kernel is built for the base variant only"
 [ "$KERNEL" = std ] || [ "$BOOTLOADER" = grub-efi ] || die "the rt kernel is built for the EFI targets only; $TARGET boots with $BOOTLOADER"
+# The distribution (distros/<distro>/versions): its archive and the Docker
+# pins built for it. Debian 13 unless the target names another.
+DISTRO=${DISTRO:-debian-trixie}
+if [[ ! "$DISTRO" =~ ^[a-z0-9]+-[a-z0-9]+$ ]] || [ ! -f "$src/distros/$DISTRO/versions" ]; then
+  die "target $TARGET names an unknown distribution $DISTRO (no distros/$DISTRO/versions)"
+fi
+export DISTRO
+load_conf "$src/distros/$DISTRO/versions"
 load_conf "$src/profiles/base/versions"
 [ -f "$src/profiles/$VARIANT/versions" ] && load_conf "$src/profiles/$VARIANT/versions"
 [ "$(dpkg --print-architecture)" = "$ARCH" ] || die "target $TARGET is $ARCH; this build container is $(dpkg --print-architecture)"
