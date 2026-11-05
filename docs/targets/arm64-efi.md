@@ -18,7 +18,7 @@ Raspberry Pi and Jetson Orin have their own targets.
 
 | Board | UEFI version | Date | Result | Notes |
 |-------|--------------|------|--------|-------|
-| QEMU virt + AAVMF (CI) | Ubuntu 24.04 `qemu-efi-aarch64` | every pull request | `image-test` | arm64 runner without KVM: emulated (TCG) |
+| QEMU virt + AAVMF (CI) | Ubuntu 24.04 `qemu-efi-aarch64` | every pull request | `image-test`, `install-test` | arm64 runner without KVM: emulated (TCG) |
 
 ## Notes
 
@@ -29,3 +29,8 @@ Raspberry Pi and Jetson Orin have their own targets.
   serial port.
 - A board whose console is not a PL011 still shows the console on the screen;
   add its `console=` to `FLOCKOS_CMDLINE` in `grubenv` for a serial login.
+- GRUB's serial terminal is `serial_efi0` (the firmware's Serial I/O port);
+  `GRUB_TERMINAL` in `target.conf`.
+- The installer stick (`just build arm64-efi installer`) works as on amd64-efi
+  ([amd64-efi.md](amd64-efi.md#installer-stick)): it writes the base image to
+  an internal disk and registers `\EFI\BOOT\BOOTAA64.EFI` as the boot entry.

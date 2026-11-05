@@ -152,6 +152,16 @@ installer_partition() {
   esac
 }
 
+# installer_loader [MACHINE]: the UEFI removable-media loader the written
+# image boots from on this machine (uname -m), as EFI_LOADER in the targets.
+installer_loader() {
+  case "${1:-$(uname -m)}" in
+    x86_64) echo '\EFI\BOOT\BOOTX64.EFI' ;;
+    aarch64) echo '\EFI\BOOT\BOOTAA64.EFI' ;;
+    *) return 1 ;;
+  esac
+}
+
 # installer_human BYTES: a size for people.
 installer_human() {
   awk -v b="$1" 'BEGIN { split("B KB MB GB TB", u); i = 1; while (b >= 1000 && i < 5) { b /= 1000; i++ } printf "%.1f %s\n", b, u[i] }'

@@ -60,3 +60,15 @@ setup() {
   run bash "$repo/build/build.sh" amd64-efi nvidia rt
   [ "$status" -ne 0 ] && [[ "$output" == *"the rt kernel is built for the base variant only"* ]]
 }
+
+@test "GRUB's console and serial terminal are the one GRUB_SERIAL makes" {
+  for t in amd64-efi arm64-efi; do
+    out=$(load_conf "$repo/targets/$t/target.conf" && render "$repo/targets/$t/grub/grub.cfg")
+    terminal=$(load_conf "$repo/targets/$t/target.conf" && echo "$GRUB_TERMINAL")
+    echo "$out" | grep -qx "terminal_input console $terminal"
+    echo "$out" | grep -qx "terminal_output console $terminal"
+  done
+  # GRUB names a port's terminal serial_<port>; com0 (unit 0) is also "serial".
+  [ "$(load_conf "$repo/targets/amd64-efi/target.conf" && echo "$GRUB_TERMINAL")" = serial ]
+  [ "$(load_conf "$repo/targets/arm64-efi/target.conf" && echo "$GRUB_SERIAL $GRUB_TERMINAL")" = "serial efi0 serial_efi0" ]
+}
