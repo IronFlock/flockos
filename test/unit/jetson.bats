@@ -74,3 +74,45 @@ setup() {
   FLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin base rt
   [ "$status" -ne 0 ] && [[ "$output" == *"the rt kernel is built for the EFI targets only"* ]]
 }
+
+@test "slot A's extlinux.conf: NVIDIA's kernel, initrd and command line, root= and rauc.slot= of the slot" {
+  run bash -c ". '$repo/build/lib.sh'; load_conf '$t/target.conf'; SLOT=A ROOT_PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e render '$t/boot/extlinux.conf'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"@"*"@"* ]]
+  printf '%s\n' "$output" | grep -qx 'DEFAULT flockos'
+  printf '%s\n' "$output" | grep -qE '^[[:space:]]+LINUX /boot/Image$'
+  printf '%s\n' "$output" | grep -qE '^[[:space:]]+INITRD /boot/initrd$'
+  append=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*APPEND //p')
+  [[ "$append" == '${cbootargs} root=PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e rw rootwait rootfstype=ext4 '* ]]
+  [[ " $append " == *" console=ttyTCU0,115200 "* ]] && [[ " $append " == *" rauc.slot=A "* ]]
+  [[ " $append " == *" firmware_class.path=/etc/firmware "* ]]
+}
+
+extlinux_tool="$repo/targets/jetson-orin/overlay/usr/lib/flockos/tegra-extlinux"
+
+@test "tegra-extlinux points the bundle's extlinux.conf at slot B" {
+  dir=$(mktemp -d)
+  printf '# a comment with root=x\nDEFAULT flockos\nLABEL flockos\n\tLINUX /boot/Image\n\tAPPEND ${cbootargs} root=PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e rw rootwait console=ttyTCU0,115200 rauc.slot=A\n' >"$dir/extlinux.conf"
+  run "$extlinux_tool" "$dir/extlinux.conf" 5c0ffee0-1234-4abc-8def-0123456789ab B
+  [ "$status" -eq 0 ]
+  grep -qx $'\tAPPEND ${cbootargs} root=PARTUUID=5c0ffee0-1234-4abc-8def-0123456789ab rw rootwait console=ttyTCU0,115200 rauc.slot=B' "$dir/extlinux.conf"
+  grep -qx '# a comment with root=x' "$dir/extlinux.conf"
+  [ "$(wc -l <"$dir/extlinux.conf")" -eq 5 ] && [ ! -e "$dir/extlinux.conf.new" ]
+  rm -rf "$dir"
+}
+
+@test "tegra-extlinux refuses what it cannot rewrite" {
+  dir=$(mktemp -d)
+  printf 'LABEL x\n\tAPPEND ${cbootargs} rootwait\n' >"$dir/extlinux.conf"
+  run "$extlinux_tool" "$dir/extlinux.conf" 5c0ffee0 B
+  [ "$status" -ne 0 ] && [[ "$output" == *"no APPEND line with root="* ]]
+  printf 'LABEL x\n\tAPPEND root=PARTUUID=x rauc.slot=A\n' >"$dir/extlinux.conf"
+  run "$extlinux_tool" "$dir/extlinux.conf" 'x/y' B
+  [ "$status" -ne 0 ]
+  run "$extlinux_tool" "$dir/extlinux.conf" 5c0ffee0 C
+  [ "$status" -ne 0 ]
+  run "$extlinux_tool" "$dir/missing.conf" 5c0ffee0 B
+  [ "$status" -ne 0 ]
+  grep -qx $'\tAPPEND root=PARTUUID=x rauc.slot=A' "$dir/extlinux.conf"
+  rm -rf "$dir"
+}

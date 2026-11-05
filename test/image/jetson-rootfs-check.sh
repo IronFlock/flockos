@@ -75,6 +75,13 @@ kver=${kvers[0]:-}
 check "one kernel's modules: $kver" test "${#kvers[@]}" -eq 1
 check "the GPU driver (nvgpu) for $kver" bash -c "compgen -G '$root/usr/lib/modules/$kver/updates/nvgpu.ko*'"
 check "modules.dep is current" test -s "$root/usr/lib/modules/$kver/modules.dep"
+ext=$root/boot/extlinux/extlinux.conf
+check "extlinux.conf boots /boot/Image with /boot/initrd" \
+  bash -c "grep -qE '^[[:space:]]+LINUX /boot/Image\$' '$ext' && grep -qE '^[[:space:]]+INITRD /boot/initrd\$' '$ext'"
+check "extlinux.conf mounts slot A by PARTUUID and names it for RAUC" \
+  bash -c "grep -E '^[[:space:]]+APPEND ' '$ext' | grep -E ' root=PARTUUID=[0-9a-f-]{36} ' | grep -q ' rauc.slot=A'"
+check "tegra-extlinux is executable (rauc-post-install points written slots at themselves)" \
+  test -x "$root/usr/lib/flockos/tegra-extlinux"
 
 # --- apt -------------------------------------------------------------------
 sl=$root/etc/apt/sources.list.d

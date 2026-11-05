@@ -3,7 +3,9 @@
 # RAUC has just written:
 # - a root slot (class rootfs) gets the device's identity, so the new slot
 #   boots as the same machine: machine-id keeps the journal and the DHCP
-#   client id; hostname is what device-init or the platform set;
+#   client id; hostname is what device-init or the platform set; on Jetson
+#   its /boot/extlinux/extlinux.conf gets root= and rauc.slot= of that slot
+#   (WP-6.2), as the bundle's names slot A;
 # - a Raspberry Pi boot partition (class boot, WP-5.2) gets a cmdline.txt
 #   that mounts its own root slot: the bundle's names slot A.
 set -eu
@@ -11,6 +13,7 @@ set -eu
 files="/etc/machine-id /etc/hostname"
 prefix=${RAUC_MOUNT_PREFIX:-/run/rauc}
 cmdline_tool=${FLOCKOS_RPI_CMDLINE:-/usr/lib/flockos/rpi-cmdline}
+extlinux_tool=${FLOCKOS_TEGRA_EXTLINUX:-/usr/lib/flockos/tegra-extlinux}
 
 fail() {
   echo "rauc-post-install: $*" >&2
@@ -46,8 +49,16 @@ for i in ${RAUC_TARGET_SLOTS:-}; do
           cp -p "$f" "$mnt$f"
         fi
       done
+      extlinux=""
+      if [ -f "$mnt/boot/extlinux/extlinux.conf" ]; then
+        eval "bootname=\${RAUC_SLOT_BOOTNAME_$i:-}"
+        partuuid=$(blkid -s PARTUUID -o value "$device") || fail "no PARTUUID for $device"
+        # shellcheck disable=SC2154 # assigned by the eval above
+        "$extlinux_tool" "$mnt/boot/extlinux/extlinux.conf" "$partuuid" "$bootname"
+        extlinux=", extlinux.conf mounts slot $bootname (PARTUUID=$partuuid)"
+      fi
       unmount_slot
-      echo "rauc-post-install: copied machine-id and hostname to slot $i ($device)"
+      echo "rauc-post-install: copied machine-id and hostname to slot $i ($device)$extlinux"
       ;;
     boot)
       # The root slot of the group: RAUC_SLOT_PARENT_<i> names it.
