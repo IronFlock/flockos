@@ -62,7 +62,8 @@ mount -o ro "${dev}p2" "$work/boot"
 mount -o ro "${dev}p4" "$work/root"
 
 # --- FLOCKOS ---------------------------------------------------------------
-check "autoboot.txt boots partition 2" grep -qx 'boot_partition=2' "$work/flockos/autoboot.txt"
+check "autoboot.txt: boot-a by default, boot-b on tryboot" \
+  bash -c "[ \"\$(tr '\n' ' ' <'$work/flockos/autoboot.txt')\" = '[all] tryboot_a_b=1 boot_partition=2 [tryboot] boot_partition=3 ' ]"
 
 # --- boot-a ----------------------------------------------------------------
 for f in start4.elf fixup4.dat kernel8.img kernel_2712.img initramfs8 initramfs_2712 \
@@ -86,8 +87,13 @@ done
 check "os-release names flockos-rpi-arm64-base" grep -qx 'IMAGE_ID=flockos-rpi-arm64-base' "$work/root/usr/lib/os-release"
 check "/boot/firmware is empty in the slot (the files are on boot-a)" \
   bash -c "[ -d '$work/root/boot/firmware' ] && [ -z \"\$(ls -A '$work/root/boot/firmware')\" ]"
-check "RAUC: compatible and the noop backend" \
-  bash -c "grep -qx compatible=flockos-rpi-arm64-base '$work/root/etc/rauc/system.conf' && grep -qx bootloader=noop '$work/root/etc/rauc/system.conf'"
+check "RAUC: compatible, the tryboot backend, boot partitions grouped with their root slots" \
+  bash -c "c='$work/root/etc/rauc/system.conf'; grep -qx compatible=flockos-rpi-arm64-base \$c && grep -qx bootloader=custom \$c && grep -qx bootloader-custom-backend=/usr/lib/flockos/rpi-tryboot \$c && grep -qx parent=rootfs.0 \$c && grep -qx parent=rootfs.1 \$c"
+for tool in rpi-tryboot rpi-cmdline rauc-post-install; do
+  check "$tool is executable" test -x "$work/root/usr/lib/flockos/$tool"
+done
+check "the backend reads the image's autoboot.txt: slot A is primary" \
+  bash -c "[ \"\$(FLOCKOS_AUTOBOOT='$work/flockos/autoboot.txt' '$work/root/usr/lib/flockos/rpi-tryboot' get-primary)\" = A ]"
 check "repart.d: rootfs-b and data come on the first boot" \
   test -f "$work/root/usr/lib/repart.d/60-data.conf"
 check "fstab mounts FLOCKOS and /data" bash -c "grep -q '^PARTLABEL=FLOCKOS ' '$work/root/etc/fstab' && grep -q '^PARTLABEL=data ' '$work/root/etc/fstab'"

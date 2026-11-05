@@ -18,17 +18,16 @@ TARGET=$1 VARIANT=$2 KERNEL=$3
 valid_target "$TARGET" || die "unknown target $TARGET"
 valid_variant "$VARIANT" || die "unknown variant $VARIANT"
 valid_kernel "$KERNEL" || die "unknown kernel $KERNEL"
-case "$VARIANT" in
-  base | nvidia) ;;
-  installer) die "the installer variant arrives with Phase 3 (WP-3.2)" ;;
-esac
-[ "$KERNEL" = std ] || die "the rt kernel arrives with Phase 4b (WP-4b.1)"
 
 : "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
 FLOCKOS_DIRTY=${FLOCKOS_DIRTY:-}
 FLOCKOS_SIGNING=${FLOCKOS_SIGNING:-dev}
 
 load_conf "$src/targets/$TARGET/target.conf"
+# The rt kernel (section 3.11): base only, as NVIDIA's modules do not support
+# PREEMPT_RT on x86; EFI targets only, as the Pi boots its own kernels.
+[ "$KERNEL" = std ] || [ "$VARIANT" = base ] || die "the rt kernel is built for the base variant only"
+[ "$KERNEL" = std ] || [ "$BOOTLOADER" = grub-efi ] || die "the rt kernel is built for the EFI targets only; $TARGET boots with $BOOTLOADER"
 load_conf "$src/profiles/base/versions"
 [ -f "$src/profiles/$VARIANT/versions" ] && load_conf "$src/profiles/$VARIANT/versions"
 [ "$(dpkg --print-architecture)" = "$ARCH" ] || die "target $TARGET is $ARCH; this build container is $(dpkg --print-architecture)"
@@ -37,7 +36,20 @@ IMAGE_ID=$(image_id "$TARGET" "$VARIANT" "$KERNEL")
 slot_var="SLOT_SIZE_${VARIANT^^}"
 SLOT_SIZE=${!slot_var:?no $slot_var in target.conf}
 NAME="$IMAGE_ID-$FLOCKOS_VERSION"
-export TARGET VARIANT KERNEL ARCH IMAGE_ID SLOT_SIZE NAME
+# GPT names: an installed disk and the installer stick never share them.
+if [ "$VARIANT" = installer ]; then
+  ESP_PART_NAME=flockos-installer-esp ROOT_PART_NAME=flockos-installer
+  # The images the installer carries (built before it, in /out).
+  FLOCKOS_INSTALLER_PAYLOADS=${FLOCKOS_INSTALLER_PAYLOADS:-base}
+  for p in $FLOCKOS_INSTALLER_PAYLOADS; do
+    f=/out/flockos-$TARGET-$p/flockos-$TARGET-$p-$FLOCKOS_VERSION.img.gz
+    [ -f "$f" ] || die "the installer carries $p: build $TARGET $p first ($f is missing)"
+  done
+  export FLOCKOS_INSTALLER_PAYLOADS
+else
+  ESP_PART_NAME=FLOCKOS ROOT_PART_NAME=rootfs-a
+fi
+export TARGET VARIANT KERNEL ARCH IMAGE_ID SLOT_SIZE NAME ESP_PART_NAME ROOT_PART_NAME
 
 WORK=/work/$IMAGE_ID
 OUT=/out/$IMAGE_ID
@@ -62,9 +74,7 @@ case "$BOOTLOADER" in
   *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
 esac
 
-# The Pi's bundle holds its boot partition as well, with the A/B backend
-# (WP-5.2); until then rpi-arm64 builds the image only.
-if [ "$BOOTLOADER" != rpi ]; then
+if [ "$VARIANT" != installer ]; then
   log "$NAME: RAUC bundle"
   bash "$here/mkbundle.sh"
 fi
@@ -73,7 +83,7 @@ log "$NAME: checksums"
 (
   cd "$OUT"
   files=(*.img.gz)
-  [ "$BOOTLOADER" = rpi ] || files+=(*.raucb)
+  [ "$VARIANT" = installer ] || files+=(*.raucb)
   sha256sum -- "${files[@]}" >SHA256SUMS
   cat SHA256SUMS
 )

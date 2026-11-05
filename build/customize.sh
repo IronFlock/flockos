@@ -22,19 +22,35 @@ copy_tree() {
 copy_tree "$src/overlay"
 [ -d "$target_dir/overlay" ] && copy_tree "$target_dir/overlay"
 [ "$VARIANT" != base ] && [ -d "$src/profiles/$VARIANT/overlay" ] && copy_tree "$src/profiles/$VARIANT/overlay"
+[ "$KERNEL" = rt ] && copy_tree "$src/profiles/kernel-rt/overlay"
 
-# --- RAUC ------------------------------------------------------------------
-# shellcheck disable=SC1091 # written by build/signing.sh
-. "$WORK/pki/signing.env"
-mkdir -p "$ROOT/etc/rauc"
-COMPATIBLE=$IMAGE_ID render "$target_dir/system.conf" >"$ROOT/etc/rauc/system.conf"
-install -m 0644 "$KEYRING" "$ROOT/etc/rauc/keyring.pem"
+if [ "$VARIANT" != installer ]; then
+  # --- RAUC ----------------------------------------------------------------
+  # shellcheck disable=SC1091 # written by build/signing.sh
+  . "$WORK/pki/signing.env"
+  mkdir -p "$ROOT/etc/rauc"
+  COMPATIBLE=$IMAGE_ID render "$target_dir/system.conf" >"$ROOT/etc/rauc/system.conf"
+  install -m 0644 "$KEYRING" "$ROOT/etc/rauc/keyring.pem"
 
-# --- partitions created on the first boot (systemd-repart) ------------------
-mkdir -p "$ROOT/usr/lib/repart.d"
-for f in "$target_dir"/repart.d/*.conf; do
-  render "$f" >"$ROOT/usr/lib/repart.d/$(basename "$f")"
-done
+  # --- partitions created on the first boot (systemd-repart) ----------------
+  mkdir -p "$ROOT/usr/lib/repart.d"
+  for f in "$target_dir"/repart.d/*.conf; do
+    render "$f" >"$ROOT/usr/lib/repart.d/$(basename "$f")"
+  done
+else
+  # --- the installer: the images it writes, nothing of a device -------------
+  # Each payload with its size (the installer checks the target disk by it).
+  payload_dir=$ROOT/usr/share/flockos/payload
+  mkdir -p "$payload_dir"
+  for p in $FLOCKOS_INSTALLER_PAYLOADS; do
+    base=flockos-$TARGET-$p-$FLOCKOS_VERSION
+    pigz -dc "/out/flockos-$TARGET-$p/$base.img.gz" >"$WORK/payload.img"
+    stat -c %s "$WORK/payload.img" >"$payload_dir/$base.img.zst.size"
+    zstd -q -T0 -12 -o "$payload_dir/$base.img.zst" "$WORK/payload.img"
+    rm -f "$WORK/payload.img"
+    log "installer payload: $base ($(du -h "$payload_dir/$base.img.zst" | cut -f1))"
+  done
+fi
 
 # --- identity --------------------------------------------------------------
 commit=${FLOCKOS_COMMIT}
@@ -110,8 +126,24 @@ mkdir -p "$ROOT/boot/efi" "$ROOT/data" "$ROOT/opt/ironflock" "$ROOT/var/cache/fl
 chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
 
 # --- units -----------------------------------------------------------------
-systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service flockos-mark-good.service \
-  flockos-enroll.service ssh.service docker.service NetworkManager.service systemd-timesyncd.service
+if [ "$VARIANT" = installer ]; then
+  # The installer runs on the console and nothing else: no device services,
+  # no /data, no slots, no SSH.
+  systemctl --root="$ROOT" enable flockos-installer.service NetworkManager.service
+  systemctl --root="$ROOT" disable flockos-ssh-hostkeys.service flockos-mark-good.service \
+    flockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
+  systemctl --root="$ROOT" mask flockos-enroll.service flockos-mark-good.service \
+    flockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
+    systemd-repart.service
+else
+  systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service flockos-mark-good.service \
+    flockos-enroll.service ssh.service docker.service NetworkManager.service systemd-timesyncd.service
+fi
+if [ "$KERNEL" = rt ]; then
+  systemctl --root="$ROOT" enable flockos-rt-tuning.service
+  mkdir -p "$ROOT/etc/flockos"
+  ln -sfn /data/flockos/rt.conf "$ROOT/etc/flockos/rt.conf"
+fi
 # Nothing changes the OS behind RAUC's back, nothing asks questions on the
 # console, nothing fetches firmware metadata on its own (sections 3.9, 3.10).
 # rauc-mark-good would mark every slot good at boot: the health gate is
@@ -126,11 +158,15 @@ systemctl --root="$ROOT" mask apt-daily.timer apt-daily-upgrade.timer fwupd-refr
 # fails on machines without vsock.
 mkdir -p "$ROOT/etc/systemd/system-generators"
 ln -sfn /dev/null "$ROOT/etc/systemd/system-generators/systemd-ssh-generator"
-for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enroll.service; do
-  systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
-done
-[ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||
-  die "RAUC's D-Bus service is missing (package rauc-service)"
+if [ "$VARIANT" = installer ]; then
+  systemctl --root="$ROOT" is-enabled flockos-installer.service >/dev/null || die "flockos-installer.service is not enabled"
+else
+  for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enroll.service; do
+    systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
+  done
+  [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||
+    die "RAUC's D-Bus service is missing (package rauc-service)"
+fi
 if [ "$VARIANT" = nvidia ]; then
   # nvidia-persistenced fails without a GPU: udev starts it where the nvidia
   # module loads (71-flockos-nvidia.rules). nvidia-powerd is for notebooks.
@@ -142,7 +178,10 @@ if [ "$VARIANT" = nvidia ]; then
 fi
 
 # --- IronFlock: the agent and the host defaults, by device-init ----------
-bash "$here/bake.sh"
+# The installer writes devices; it is not one.
+if [ "$VARIANT" != installer ]; then
+  bash "$here/bake.sh"
+fi
 if [ "$VARIANT" = nvidia ]; then
   # bake adds the nvidia runtime where nvidia-container-runtime exists.
   jq -e '.runtimes.nvidia.path == "/usr/bin/nvidia-container-runtime"' "$ROOT/etc/docker/daemon.json" >/dev/null ||

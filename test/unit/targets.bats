@@ -52,3 +52,11 @@ setup() {
   done
   ! read_list "$repo/profiles/base/packages" "$repo/profiles/base/packages.amd64" "$repo/profiles/base/packages.arm64" | grep -q '^linux-image-'
 }
+
+@test "the rt kernel is offered for base on the EFI targets only" {
+  export FLOCKOS_VERSION=0.0.0 FLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
+  run bash "$repo/build/build.sh" rpi-arm64 base rt
+  [ "$status" -ne 0 ] && [[ "$output" == *"the rt kernel is built for the EFI targets only; rpi-arm64 boots with rpi"* ]]
+  run bash "$repo/build/build.sh" amd64-efi nvidia rt
+  [ "$status" -ne 0 ] && [[ "$output" == *"the rt kernel is built for the base variant only"* ]]
+}

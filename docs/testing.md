@@ -53,7 +53,10 @@ Sequence:
    in the initramfs; neither nouveau nor nvidia is loaded and
    `nvidia-persistenced` is not enabled; Docker lists the `nvidia` runtime;
    `nvidia-ctk` and `nvidia-container-cli` run.
-2. **Reboot.** machine-id, SSH host key and the persistent journal survive.
+2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
+   an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
+   `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
+   `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked
    good, keeps machine-id, host key and `/data`, and is enrolled again from the
@@ -61,6 +64,14 @@ Sequence:
 4. **Fallback.** With `flockos.no-mark-good` added, a second update makes A
    primary; A boots once with `A_TRY=1` and is never marked good; the next boot
    falls back to B.
+
+**Install test** (`--variant installer`, the `install-test` job): the installer
+image is attached as a USB stick with `installer.conf` set to `confirm=no` and
+the test `.flock`, next to a blank 20 GiB NVMe. The stick must install to
+`/dev/nvme0n1` on its own, copy the `.flock` to the new disk and power off; its
+log must say both. The NVMe then boots alone, with the UEFI variables the
+installer wrote, passes the first-boot checks above and enrolls with that
+`.flock` (`--no-flock` leaves it out).
 
 Locally (Linux with KVM, or slowly under emulation elsewhere) after a build:
 
@@ -82,8 +93,11 @@ reboot, `--only update` after the update. On failure the work directory with
 QEMU cannot boot the Pi firmware, so `rpi-arm64` has no image test. CI runs
 `sudo test/image/rpi-check.sh <image>.img.gz` on the arm64 runner instead: GPT
 layout, `autoboot.txt`, the boot files and `cmdline.txt` of boot-a, slot A's
-tree (os-release, units, RAUC, the baked agent, no passwords) and the image's
-own binaries in a chroot. It needs root and an arm64 host. The boot itself is
+tree (os-release, units, the RAUC tryboot backend and its slot groups, the
+baked agent, no passwords) and the image's own binaries in a chroot. The
+backend's logic is covered by `test/unit/rpi-tryboot.bats` against fixture
+`autoboot.txt` files and a fake firmware device tree; the update and fallback
+on a real Pi is the hardware checklist. It needs root and an arm64 host. The boot itself is
 the hardware checklist below (WP-5.4).
 
 ## Hardware checklist

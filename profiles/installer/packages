@@ -1,0 +1,3 @@
+# Additions of the installer variant to profiles/base/packages (WP-3.2).
+efibootmgr
+parted
