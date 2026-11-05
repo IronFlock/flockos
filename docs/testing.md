@@ -54,7 +54,9 @@ Sequence:
    to the disk); `/data` and its bind mounts are in place; machine-id
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses
    root and passwords; no account has a password; RAUC reports slot A booted with
-   the right compatible; Docker's data-root is on `/data` and, with
+   the right compatible, tried and not marked good by anything at boot (the
+   test then marks it, as the device-agent does once it reaches the platform;
+   the test `.flock`'s agent never does); Docker's data-root is on `/data` and, with
    `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers. With the test
    `.flock` the harness puts on the FLOCKOS partition (a throwaway key, useless to
    the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
@@ -71,12 +73,13 @@ Sequence:
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
 3. **Update into slot B** with the bundle of the same build, downloaded over
-   HTTP from the host as the agent will: RAUC makes B primary, B boots, is marked
-   good, keeps machine-id, host key and `/data`, and is enrolled again from the
-   agent's copy (SSH user and agent unit back in the new slot).
-4. **Fallback.** With `flockos.no-mark-good` added, a second update makes A
-   primary; A boots once with `A_TRY=1` and is never marked good; the next boot
-   falls back to B.
+   HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
+   machine-id, host key and `/data`, and is enrolled again from the agent's copy
+   (SSH user and agent unit back in the new slot); the test marks B good, in
+   the agent's place.
+4. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
+   and nobody marks it good (as when the agent cannot reach the platform after
+   an update); the next boot falls back to B.
 
 **Install test** (`--variant installer`, the `install-test` job, for amd64-efi
 under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to `confirm=no` and
@@ -141,9 +144,11 @@ WP-4b.2, WP-5.4, WP-6.6):
 3. Wired network comes up with DHCP; WiFi with a NetworkManager profile where
    the board has WiFi.
 4. `docker run --rm hello-world` works.
-5. `rauc status` shows the booted slot good.
-6. Update to the next build's bundle, reboot, slot switched; break the new slot
-   (`flockos.no-mark-good`), update again, confirm the fallback.
+5. `rauc status` shows the booted slot good once the device-agent has reached
+   the platform (enrolled with a real `.flock`).
+6. Update to the next build's bundle, reboot, slot switched and marked good by
+   the agent; update again, keep the device off the network, reboot twice,
+   confirm the fallback.
 7. `fwupdmgr get-devices` lists the board's devices; note which have firmware on
    LVFS.
 8. Target-specific items in `docs/targets/<target>.md`.

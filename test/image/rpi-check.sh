@@ -97,11 +97,13 @@ check "the backend reads the image's autoboot.txt: slot A is primary" \
 check "repart.d: rootfs-b and data come on the first boot" \
   test -f "$work/root/usr/lib/repart.d/60-data.conf"
 check "fstab mounts FLOCKOS and /data" bash -c "grep -q '^PARTLABEL=FLOCKOS ' '$work/root/etc/fstab' && grep -q '^PARTLABEL=data ' '$work/root/etc/fstab'"
-for unit in flockos-ssh-hostkeys.service flockos-mark-good.service flockos-enroll.service ssh.service \
+for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service systemd-timesyncd.service; do
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "rauc-mark-good is masked" bash -c "[ \"\$(systemctl --root='$work/root' is-enabled rauc-mark-good.service)\" = masked ]"
+check "no unit marks the slot good at boot (the device-agent does, once online)" \
+  test ! -e "$work/root/usr/lib/systemd/system/flockos-mark-good.service"
 check "the agent is baked in" test -x "$work/root/usr/lib/ironflock/device-agent"
 # shellcheck disable=SC2016 # an awk program
 check "no account has a password" awk -F: '$2 !~ /^[!*]/ { bad = 1 } END { exit bad }' "$work/root/etc/shadow"

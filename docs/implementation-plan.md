@@ -70,9 +70,9 @@ decision), in progress.
 | 2.1 | `ironflock-init bake` | device-init | 2 | 2.0 | done (device-init 1.4.9) |
 | 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e |
 | 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
-| 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done in device-agent #202; in the next agent release |
+| 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done (device-agent #202 in 1.6.0, the catalog key in 1.6.1); the images' only health gate since flockos-mark-good went |
 | 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009) |
-| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | done (#170; catalog key 2026-11-05); the first release waits for an agent release with the key |
+| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | done (#170; catalog key 2026-11-05, trusted by device-agent 1.6.1) |
 | 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | blocked on 2.6 |
 | 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | blocked on 2.4 |
 | 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | blocked on 2.5 |
