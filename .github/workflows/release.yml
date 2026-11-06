@@ -152,7 +152,8 @@ jobs:
           retention-days: 7
 
   # The release images as published, in QEMU (test/qemu/run.py, amd64-efi
-  # base under KVM): first boot, enrollment from the test .flock, reboot. A
+  # base under KVM, with Secure Boot on and Microsoft's keys as PCs ship,
+  # ADR-0011): first boot, enrollment from the test .flock, reboot. A
   # release also updates into slot B with its own bundle, whose Cloud KMS
   # signature the image's keyring (the FlockOS root CA) must accept, and
   # falls back. A dry run's bundles carry the stand-in's signature, which no
@@ -195,7 +196,7 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
           only=()
           [ "$MODE" = release ] || only=(--only boot)
-          python3 -I test/qemu/run.py --target amd64-efi --variant base "${only[@]}" \
+          python3 -I test/qemu/run.py --target amd64-efi --variant base "${only[@]}" --secure-boot \
             --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
       - name: console and shell logs
         if: ${{ always() }}

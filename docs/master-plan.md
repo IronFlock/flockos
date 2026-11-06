@@ -32,7 +32,9 @@ are recorded as ADRs in [adr/](adr/).
   different partition layout and architecture; they are reflashed.
 - Jetson Nano, TX2, Xavier (JetPack 4/5, EOL kernels). Orin and newer only.
 - A desktop or GUI session on the device.
-- Secure Boot and measured boot. Listed as later hardening, not part of this program.
+- Secure Boot with IronFlock's own keys, and measured boot. Listed as later hardening,
+  not part of this program. The EFI targets boot with Secure Boot on through Debian's
+  signed boot chain, for convenience (ADR-0011).
 
 ## 2. Where we are
 
@@ -135,7 +137,7 @@ The FAT partition is labelled `FLOCKOS` and is where FlockFlasher drops the `.fl
 
 | # | Label | FS | Size | Content |
 |---|-------|----|------|---------|
-| 1 | `FLOCKOS` (ESP) | FAT32 | 256 MiB | GRUB EFI binary, `grub.cfg` (RAUC A/B script), `grubenv`, incoming `<device>.flock` |
+| 1 | `FLOCKOS` (ESP) | FAT32 | 256 MiB | shim and Debian's signed GRUB (ADR-0011), `grub.cfg` (RAUC A/B script), `grubenv`, incoming `<device>.flock` |
 | 2 | `rootfs-a` | ext4 | 4 GiB base, 8 GiB nvidia | Debian root including `/boot/vmlinuz` and initrd |
 | 3 | `rootfs-b` | ext4 | same | empty at flash time |
 | 4 | `data` | ext4 | rest of disk, grown on first boot by `systemd-repart` | everything that must survive an A/B switch |
@@ -370,7 +372,8 @@ grows `data`, `flockos-enroll` enrolls. The installer supports choosing `base` o
 ### 3.7 Hardware enablement
 
 **`amd64-efi`** (Phase 1). Debian 13 (trixie) `linux-image-amd64` (6.12 LTS, Debian
-security updates), `grub-efi-amd64-signed` not needed (no Secure Boot), `firmware-linux`
+security updates), Debian's signed boot chain (`shim-signed`, `grub-efi-amd64-signed`;
+ADR-0011), `firmware-linux`
 non-free blobs for NICs and WiFi, `intel-microcode`/`amd64-microcode`. Boot-tested in
 QEMU with OVMF in CI. Generic enough for any UEFI x86 IPC; legacy BIOS is not supported.
 
@@ -510,8 +513,8 @@ away (builds are 10 to 20 minutes). Jetson builds pull a 2 GB BSP; cache it with
   intact). Vendors that publish to LVFS are handled by lane 3. Vendors that do neither get
   no in-field BIOS update, and the per-target docs say so.
 
-**Lane 3.** `fwupd` (2.0 series in Debian 13; the `fwupd-unsigned` EFI binaries, since
-Secure Boot is off) with the `uefi-capsule`, `nvme`, `ata`, `dfu`, `modem-manager`,
+**Lane 3.** `fwupd` (2.0 series in Debian 13; Debian's signed EFI helper
+`fwupd-<arch>-signed`, so capsules also start under Secure Boot, ADR-0011) with the `uefi-capsule`, `nvme`, `ata`, `dfu`, `modem-manager`,
 `tpm`, `thunderbolt` and `flashrom` plugins; D-Bus activated, not resident; state on
 `/data`. Two remotes: LVFS stable (can be disabled for air-gapped fleets) and an
 `ironflock` remote whose metadata and `.cab` files are signed with an IronFlock key
@@ -766,7 +769,8 @@ Open questions to settle before Phase 2 (1, 2, 4 and 5 settled 2026-11-05 in
 ## 8. Later hardening (after this program)
 
 Read-only root with dm-verity from the RAUC `verity` hash tree, Secure Boot on x86 with
-IronFlock keys and signed UKIs (systemd-boot + RAUC `efi` backend becomes attractive
+IronFlock keys and signed UKIs (beyond ADR-0011's Debian chain, which only makes Secure
+Boot on machines boot) (systemd-boot + RAUC `efi` backend becomes attractive
 then), TPM-bound device keys, RAUC streaming installs, delta updates (RAUC adaptive
 updates), and a self-hosted arm64 runner with real Raspberry Pi hardware in the loop.
 

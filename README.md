@@ -25,6 +25,9 @@ starting with [docs/master-plan.md](docs/master-plan.md).
 | `rpi-arm64` | Raspberry Pi 4, 5, CM4, CM5 (Pi 3 and Zero 2 W without A/B) | Pi firmware tryboot + RAUC |
 | `jetson-orin` | NVIDIA Jetson Orin (Nano devkit SD image; NX/AGX flash package) | NVIDIA UEFI `nvbootctrl` + RAUC |
 
+The EFI targets boot with Secure Boot on or off, through Debian's signed shim, GRUB and
+kernel ([ADR-0011](docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md)).
+
 Variants: `base`, `nvidia` (GPU in containers on x86), `installer` (a USB stick that
 installs any of its target's images on an internal disk). Every target can be built with a PREEMPT_RT kernel
 (`-rt`). Images are flashed with [FlockFlasher](https://github.com/IronFlock/flasher);

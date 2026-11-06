@@ -2,3 +2,8 @@
 # generic arm64 kernel and GRUB's environment tool (RAUC's grub backend).
 linux-image-arm64
 grub-common
+# The Secure Boot chain as on amd64-efi (ADR-0011).
+shim-signed
+shim-helpers-arm64-signed
+grub-efi-arm64-signed
+fwupd-arm64-signed

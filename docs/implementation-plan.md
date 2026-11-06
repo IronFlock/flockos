@@ -6,7 +6,12 @@ that end in one pull request, one cross-repo change, or one hardware session, ea
 a verifiable acceptance criterion. It is the list to work from; the master plan stays the
 reference for *why*.
 
-Status as of 2026-11-04. Phase 0 is complete (release v0.9.0 is tagged).
+Status as of 2026-11-06. Releases: `v0.9.0` (2026-11-04) and `v0.10.0` (2026-11-06,
+the first signed one). Phase 0 is complete. The code of every work package up to Phase 5
+is written except WP-2.9 (platform firmware inventory). Jetson has its BSP, root tree and
+layout (WP-6.1, WP-6.2), but not yet its A/B backend, images or capsule lane (WP-6.3 to
+WP-6.5). What remains elsewhere is acceptance on real devices, starting with the x86 IPC
+(WP-1.9) that `v1.0.0` (WP-2.10, milestone M3) needs.
 
 ## How to use this plan
 
@@ -34,15 +39,15 @@ Status as of 2026-11-04. Phase 0 is complete (release v0.9.0 is tagged).
 | Milestone | Means | Phase | Reached |
 |-----------|-------|-------|---------|
 | M0 | Repo is the FlockOS home with the harness; `v0.9.0` tagged | 0 | 2026-11-04 |
-| M1 | A CI-built `amd64-efi` image boots in QEMU on a pull request | 1 | |
-| M2 | QEMU A/B update and fallback pass on every pull request; KMS-signed bundle from a workflow | 1 | |
+| M1 | A CI-built `amd64-efi` image boots in QEMU on a pull request | 1 | 2026-11-04 (#155) |
+| M2 | QEMU A/B update and fallback pass on every pull request; KMS-signed bundle from a workflow | 1 | 2026-11-06 (`v0.10.0`, the first bundles signed in Cloud KMS) |
 | M3 | `v1.0.0`: flashed from FlockFlasher, online in IronFlock, updated from the platform with rollback verified | 2 | |
 | M4 | Sealed IPC installed unattended from the installer USB | 3 | |
 | M5 | `nvidia-smi` in a container on a FlockOS GPU host | 4 | |
 | M6 | `-rt` image passes the one-hour latency acceptance on an IPC | 4b | |
 | M7 | Pi 4 and Pi 5 enroll and update with rollback from a FlockFlasher image | 5 | |
 | M8 | Orin Nano enrolls and runs a CUDA container; Orin NX updates with rollback | 6 | |
-| M9 | `arm64-efi` boots in QEMU; ReswarmOS sunset date published; docs reviewed | 7 | |
+| M9 | `arm64-efi` boots in QEMU; ReswarmOS sunset date published; docs reviewed | 7 | `arm64-efi` part 2026-11-05 (#161) |
 
 ## Status board
 
@@ -56,7 +61,7 @@ decision), in progress.
 | 0.3 | Harness skeleton, docs, legacy tag, v0.9.0 | flockos | 2 | 0.1 | done |
 | 0.4 | `shell-gate.yml` in the harness | workflows | 2 | | done (#158) |
 | 0.5 | RAUC PKI in Cloud KMS and `docs/signing.md` | GCP, flockos | 2 | | done (ceremony 2026-11-05, #167) |
-| 0.6 | Security scan switches from report-only to blocking | flockos | 0.5 | 0.3 | done (2026-11-06; accepted findings in .trivyignore.yaml until 2026-11-17 and 2026-12-06) |
+| 0.6 | Security scan switches from report-only to blocking | flockos | 0.5 | 0.3 | done (#181, 2026-11-06; accepted findings in .trivyignore.yaml until 2026-11-17 and 2026-12-06; a planted secret was blocked in #182); open: the first weekly run on `main` in blocking mode, 2026-11-09 |
 | 1.1 | Build framework and `base` rootfs | flockos | 3 | 0.3 | done (#155) |
 | 1.2 | `amd64-efi` target: GRUB, partitions, disk image | flockos | 3 | 1.1 | done (#155) |
 | 1.3 | Shared overlay: `/data` redirections, os-release, enroll placeholder | flockos | 2 | 1.1 | done (#155) |
@@ -68,18 +73,18 @@ decision), in progress.
 | 1.9 | Hardware acceptance on an x86 IPC; target and testing docs | flockos, hardware | 2 | 1.5 | open: needs an x86 IPC |
 | 2.0 | Decisions before Phase 2 (hostname, channels, first firmware lane) | all | 0.5 | | done (ADR-0009) |
 | 2.1 | `ironflock-init bake` | device-init | 2 | 2.0 | done (device-init 1.4.9) |
-| 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e |
+| 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e, for which a FlockOS VM (X.2) can be the test machine |
 | 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
-| 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done (device-agent #202 in 1.6.0, the catalog key in 1.6.1); the images' only health gate since flockos-mark-good went |
-| 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009) |
+| 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done (device-agent #202 in 1.6.0, the catalog key in 1.6.1); the images' only health gate since flockos-mark-good went; open: the acceptance, an update N to N+1 by RPC on an image with one rollback, possible once a second release is published |
+| 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009); open: the acceptance, the inventory RPC on an image |
 | 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | done (#170; catalog key 2026-11-05, trusted by device-agent 1.6.1); first release v0.10.0 on 2026-11-06 |
-| 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | blocked on 2.6 |
-| 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | blocked on 2.4 |
-| 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | blocked on 2.5 |
-| 2.10 | Phase 2 acceptance: `v1.0.0` end to end | all | 2 | 2.6, 2.7, 2.8 | blocked on 2.6, 2.7, 2.8 |
+| 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | done in FlockFlasher v3.0.0 (flasher #25, 2026-11-06); open: the acceptance, a flash from Windows, macOS and Linux that enrolls |
+| 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | done in Studio v4.0.48 (OS release, slots, "reflash required", the update with its progress) and backend v1.4.51 (`perform_os_update` at MAINTAIN); open: the acceptance, an update from the UI |
+| 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | open: not started (the backend does not pass `get_firmware_inventory` yet) |
+| 2.10 | Phase 2 acceptance: `v1.0.0` end to end | all | 2 | 1.9, 2.6, 2.7, 2.8 | open: needs the x86 IPC of 1.9; a FlockOS VM (X.2) can rehearse everything but the flash |
 | 3.1 | `flockos-installer` program | flockos | 4 | 1.5 | done (#156) |
-| 3.2 | `installer` variant image with embedded payload; QEMU install test | flockos | 3 | 3.1 | done (#156) |
-| 3.3 | Installer in FlockFlasher; hardware acceptance on a sealed IPC | flasher, hardware | 2 | 3.2, 2.7 | blocked on 2.7; needs a sealed IPC |
+| 3.2 | `installer` variant image with embedded payload; QEMU install test | flockos | 3 | 3.1 | done (#156; one stick per target carrying every image of it, #186) |
+| 3.3 | Installer in FlockFlasher; hardware acceptance on a sealed IPC | flasher, hardware | 2 | 3.2, 2.7 | open: needs a sealed IPC (FlockFlasher v3.0.0 writes the stick with the chosen payload) |
 | 4.1 | `nvidia` profile: open kernel modules built in the chroot, container toolkit | flockos | 4 | 1.5 | done (#160) |
 | 4.2 | GPU host acceptance, installer payload option, GPU docs | flockos, hardware | 2 | 4.1, 3.2 | open: needs a GPU host (the `nvidia` installer payload is done: every stick carries every image of its target) |
 | 4b.1 | `kernel-rt` profile, `-rt` images, tuning unit | flockos | 3 | 1.5 | done (#157) |
@@ -91,7 +96,7 @@ decision), in progress.
 | 5.5 | Follow-up: Raspberry Pi RT kernel built in CI | flockos | 8 | 5.4, 4b.1 | open |
 | 6.1 | BSP decision, download and cache | flockos | 2 | | done (#164, ADR-0008 accepted) |
 | 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | done (#171, #173, #174, #177) |
-| 6.3 | RAUC `custom` backend over `nvbootctrl`; health gate | flockos | 4 | 6.2 | open |
+| 6.3 | RAUC `custom` backend over `nvbootctrl`; health gate | flockos | 4 | 6.2 | open (`system.conf` names the backend; the backend itself is to do) |
 | 6.4 | Orin Nano SD image and NX/AGX flash package | flockos | 5 | 6.3 | open |
 | 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |
 | 6.6 | Jetson hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 5 | 6.4, 6.5 | open |
@@ -100,10 +105,17 @@ decision), in progress.
 | 7.2 | ReswarmOS migration guide and sunset | flockos, GCS, flasher, device-agent | 2 | 2.10 | open |
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
 | X.1 | Public install guides per target | website | 1 per target | 2.10, 5.4, 6.6 | open |
+| X.2 | Compute Engine images for virtual devices | flockos, GCP, virtual-device-manager | unplanned | 2.6 | done in flockos (#187, ADR-0010; the first images come with the next release); open: the virtual-device-manager side, in review |
+| X.3 | Secure Boot with Debian's signed boot chain | flockos | unplanned | 1.5, 3.2 | done in flockos (ADR-0011; QEMU tests with Secure Boot on); open: a boot with Secure Boot on on the x86 IPC of 1.9 |
 
-Totals in days: Phase 0 remaining 4.5; Phase 1 20; Phase 2 31.5 across four repositories;
-Phase 3 9; Phase 4 6; Phase 4b 6; Phase 5 15 (+8 follow-up); Phase 6 25 (+5 follow-up);
-Phase 7 8.
+Totals in days as planned: Phase 0 remaining 4.5; Phase 1 20; Phase 2 31.5 across four
+repositories; Phase 3 9; Phase 4 6; Phase 4b 6; Phase 5 15 (+8 follow-up); Phase 6 25
+(+5 follow-up); Phase 7 8.
+
+Remaining on 2026-11-06, open work packages only: Phase 1 2; Phase 2 5, plus the
+acceptances left in 2.2, 2.4, 2.5, 2.7 and 2.8, most of which 2.10 covers; Phase 3 2;
+Phase 4 2; Phase 4b 3; Phase 5 6 (+8 follow-up); Phase 6 17 (+5 follow-up); Phase 7 5.
+Everything marked done above was merged between 2026-11-04 and 2026-11-06.
 
 ## Dependency graph
 
@@ -127,6 +139,7 @@ flowchart LR
   WP24[2.4 agent OS updates] --> WP28[2.8 platform]
   WP26 --> WP27[2.7 FlockFlasher]
   WP26 --> WP210[2.10 v1.0.0]
+  WP19 --> WP210
   WP27 --> WP210
   WP28 --> WP210
   WP15 --> WP31[3.x installer]
@@ -141,8 +154,8 @@ flowchart LR
 ## Phase 0: Foundations and hygiene
 
 Goal and acceptance: see master plan, Phase 0. Reached on 2026-11-04 with `v0.9.0`.
-Three packages remain because they were scheduled into the first two weeks rather than
-into the release pull request.
+Three packages were scheduled into the first two weeks rather than into that release
+pull request; all three are done (WP-0.4 to WP-0.6). One owner action of WP-0.2 is open.
 
 ### WP-0.1 Repository home, rulesets, release environment (done)
 
@@ -412,8 +425,9 @@ Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmwar
   checksums, SBOMs and attestation links; `tag` last. WIF service account gets object
   admin on the two prefixes.
 - Acceptance: a release pull request's dry run exercises every job without publishing;
-  the first real release tags `v1.0.0` with the `amd64-efi/base` image downloadable and
-  the manifest signature verifying with the agent's verifier.
+  the first real release has the `amd64-efi/base` image downloadable and the manifest
+  signature verifying with the agent's verifier. That release was `v0.10.0`
+  (2026-11-06), not `v1.0.0` as first planned: `v1.0.0` is milestone M3 (WP-2.10).
 
 ### WP-2.7 FlockFlasher: signed catalog, variants, `FLOCKOS` targeting (4 days, `flasher`)
 
@@ -445,7 +459,9 @@ Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmwar
 
 The master plan's Phase 2 acceptance, executed and recorded: flash from FlockFlasher,
 boot the IPC, online within two minutes, run an app, bump `VERSION`, merge, update from
-the platform, rollback verified once by sabotaging the new slot. Milestone M3.
+the platform, rollback verified once by sabotaging the new slot. Milestone M3. It needs
+the IPC of WP-1.9. A FlockOS VM (WP-X.2) can rehearse every step except the flash
+before that.
 
 ## Phase 3: Installer USB
 
@@ -675,6 +691,32 @@ Goal and acceptance: see master plan, Phase 7. Milestone M9.
 
 FlockOS install guides replacing the Reswarm docs linked from the old catalog, one per
 target as its phase closes (2, 5, 6), linked from the manifest's `docs` field.
+
+### WP-X.2 Compute Engine images for virtual devices (unplanned, flockos + virtual-device-manager)
+
+Per [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md): every release makes
+Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`
+(`release.yml` job `vm-images`), and the virtual-device-manager boots every non-Windows
+VM from FlockOS, the image chosen by the VM's hardware, enrolling from the `.flock` in
+the instance metadata.
+
+- Acceptance: a release fills the three image families; a virtual device created in
+  Studio boots FlockOS and comes online in its flock without an SSH login.
+
+### WP-X.3 Secure Boot with Debian's signed boot chain (unplanned, flockos)
+
+Per [ADR-0011](adr/0011-secure-boot-with-debians-signed-boot-chain.md): the EFI targets
+and their installer sticks boot Debian's shim (signed by Microsoft), Debian's signed
+GRUB and kernel, so a PC boots FlockOS with Secure Boot on as it comes from the
+factory. With Secure Boot on, the `nvidia` variant's GPU stays unused, and
+`flockos-nvidia-secure-boot` says so on the console.
+
+- Acceptance: the QEMU image, install and release tests boot with Microsoft's keys and
+  Secure Boot on (done); an x86 IPC with Secure Boot on as delivered boots a flashed
+  disk and an installer stick (with WP-1.9).
+- Follow-ups: an update path for the FLOCKOS partition, so revocations of shim or GRUB
+  reach devices in the field; IronFlock's own keys with signed unified kernel images
+  (master plan, section 8).
 
 ## Keeping this plan honest
 
