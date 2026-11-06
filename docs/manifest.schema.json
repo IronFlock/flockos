@@ -98,7 +98,7 @@
           "$ref": "#/$defs/artifact"
         },
         "bundle": {
-          "description": "The RAUC bundle, <image-id>-<version>.raucb. The device-agent downloads it, checks size and sha256, and hands it to RAUC, which checks the signature and compatible. The installer has none.",
+          "description": "The RAUC bundle, <image-id>-<version>.raucb. The device-agent downloads it from <its update base>/flockos/<version>/<the last segment of url> (an IronFlock appliance's OS mirror serves the same paths; on the cloud it is url), checks size and sha256, and hands it to RAUC, which checks the signature and compatible. The installer has none.",
           "allOf": [
             { "$ref": "#/$defs/artifact" },
             {

@@ -59,6 +59,15 @@ keeps an image made from the same file.
   through `INSTALLER_PAYLOADS` in its `target.conf`. Releases up to 0.10.0
   have no `payloads`: their sticks carry the base image only, and readers take
   it so.
+- **The device-agent downloads a bundle from its own update base**, at
+  `<update base>/flockos/<version>/<file>`, where `<file>` is the last part of
+  the bundle's `url` (from device-agent 1.6.3). The `url`s
+  name the copy on the download server; the catalog is signed, so no mirror
+  can change them. On the cloud both are the same file. A device behind an
+  IronFlock appliance reaches only the appliance, whose OS mirror serves the
+  catalog unchanged and the bundles of the images its devices run, under the
+  same paths. Size and sha256 still come from the signed catalog. The layout
+  `flockos/<version>/<file>` is therefore part of the contract with readers.
 - FlockFlasher (from the release after v2.2.4) reloads the catalog when its
   board list is shown, at most every five minutes, so a new release appears
   without restarting it.
