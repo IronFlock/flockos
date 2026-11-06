@@ -9,6 +9,6 @@ PARTLABEL=data     /data      ext4  defaults,x-systemd.requires=systemd-repart.s
 /data/ironflock            /opt/ironflock                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0
 /data/home                 /home                                   none  bind,x-systemd.requires=flockos-data-layout.service  0  0
 /data/network/connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/log/journal          /var/log/journal                        none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+/data/log                  /var/log                                none  bind,x-systemd.requires=flockos-data-layout.service  0  0
 /data/cache                /var/cache/flockos                      none  bind,x-systemd.requires=flockos-data-layout.service  0  0
 /data/fwupd                /var/lib/fwupd                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0
