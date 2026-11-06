@@ -4,7 +4,7 @@ UEFI x86 edge PCs and industrial PCs (master plan, sections 3.2 and 3.7).
 
 | | |
 |---|---|
-| Boot | UEFI only (no legacy BIOS), GRUB from the removable-media path `EFI/BOOT/BOOTX64.EFI`, no Secure Boot in 1.x |
+| Boot | UEFI only (no legacy BIOS). Debian's shim (signed by Microsoft) at the removable-media path `EFI/BOOT/BOOTX64.EFI`, Debian's signed GRUB next to it; boots with Secure Boot on or off (ADR-0011) |
 | A/B | RAUC `grub` backend, `grubenv` on the FLOCKOS partition, `rauc.slot=` on the kernel command line |
 | Kernel | Debian 13 `linux-image-amd64` (6.12 LTS), `amd64-microcode`, `intel-microcode`; `-rt` images: `linux-image-rt-amd64` (PREEMPT_RT) with `flockos-rt-tuning` |
 | Firmware blobs | `firmware-linux-free`, `firmware-misc-nonfree`, `-realtek`, `-iwlwifi`, `-atheros`, `-brcm80211`, `-mediatek` |
@@ -13,13 +13,13 @@ UEFI x86 edge PCs and industrial PCs (master plan, sections 3.2 and 3.7).
 | Disk | GPT: `FLOCKOS` (ESP, 256 MiB), `rootfs-a`; `rootfs-b` and `data` made on the first boot |
 | Watchdog | systemd uses a hardware watchdog when the board has one (60 s) |
 | Firmware updates | fwupd (lane 3); board UEFI only where the vendor publishes capsules (section 3.10) |
-| GPU (`nvidia`) | NVIDIA driver from the CUDA repository with the open kernel modules: Turing (RTX 20, T4) and newer; older GPUs need the proprietary modules, which FlockOS does not ship. Containers get the GPU through the `nvidia` runtime (`docker run --gpus all`) or CDI |
+| GPU (`nvidia`) | NVIDIA driver from the CUDA repository with the open kernel modules: Turing (RTX 20, T4) and newer; older GPUs need the proprietary modules, which FlockOS does not ship. Containers get the GPU through the `nvidia` runtime (`docker run --gpus all`) or CDI. Needs Secure Boot off (see below) |
 
 ## Tested hardware
 
 | Board | UEFI version | Date | Result | Notes |
 |-------|--------------|------|--------|-------|
-| QEMU q35 + OVMF (CI) | Ubuntu 24.04 `ovmf` | every pull request | `image-test` | KVM on GitHub runners; `base` and `nvidia` (no GPU) |
+| QEMU q35 + OVMF (CI) | Ubuntu 24.04 `ovmf` | every pull request | `image-test`, `install-test` | KVM on GitHub runners; `base` and `nvidia` (no GPU); Secure Boot on with Microsoft's keys (`OVMF_VARS_4M.ms.fd`), off for `base-rt` |
 
 Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 
@@ -27,6 +27,18 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 
 - Boot from USB: the image boots from the removable-media path, so no boot entry
   is needed; on boards that hide USB boot, enable it in the firmware setup.
+- Secure Boot (ADR-0011): leave it as the machine came. FlockOS boots with
+  Microsoft's keys, as Windows and Debian do; `mokutil --sb-state` shows the
+  state. Two exceptions:
+  - Some Windows "Secured-core" PCs ship without the Microsoft third-party UEFI
+    CA, which signed shim. The firmware then refuses the disk; switch on
+    "Allow Microsoft 3rd party UEFI CA" (the name varies) or turn Secure Boot off.
+  - `nvidia`: the NVIDIA kernel modules are not signed with a key the machine
+    trusts, so with Secure Boot on the GPU stays unused and the console says so
+    at boot (`journalctl -u flockos-nvidia-secure-boot`). Turn Secure Boot off to
+    use the GPU.
+- Disks flashed with a release before ADR-0011 have an unsigned boot loader and
+  keep it through updates: they need Secure Boot off, or a new flash.
 - Some IPC firmware enables a hardware watchdog in setup; FlockOS feeds it from
   systemd once booted.
 - `nvidia` on a GPU host (WP-4.2): `nvidia-smi` on the host and

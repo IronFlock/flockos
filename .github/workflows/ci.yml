@@ -76,9 +76,11 @@ jobs:
 
   # Boots the image under KVM and runs test/qemu/run.py: first boot, reboot,
   # update into slot B with the bundle of the same build, fallback of an
-  # untested slot.
+  # untested slot. Secure Boot is on, with Microsoft's keys as PCs ship
+  # (ADR-0011), except for the rt images, which keep the path with Secure
+  # Boot off tested.
   image-test:
-    name: image-test (${{ matrix.target }}, ${{ matrix.variant }}${{ matrix.kernel == 'rt' && ', rt' || '' }})
+    name: image-test (${{ matrix.target }}, ${{ matrix.variant }}${{ matrix.kernel == 'rt' && ', rt' || '' }}${{ matrix.secure_boot && ', secure boot' || '' }})
     needs: [build]
     runs-on: ${{ matrix.runner }}
     # arm64 runners have no KVM: the arm64 image boots emulated (TCG).
@@ -94,31 +96,37 @@ jobs:
             kernel: std
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
+            secure_boot: true
           - target: amd64-efi
             variant: base
             kernel: rt
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
+            secure_boot: false
           - target: amd64-efi
             variant: nvidia
             kernel: std
             runner: ubuntu-latest
             qemu: qemu-system-x86 ovmf
+            secure_boot: true
           - target: arm64-efi
             variant: base
             kernel: std
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
+            secure_boot: true
           - target: arm64-efi
             variant: base
             kernel: rt
             runner: ubuntu-24.04-arm
             qemu: qemu-system-arm qemu-efi-aarch64
+            secure_boot: false
     env:
       TARGET: ${{ matrix.target }}
       VARIANT: ${{ matrix.variant }}
       KERNEL: ${{ matrix.kernel }}
       SUFFIX: ${{ matrix.kernel == 'rt' && '-rt' || '' }}
+      SECURE_BOOT: ${{ matrix.secure_boot && '--secure-boot' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,8 +158,9 @@ jobs:
         run: |
           sudo mkdir -p /mnt/flockos-qemu
           sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
+          # shellcheck disable=SC2086 # SECURE_BOOT is one flag or nothing
           python3 -I test/qemu/run.py --target "$TARGET" --variant "$VARIANT" --kernel "$KERNEL" \
-            --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
+            --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar" $SECURE_BOOT
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -166,8 +175,9 @@ jobs:
   # The installer stick (WP-3.2) carries every image of its target just built;
   # the test installs the base image (installer.conf payload=).
   # The stick installs to a blank NVMe unattended; the NVMe then boots alone.
+  # Both boot with Secure Boot on and Microsoft's keys (ADR-0011).
   install-test:
-    name: install-test (${{ matrix.target }})
+    name: install-test (${{ matrix.target }}, secure boot)
     needs: [build]
     runs-on: ${{ matrix.runner }}
     # arm64 runners have no KVM: the arm64 installer runs emulated (TCG).
@@ -211,7 +221,7 @@ jobs:
         run: |
           sudo mkdir -p /mnt/flockos-install
           sudo chown "$(id -u):$(id -g)" /mnt/flockos-install
-          python3 -I test/qemu/run.py --target "$TARGET" --variant installer --work /mnt/flockos-install --keep
+          python3 -I test/qemu/run.py --target "$TARGET" --variant installer --work /mnt/flockos-install --keep --secure-boot
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

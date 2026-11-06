@@ -3,3 +3,7 @@
 # inert; it is not started at boot (10-flockos-nvidia.preset). The same
 # pattern as nvidia-cdi-refresh (99-nvidia-cdi-refresh.rules).
 ACTION=="add", SUBSYSTEM=="module", KERNEL=="nvidia", TAG+="systemd", ENV{SYSTEMD_WANTS}+="nvidia-persistenced.service"
+# Under Secure Boot the kernel refuses the nvidia module (ADR-0011): for each
+# NVIDIA display controller (VGA or 3D), once udev has tried to load the
+# module, flockos-nvidia-secure-boot says so on the console.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="flockos-nvidia-secure-boot.service"

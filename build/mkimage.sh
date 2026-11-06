@@ -1,28 +1,51 @@
 #!/usr/bin/env bash
 # Stage 3: the disk image (master plan, sections 3.2 and 3.3): the FLOCKOS
-# partition (ESP with GRUB and its A/B script) and slot A (ext4 from $ROOT),
-# assembled by genimage, compressed for FlockFlasher.
+# partition (ESP with the boot chain and GRUB's A/B script) and slot A (ext4
+# from $ROOT), assembled by genimage, compressed for FlockFlasher.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${SOURCE_DATE_EPOCH:?}"
-: "${GRUB_FORMAT:?}" "${EFI_LOADER:?}" "${ESP_SIZE:?}" "${ROOT_PART_TYPE:?}" "${CONSOLE_CMDLINE:?}" "${GRUB_SERIAL:?}" "${GRUB_TERMINAL:?}"
+: "${GRUB_FORMAT:?}" "${EFI_ARCH:?}" "${EFI_LOADER:?}" "${ESP_SIZE:?}" "${ROOT_PART_TYPE:?}" "${CONSOLE_CMDLINE:?}" "${GRUB_SERIAL:?}" "${GRUB_TERMINAL:?}"
 : "${ESP_PART_NAME:?}" "${ROOT_PART_NAME:?}"
-require grub-mkimage grub-editenv mkfs.vfat mmd mcopy mke2fs dumpe2fs genimage pigz
+require grub-editenv mkfs.vfat mmd mcopy mke2fs dumpe2fs genimage pigz
 target_dir=$src/targets/$TARGET
 img=$WORK/image
 rm -rf "$img"
 mkdir -p "$img/input" "$img/tmp" "$img/root"
 
-# --- GRUB: one EFI binary with its modules, the A/B script, grubenv ---------
+# --- the boot chain: shim, GRUB, the A/B script, grubenv --------------------
+# Secure Boot (ADR-0011): the firmware starts Debian's shim, which Microsoft
+# signed, from the removable-media path, so no boot entry is needed. shim
+# checks and starts Debian's signed GRUB next to it, and GRUB has shim check
+# the kernel, which Debian signed too. With Secure Boot off the same chain
+# boots without the checks. The binaries are the image's own packages
+# (targets/<target>/packages), so packages.tsv and the SBOM list them.
+# MokManager is there for shim to start when a check fails; shim's fallback
+# (fb*.efi) is not: it would write boot entries and reboot.
 esp_dir=$img/esp
-mkdir -p "$esp_dir/EFI/BOOT"
-grub-mkimage -O "$GRUB_FORMAT" -o "$esp_dir/EFI/BOOT/$EFI_LOADER" -p /EFI/BOOT \
-  part_gpt part_msdos fat ext2 normal configfile linux loadenv test regexp probe \
-  echo gzio serial terminal all_video search search_fs_uuid search_label \
-  sleep reboot halt cat ls minicmd
+mkdir -p "$esp_dir/EFI/BOOT" "$esp_dir/EFI/debian"
+shim=$ROOT/usr/lib/shim/shim$EFI_ARCH.efi.signed
+mok_manager=$ROOT/usr/lib/shim/mm$EFI_ARCH.efi.signed
+grub=$ROOT/usr/lib/grub/$GRUB_FORMAT-signed/grub$EFI_ARCH.efi.signed
+for f in "$shim" "$mok_manager" "$grub"; do
+  [ -s "$f" ] || die "the image has no ${f#"$ROOT"} (targets/$TARGET/packages)"
+done
+install -m 0644 "$shim" "$esp_dir/EFI/BOOT/$EFI_LOADER"
+install -m 0644 "$mok_manager" "$esp_dir/EFI/BOOT/mm$EFI_ARCH.efi"
+install -m 0644 "$grub" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi"
+# Debian's signed GRUB has its modules built in and reads its configuration
+# from /EFI/debian (its built-in prefix). That file hands over to the A/B
+# script in /EFI/BOOT, next to grubenv, where RAUC's system.conf, rt-tuning
+# and the devices flashed before ADR-0011 have it.
+cat >"$esp_dir/EFI/debian/grub.cfg" <<'CFG'
+# FlockOS: Debian's signed GRUB reads this file (its prefix is /EFI/debian).
+# The A/B script and grubenv are in /EFI/BOOT, next to the boot loader.
+set prefix=($root)/EFI/BOOT
+source ${prefix}/grub.cfg
+CFG
 render "$target_dir/grub/grub.cfg" >"$esp_dir/EFI/BOOT/grub.cfg"
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" create
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" set "ORDER=A B" A_OK=1 A_TRY=0 B_OK=0 B_TRY=0 FLOCKOS_CMDLINE=
@@ -43,9 +66,11 @@ esp_kib=$(($(size_bytes "$ESP_SIZE") / 1024))
 volid=$(printf '%08x' $((SOURCE_DATE_EPOCH & 0xffffffff)))
 mkfs.vfat -F 32 -n FLOCKOS -i "$volid" --invariant -C "$esp" "$esp_kib" >/dev/null
 export MTOOLS_SKIP_CHECK=1
-mmd -i "$esp" ::/EFI ::/EFI/BOOT
+mmd -i "$esp" ::/EFI ::/EFI/BOOT ::/EFI/debian
 mcopy -i "$esp" -m "$esp_dir/README.txt" ::/README.txt
-mcopy -i "$esp" -m "$esp_dir/EFI/BOOT/$EFI_LOADER" "$esp_dir/EFI/BOOT/grub.cfg" "$esp_dir/EFI/BOOT/grubenv" ::/EFI/BOOT/
+mcopy -i "$esp" -m "$esp_dir/EFI/BOOT/$EFI_LOADER" "$esp_dir/EFI/BOOT/mm$EFI_ARCH.efi" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi" \
+  "$esp_dir/EFI/BOOT/grub.cfg" "$esp_dir/EFI/BOOT/grubenv" ::/EFI/BOOT/
+mcopy -i "$esp" -m "$esp_dir/EFI/debian/grub.cfg" ::/EFI/debian/
 
 # --- slot A: ext4 of the full slot size from the tree ----------------------
 # metadata_csum_seed and orphan_file are left out: GRUB has to read this

@@ -2,7 +2,7 @@
 """Boot a built FlockOS image in QEMU and test it (docs/testing.md).
 
   run.py --target amd64-efi --variant base [--out out] [--work DIR]
-         [--docker-image-tar FILE] [--keep]
+         [--docker-image-tar FILE] [--secure-boot] [--keep]
 
 The image under test is the artefact from `just build`, unchanged except for
 one value in the FLOCKOS partition's grubenv of the test copy:
@@ -11,14 +11,20 @@ on the second serial port on amd64 (ttyS1), on a virtio console on arm64
 (hvc0; QEMU's virt machine has one UART). grubenv lives on the FLOCKOS
 partition, so the shell is there on both slots, before and after an update.
 
-Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (partitions grown, /data
-layout, identity, SSH policy, RAUC slot A good, Docker, fwupd); for nvidia
+With --secure-boot the firmware has Microsoft's keys enrolled and Secure
+Boot on, as on a PC from the factory (ADR-0011): the image's shim, GRUB and
+kernel have to pass its checks, and the kernel runs locked down.
+
+Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (boot chain and Secure Boot
+state, partitions grown, /data layout, identity, SSH policy, RAUC slot A good,
+Docker, fwupd); for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
 (state persists); update into slot B with the bundle of the same build;
 fallback: an update into slot A that is never marked good falls back to B.
 
-Needs: qemu-system-<arch>, OVMF/AAVMF firmware, mtools (mcopy). Standard
-library only; run with `python3 -I`.
+Needs: qemu-system-<arch>, OVMF/AAVMF firmware (for --secure-boot the
+builds with Microsoft's keys: Debian's and Ubuntu's ovmf, qemu-efi-aarch64),
+mtools (mcopy). Standard library only; run with `python3 -I`.
 """
 
 import argparse
@@ -71,6 +77,13 @@ FIRMWARE = {
         ("/usr/share/AAVMF/AAVMF_CODE.fd", "/usr/share/AAVMF/AAVMF_VARS.fd"),
         ("/opt/homebrew/share/qemu/edk2-aarch64-code.fd", "/opt/homebrew/share/qemu/edk2-arm-vars.fd"),
     ],
+}
+# Firmware with Secure Boot on and Microsoft's keys enrolled (the variable
+# store's "ms" build), as PCs ship. On amd64 the code is the SMM build, which
+# keeps the variables from the guest and needs q35 with SMM.
+SECURE_BOOT_FIRMWARE = {
+    "amd64": [("/usr/share/OVMF/OVMF_CODE_4M.secboot.fd", "/usr/share/OVMF/OVMF_VARS_4M.ms.fd")],
+    "arm64": [("/usr/share/AAVMF/AAVMF_CODE.ms.fd", "/usr/share/AAVMF/AAVMF_VARS.ms.fd")],
 }
 
 
@@ -172,8 +185,9 @@ def set_test_cmdline(disk, workdir, cmdline):
 
 
 class VM:
-    def __init__(self, arch, disk, workdir, accel, stick=None, nvme=False):
+    def __init__(self, arch, disk, workdir, accel, stick=None, nvme=False, secure_boot=False):
         self.arch, self.disk, self.workdir, self.accel = arch, disk, workdir, accel
+        self.secure_boot = secure_boot
         self.debug_cmdline = debug_cmdline(arch)
         # stick: an image attached as a USB stick (booted first); nvme: the
         # disk is an NVMe drive instead of virtio.
@@ -186,10 +200,12 @@ class VM:
         self.transcript = open(os.path.join(workdir, "shell.log"), "ab")
 
     def firmware(self):
-        for code, vars_ in FIRMWARE[self.arch]:
-            if os.path.exists(code):
+        table = SECURE_BOOT_FIRMWARE if self.secure_boot else FIRMWARE
+        for code, vars_ in table[self.arch]:
+            if os.path.exists(code) and (vars_ is None or os.path.exists(vars_)):
                 return code, vars_
-        raise TestFailure(f"no UEFI firmware for {self.arch} found (install ovmf / qemu-efi-aarch64)")
+        kind = "Secure Boot UEFI firmware with Microsoft's keys" if self.secure_boot else "UEFI firmware"
+        raise TestFailure(f"no {kind} for {self.arch} found (install ovmf / qemu-efi-aarch64)")
 
     def start(self, qemu, http_port):
         code, vars_template = self.firmware()
@@ -198,7 +214,9 @@ class VM:
             shutil.copy(vars_template, vars_copy)
         cmd = [qemu, "-m", "2048", "-smp", "2", "-display", "none", "-no-user-config", "-nodefaults"]
         if self.arch == "amd64":
-            cmd += ["-machine", "q35", "-device", "i6300esb"]
+            cmd += ["-machine", "q35,smm=on" if self.secure_boot else "q35", "-device", "i6300esb"]
+            if self.secure_boot:
+                cmd += ["-global", "driver=cfi.pflash01,property=secure,value=on"]
         else:
             cmd += ["-machine", "virt"]
         # Emulated arm64: QEMU's own pointer-authentication algorithm is far
@@ -385,6 +403,7 @@ def serve(directory):
 class Runner:
     def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout, disk_dev="/dev/vda", flock=None):
         self.vm, self.conf, self.image_id = vm, conf, image_id
+        self.secure_boot = vm.secure_boot
         self.disk_dev = disk_dev
         self.flock = flock
         self.http = f"http://10.0.2.2:{http_port}"
@@ -431,12 +450,29 @@ class Runner:
         if f"{name}_OK=1" not in env or f"{name}_TRY=0" not in env or state != "good":
             raise TestFailure(f"slot {name} is not good after rauc status mark-good: {state}, {env}")
 
+    def boot_chain(self):
+        """ADR-0011: the FLOCKOS partition boots the image's own shim and
+        Debian's signed GRUB, and Secure Boot is what the test asked for: on,
+        the kernel booted through every check and runs locked down."""
+        efi_arch, grub_format = self.conf["EFI_ARCH"], self.conf["GRUB_FORMAT"]
+        boot = "/boot/efi/EFI/BOOT"
+        self.vm.run(f"cmp {boot}/{self.conf['EFI_LOADER']} /usr/lib/shim/shim{efi_arch}.efi.signed")
+        self.vm.run(f"cmp {boot}/mm{efi_arch}.efi /usr/lib/shim/mm{efi_arch}.efi.signed")
+        self.vm.run(f"cmp {boot}/grub{efi_arch}.efi /usr/lib/grub/{grub_format}-signed/grub{efi_arch}.efi.signed")
+        self.vm.run(f"test ! -e {boot}/fb{efi_arch}.efi && grep -q '^source ' /boot/efi/EFI/debian/grub.cfg")
+        state = self.vm.run("mokutil --sb-state", check=False).strip()
+        lockdown = self.vm.run("cat /sys/kernel/security/lockdown").strip()
+        want_state, want_lockdown = ("enabled", "[integrity]") if self.secure_boot else ("disabled", "[none]")
+        if f"SecureBoot {want_state}" not in state or want_lockdown not in lockdown:
+            raise TestFailure(f"Secure Boot should be {want_state}: mokutil says {state!r}, lockdown {lockdown!r}")
+
     def first_boot(self):
         self.vm.wait_shell(self.boot_timeout)
         self.wait_running()
         osr = self.vm.run("cat /etc/os-release")
         if f"IMAGE_ID={self.image_id}" not in osr or "ID=flockos" not in osr:
             raise TestFailure(f"unexpected os-release:\n{osr}")
+        self.boot_chain()
         parts = self.vm.run(f"lsblk -bnro PARTLABEL,SIZE {self.disk_dev} | sed '/^ /d'")
         sizes = dict(line.split() for line in parts.splitlines() if len(line.split()) == 2)
         for label in ("FLOCKOS", "rootfs-a", "rootfs-b", "data"):
@@ -667,7 +703,7 @@ def install_test(args, conf, arch, version, accel, boot_timeout, port):
 
     results = []
     ok = False
-    vm = VM(arch, nvme, workdir, accel, stick=stick, nvme=True)
+    vm = VM(arch, nvme, workdir, accel, stick=stick, nvme=True, secure_boot=args.secure_boot)
     try:
         log("--- install from the stick")
         start = time.time()
@@ -693,7 +729,7 @@ def install_test(args, conf, arch, version, accel, boot_timeout, port):
         set_test_cmdline(nvme, workdir, debug_cmdline(arch))
         if os.path.exists(vm.sock_path):
             os.remove(vm.sock_path)
-        vm2 = VM(arch, nvme, workdir, accel, nvme=True)
+        vm2 = VM(arch, nvme, workdir, accel, nvme=True, secure_boot=args.secure_boot)
         runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1", flock=flock)
         try:
             vm2.start(conf["QEMU_SYSTEM"], port)
@@ -729,6 +765,8 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep the work directory")
     ap.add_argument("--only", choices=["boot", "update"], help="stop after this part")
     ap.add_argument("--no-flock", action="store_true", help="boot without a test .flock (an unenrolled device)")
+    ap.add_argument("--secure-boot", action="store_true",
+                    help="boot with Secure Boot on and Microsoft's keys enrolled, as PCs ship (ADR-0011)")
     args = ap.parse_args()
 
     conf = load_conf(os.path.join(REPO, "targets", args.target, "target.conf"))
@@ -774,13 +812,15 @@ def main():
 
     accel = pick_accel(arch)
     boot_timeout = 300 if accel != "tcg" else 1500
-    log(f"accelerator: {accel}{' (slow)' if accel == 'tcg' else ''}")
-    vm = VM(arch, disk, workdir, accel)
+    log(f"accelerator: {accel}{' (slow)' if accel == 'tcg' else ''}; Secure Boot {'on' if args.secure_boot else 'off'}")
+    vm = VM(arch, disk, workdir, accel, secure_boot=args.secure_boot)
     runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout, flock=flock)
     ok = False
     try:
         vm.start(conf["QEMU_SYSTEM"], port)
-        runner.step("first boot: partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
+        runner.step("first boot: boot chain, Secure Boot "
+                    + ("on" if args.secure_boot else "off")
+                    + ", partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
         if args.kernel == "rt":
             runner.step("rt kernel: PREEMPT_RT, tuning from rt.conf into grubenv", runner.rt_kernel)
         if args.variant == "nvidia":

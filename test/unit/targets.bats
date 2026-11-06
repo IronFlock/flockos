@@ -53,6 +53,42 @@ setup() {
   ! read_list "$repo/profiles/base/packages" "$repo/profiles/base/packages.amd64" "$repo/profiles/base/packages.arm64" | grep -q '^linux-image-'
 }
 
+@test "each EFI target brings Debian's signed boot chain of its architecture (ADR-0011)" {
+  for t in amd64-efi arm64-efi; do
+    (
+      load_conf "$repo/targets/$t/target.conf"
+      mapfile -t pkgs < <(read_list "$repo/targets/$t/packages")
+      for p in shim-signed "shim-helpers-$ARCH-signed" "grub-efi-$ARCH-signed" "fwupd-$ARCH-signed"; do
+        printf '%s\n' "${pkgs[@]}" | grep -qx "$p"
+      done
+      # The firmware's removable-media path is BOOT<arch>.EFI, and shim
+      # starts grub<arch>.efi next to it.
+      [ "$EFI_LOADER" = "BOOT${EFI_ARCH^^}.EFI" ]
+    )
+  done
+  [ "$(load_conf "$repo/targets/amd64-efi/target.conf" && echo "$EFI_ARCH $GRUB_FORMAT")" = "x64 x86_64-efi" ]
+  [ "$(load_conf "$repo/targets/arm64-efi/target.conf" && echo "$EFI_ARCH $GRUB_FORMAT")" = "aa64 arm64-efi" ]
+}
+
+@test "the disk image boots shim and Debian's GRUB, which finds the A/B script" {
+  img=$repo/build/mkimage.sh
+  # shim at the removable-media path, GRUB and MokManager next to it, from
+  # the image's packages; no GRUB of the build's own, no shim fallback.
+  grep -q 'shim=$ROOT/usr/lib/shim/shim$EFI_ARCH.efi.signed$' "$img"
+  grep -q 'grub=$ROOT/usr/lib/grub/$GRUB_FORMAT-signed/grub$EFI_ARCH.efi.signed$' "$img"
+  grep -q 'install -m 0644 "$shim" "$esp_dir/EFI/BOOT/$EFI_LOADER"$' "$img"
+  grep -q 'install -m 0644 "$grub" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi"$' "$img"
+  ! grep -q 'grub-mkimage\|fb\$EFI_ARCH' "$img"
+  ! read_list "$repo/build/builder-packages" "$repo/build/builder-packages.amd64" "$repo/build/builder-packages.arm64" | grep -q '^grub-efi-'
+  # Debian's GRUB reads /EFI/debian/grub.cfg; it hands over to the A/B
+  # script in /EFI/BOOT, whose ${prefix}/grubenv is RAUC's.
+  stub=$(sed -n "/^cat >\"\$esp_dir\/EFI\/debian\/grub.cfg\" <<'CFG'$/,/^CFG$/p" "$img")
+  [[ "$stub" == *$'\nset prefix=($root)/EFI/BOOT\nsource ${prefix}/grub.cfg\nCFG' ]]
+  load_conf "$repo/targets/amd64-efi/target.conf"
+  COMPATIBLE=x render "$repo/targets/amd64-efi/system.conf" | grep -qx 'grubenv=/boot/efi/EFI/BOOT/grubenv'
+  grep -q 'load_env --file ${prefix}/grubenv' "$repo/targets/amd64-efi/grub/grub.cfg"
+}
+
 @test "the rt kernel is offered for base on the EFI targets only" {
   export FLOCKOS_VERSION=0.0.0 FLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
   run bash "$repo/build/build.sh" rpi-arm64 base rt

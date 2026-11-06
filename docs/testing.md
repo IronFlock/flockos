@@ -47,9 +47,20 @@ machine has one UART). The script drives that shell; the first serial port
 (kernel and systemd console) is written to `console.log`. Because `grubenv` is on
 the FLOCKOS partition, the shell is there on both slots, also after an update.
 
+With `--secure-boot` the firmware is the build with Microsoft's keys enrolled
+and Secure Boot on (`OVMF_CODE_4M.secboot.fd` with `OVMF_VARS_4M.ms.fd` on q35
+with SMM; `AAVMF_CODE.ms.fd` with `AAVMF_VARS.ms.fd`), as PCs ship (ADR-0011).
+CI boots that way in every image test except the `-rt` ones, which keep the path
+with Secure Boot off tested, in both install tests and in the release's
+end-to-end test.
+
 Sequence:
 
-1. **First boot.** System state `running`; os-release carries the image id;
+1. **First boot.** System state `running`; os-release carries the image id; the
+   FLOCKOS partition boots the image's own shim, MokManager and Debian's signed
+   GRUB (byte for byte the packaged files), without shim's fallback, and Secure
+   Boot is what the test asked for (`mokutil --sb-state`; with it on, the kernel
+   is locked down in integrity mode);
    `systemd-repart` created `rootfs-b` (same size as `rootfs-a`) and `data` (grown
    to the disk); `/data` and its bind mounts are in place; machine-id
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses

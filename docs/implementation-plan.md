@@ -106,6 +106,7 @@ decision), in progress.
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
 | X.1 | Public install guides per target | website | 1 per target | 2.10, 5.4, 6.6 | open |
 | X.2 | Compute Engine images for virtual devices | flockos, GCP, virtual-device-manager | unplanned | 2.6 | done in flockos (#187, ADR-0010; the first images come with the next release); open: the virtual-device-manager side, in review |
+| X.3 | Secure Boot with Debian's signed boot chain | flockos | unplanned | 1.5, 3.2 | done in flockos (ADR-0011; QEMU tests with Secure Boot on); open: a boot with Secure Boot on on the x86 IPC of 1.9 |
 
 Totals in days as planned: Phase 0 remaining 4.5; Phase 1 20; Phase 2 31.5 across four
 repositories; Phase 3 9; Phase 4 6; Phase 4b 6; Phase 5 15 (+8 follow-up); Phase 6 25
@@ -701,6 +702,21 @@ the instance metadata.
 
 - Acceptance: a release fills the three image families; a virtual device created in
   Studio boots FlockOS and comes online in its flock without an SSH login.
+
+### WP-X.3 Secure Boot with Debian's signed boot chain (unplanned, flockos)
+
+Per [ADR-0011](adr/0011-secure-boot-with-debians-signed-boot-chain.md): the EFI targets
+and their installer sticks boot Debian's shim (signed by Microsoft), Debian's signed
+GRUB and kernel, so a PC boots FlockOS with Secure Boot on as it comes from the
+factory. With Secure Boot on, the `nvidia` variant's GPU stays unused, and
+`flockos-nvidia-secure-boot` says so on the console.
+
+- Acceptance: the QEMU image, install and release tests boot with Microsoft's keys and
+  Secure Boot on (done); an x86 IPC with Secure Boot on as delivered boots a flashed
+  disk and an installer stick (with WP-1.9).
+- Follow-ups: an update path for the FLOCKOS partition, so revocations of shim or GRUB
+  reach devices in the field; IronFlock's own keys with signed unified kernel images
+  (master plan, section 8).
 
 ## Keeping this plan honest
 

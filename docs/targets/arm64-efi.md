@@ -6,7 +6,7 @@ Raspberry Pi and Jetson Orin have their own targets.
 
 | | |
 |---|---|
-| Boot | UEFI only, GRUB from the removable-media path `EFI/BOOT/BOOTAA64.EFI`, no Secure Boot in 1.x |
+| Boot | UEFI only. Debian's shim (signed by Microsoft) at the removable-media path `EFI/BOOT/BOOTAA64.EFI`, Debian's signed GRUB next to it; boots with Secure Boot on or off (ADR-0011) |
 | A/B | as amd64-efi: RAUC `grub` backend, `grubenv` on the FLOCKOS partition. Boot script, `system.conf`, disk layout and `repart.d` are amd64-efi's files (symlinks in `targets/arm64-efi`) |
 | Kernel | Debian 13 `linux-image-arm64` (6.12 LTS), ACPI and device tree |
 | Consoles | screen (`tty0`) and the PL011 UART (`ttyAMA0`, 115200 8N1); GRUB writes to the firmware's serial port (`serial efi0`) |
@@ -18,7 +18,7 @@ Raspberry Pi and Jetson Orin have their own targets.
 
 | Board | UEFI version | Date | Result | Notes |
 |-------|--------------|------|--------|-------|
-| QEMU virt + AAVMF (CI) | Ubuntu 24.04 `qemu-efi-aarch64` | every pull request | `image-test`, `install-test` | arm64 runner without KVM: emulated (TCG) |
+| QEMU virt + AAVMF (CI) | Ubuntu 24.04 `qemu-efi-aarch64` | every pull request | `image-test`, `install-test` | arm64 runner without KVM: emulated (TCG); Secure Boot on with Microsoft's keys (`AAVMF_VARS.ms.fd`), off for `base-rt` |
 
 ## Notes
 

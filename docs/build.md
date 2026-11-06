@@ -20,7 +20,7 @@ stage:
 | signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key. Throwaway by default; a release build (`FLOCKOS_SIGNING=release`) puts the FlockOS root CA into the image and seals the bundle with a throwaway key for `release.yml`'s sign job (ADR-0006, `docs/signing.md`) |
 | rootfs | `build/mkrootfs.sh` | minbase tree of the target's distribution (see below) from `mmdebstrap` with `profiles/base/packages`, its per-distribution and per-architecture lists, the target's `targets/<target>/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `distros/<distro>/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
 | customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`; not into the installer), package manifest, timestamps clamped to the commit time |
-| disk image | `build/mkimage.sh` (EFI targets), `build/mkimage-rpi.sh` (Raspberry Pi: FLOCKOS with `autoboot.txt`, boot-a from `/boot/firmware`, an empty boot-b, slot A) | FLOCKOS partition (ESP: GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
+| disk image | `build/mkimage.sh` (EFI targets), `build/mkimage-rpi.sh` (Raspberry Pi: FLOCKOS with `autoboot.txt`, boot-a from `/boot/firmware`, an empty boot-b, slot A) | FLOCKOS partition (ESP: shim, Debian's signed GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
 | bundle | `build/mkbundle.sh` | verity RAUC bundle of slot A's filesystem, `compatible=flockos-<target>-<variant>[-rt]`, signed and verified against the image keyring (none for the installer); on `rpi-arm64` with the boot partition as `boot.vfat` |
 
 ### The distribution
@@ -96,8 +96,14 @@ Outgrowing a slot takes a new image id with a larger slot, not a bundle.
 
 ## Boot and A/B
 
-GRUB is one EFI binary at the removable-media path `EFI/BOOT/BOOTX64.EFI` (no
-boot entry is needed) with its modules built in. `grub.cfg`
+The boot chain is Debian's signed one (ADR-0011), from the image's packages:
+the firmware starts shim (`shim-signed`, signed by Microsoft) at the
+removable-media path `EFI/BOOT/BOOTX64.EFI` (`BOOTAA64.EFI` on arm64; no boot
+entry is needed), shim starts and checks Debian's signed GRUB next to it
+(`grubx64.efi`), and GRUB has shim check Debian's kernel. With Secure Boot off
+the same chain boots without the checks. Debian's GRUB has its modules built
+in and reads `EFI/debian/grub.cfg`, which `build/mkimage.sh` writes: it sets
+`${prefix}` to `EFI/BOOT` and sources the A/B script there. `grub.cfg`
 (`targets/amd64-efi/grub/grub.cfg`) is RAUC's reference A/B script: it picks the
 first slot in `ORDER` that is good and not yet tried, sets its `_TRY` flag in
 `grubenv`, and boots that slot's `/vmlinuz` with `root=PARTUUID=…` and
@@ -165,8 +171,10 @@ Both repositories stay in the image's apt sources with their keys embedded
 initramfs. Without a GPU nothing of NVIDIA's runs: `nvidia-persistenced` is
 started by udev when the `nvidia` module loads, which happens only for an
 NVIDIA GPU, and `10-flockos-nvidia.preset` keeps it and `nvidia-powerd` (a
-notebook feature) from being enabled on a slot's first boot. The modules are
-unsigned; FlockOS 1.x boots without Secure Boot.
+notebook feature) from being enabled on a slot's first boot. No key the
+machine trusts signs the modules, so a kernel booted with Secure Boot on refuses
+them (ADR-0011): `flockos-nvidia-secure-boot`, started by udev for each NVIDIA
+display controller, then says on the console that the GPU needs Secure Boot off.
 
 ## The installer variant
 

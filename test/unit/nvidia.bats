@@ -53,6 +53,20 @@ setup() {
   [[ "$rule" == *'ENV{SYSTEMD_WANTS}+="nvidia-persistenced.service"'* ]]
 }
 
+@test "under Secure Boot, an NVIDIA GPU whose module did not load gets a console message" {
+  rule=$(grep -v '^#' "$profile/overlay/usr/lib/udev/rules.d/71-flockos-nvidia.rules" | grep flockos-nvidia-secure-boot)
+  [[ "$rule" == *'SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03*"'* ]]
+  [[ "$rule" == *'ENV{SYSTEMD_WANTS}+="flockos-nvidia-secure-boot.service"'* ]]
+  unit=$profile/overlay/usr/lib/systemd/system/flockos-nvidia-secure-boot.service
+  grep -qx 'ConditionSecurity=uefi-secureboot' "$unit"
+  grep -qx 'ConditionPathExists=!/sys/module/nvidia' "$unit"
+  grep -qx 'StandardOutput=journal+console' "$unit"
+  grep -q '^ExecStart=/usr/bin/echo "FlockOS: Secure Boot is on, .*Turn Secure Boot off in the firmware setup' "$unit"
+  # udev starts it; it is never enabled, and it never fails the boot.
+  ! grep -q '^\[Install\]' "$unit"
+  ! grep -q '^ExecStart=.*exit 1' "$unit"
+}
+
 @test "nvidia-modules.sh wants the driver version" {
   run bash "$repo/build/nvidia-modules.sh"
   [ "$status" -eq 2 ]
