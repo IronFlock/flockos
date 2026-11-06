@@ -107,11 +107,19 @@
               "properties": { "compatible": { "type": "string" } }
             }
           ]
-        }
+        },
+        "payloads": { "$ref": "#/$defs/payloads" }
       },
       "if": { "properties": { "variant": { "const": "installer" } } },
       "then": { "not": { "required": ["bundle"] } },
-      "else": { "required": ["bundle"] }
+      "else": { "required": ["bundle"], "not": { "required": ["payloads"] } }
+    },
+    "payloads": {
+      "description": "The installer only: the image ids the stick carries, every updatable image of its target in the same release (FlockFlasher offers them; it writes the chosen one as payload=<image id> into installer.conf). A release up to 0.10.0 has none: readers take the target's base image, the one payload those sticks carry.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" }
     },
     "board": {
       "description": "FlockFlasher's SupportedBoard (src/types/index.ts).",
@@ -135,7 +143,7 @@
       }
     },
     "imageInfo": {
-      "description": "FlockFlasher's ImageInfo, plus image_id, variant and kernel for its variant choice (WP-2.7).",
+      "description": "FlockFlasher's ImageInfo, plus image_id, variant and kernel for its variant choice (WP-2.7), and the installer's payloads.",
       "type": "object",
       "required": ["buildtime", "download", "file", "osname", "osvariant", "sha256", "size", "update", "version", "image_id", "variant", "kernel"],
       "properties": {
@@ -167,7 +175,8 @@
         "version": { "$ref": "#/$defs/version" },
         "image_id": { "type": "string", "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" },
         "variant": { "enum": ["base", "nvidia", "installer"] },
-        "kernel": { "enum": ["std", "rt"] }
+        "kernel": { "enum": ["std", "rt"] },
+        "payloads": { "$ref": "#/$defs/payloads" }
       }
     }
   }

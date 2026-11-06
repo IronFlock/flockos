@@ -83,3 +83,27 @@ example="$repo/docs/manifest.example.json"
   # {"payload": "...", "signature": "<88 base64 characters>"} and indentation
   [ $((payload + 200)) -lt 65536 ]
 }
+
+@test "an installer's payloads are updatable images of its target in its release" {
+  run jq -r '.releases | to_entries[] | .key as $v | .value.images as $imgs |
+    $imgs | to_entries[] | .key as $id | .value as $i |
+    if $i.variant == "installer" then
+      ($i.payloads // [])[] | . as $p | $imgs[$p] as $pi |
+      select($pi == null or $pi.target != $i.target or $pi.variant == "installer" or $pi.bundle == null) |
+      "\($v) \($id): \($p)"
+    else
+      select($i.payloads != null) | "\($v) \($id): payloads on an image that is not the installer"
+    end' "$example"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "FlockFlasher's installer entries list the payloads of the release's installer" {
+  run jq -r '.channels.production as $v | .releases[$v].images as $imgs |
+    .boards[].latestImages[] | select(.variant == "installer") |
+    select(.payloads != $imgs[.image_id].payloads) | .image_id' "$example"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run jq -e '[.releases[].images[] | select(.variant == "installer") | .payloads | length] | min >= 2' "$example"
+  [ "$status" -eq 0 ]
+}

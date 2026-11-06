@@ -81,7 +81,7 @@ decision), in progress.
 | 3.2 | `installer` variant image with embedded payload; QEMU install test | flockos | 3 | 3.1 | done (#156) |
 | 3.3 | Installer in FlockFlasher; hardware acceptance on a sealed IPC | flasher, hardware | 2 | 3.2, 2.7 | blocked on 2.7; needs a sealed IPC |
 | 4.1 | `nvidia` profile: open kernel modules built in the chroot, container toolkit | flockos | 4 | 1.5 | done (#160) |
-| 4.2 | GPU host acceptance, installer payload option, GPU docs | flockos, hardware | 2 | 4.1, 3.2 | open: needs a GPU host |
+| 4.2 | GPU host acceptance, installer payload option, GPU docs | flockos, hardware | 2 | 4.1, 3.2 | open: needs a GPU host (the `nvidia` installer payload is done: every stick carries every image of its target) |
 | 4b.1 | `kernel-rt` profile, `-rt` images, tuning unit | flockos | 3 | 1.5 | done (#157) |
 | 4b.2 | RT acceptance on hardware; platform CPU-set setting; app template | flockos, platform, ironflock-templates, hardware | 3 | 4b.1 | open: needs RT hardware |
 | 5.1 | `rpi-arm64` rootfs, kernels, boot partitions, disk image | flockos | 4 | 1.5 | done (#162) |

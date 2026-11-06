@@ -29,6 +29,10 @@ func release(t *testing.T, version, buildID string, ids ...string) string {
 		must(t, os.WriteFile(filepath.Join(d, name+".img.gz"), []byte("image of "+name), 0o644))
 		if !strings.HasSuffix(id, "-installer") {
 			must(t, os.WriteFile(filepath.Join(d, name+".raucb"), []byte("bundle of "+name), 0o644))
+		} else {
+			// The stick carries its target's base image (customize.sh).
+			base := strings.TrimSuffix(id, "-installer") + "-base"
+			must(t, os.WriteFile(filepath.Join(d, name+".payloads"), []byte(base+"\n"), 0o644))
 		}
 		osr := "NAME=\"FlockOS\"\nID=flockos\nIMAGE_ID=" + id + "\nIMAGE_VERSION=" + version + "\nBUILD_ID=" + buildID + "\n"
 		must(t, os.WriteFile(filepath.Join(d, name+".os-release"), []byte(osr), 0o644))
@@ -67,8 +71,12 @@ func TestBuildRelease(t *testing.T) {
 	if base.Bundle == nil || base.Bundle.Compatible != "flockos-amd64-efi-base" {
 		t.Fatalf("bundle %+v", base.Bundle)
 	}
-	if rel.Images["flockos-amd64-efi-installer"].Bundle != nil {
+	inst := rel.Images["flockos-amd64-efi-installer"]
+	if inst.Bundle != nil {
 		t.Fatal("the installer has no bundle")
+	}
+	if len(inst.Payloads) != 1 || inst.Payloads[0] != "flockos-amd64-efi-base" || base.Payloads != nil {
+		t.Fatalf("payloads: installer %v, base %v", inst.Payloads, base.Payloads)
 	}
 	if rel.Images["flockos-rpi-arm64-base"].Architecture != "arm64" {
 		t.Fatal("rpi-arm64 is arm64")
@@ -95,6 +103,21 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		},
 		"not an image directory": func(dir string) {
 			_ = os.MkdirAll(filepath.Join(dir, "flockos-amd64-efi-weird"), 0o755)
+		},
+		"an installer without payloads": func(dir string) {
+			_ = os.Remove(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"))
+		},
+		"a payload the release does not have": func(dir string) {
+			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
+				[]byte("flockos-amd64-efi-base\nflockos-amd64-efi-nvidia\n"), 0o644)
+		},
+		"another target's payload": func(dir string) {
+			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
+				[]byte("flockos-rpi-arm64-base\n"), 0o644)
+		},
+		"the installer as its own payload": func(dir string) {
+			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
+				[]byte("flockos-amd64-efi-installer\n"), 0o644)
 		},
 	}
 	for name, mutate := range cases {
@@ -169,6 +192,9 @@ func TestBoards(t *testing.T) {
 	}
 	if pc.LatestImages[1].Update != "" || pc.LatestImages[0].Update == "" {
 		t.Fatal("update is the bundle, empty for the installer")
+	}
+	if p := pc.LatestImages[1].Payloads; len(p) != 1 || p[0] != "flockos-amd64-efi-base" || pc.LatestImages[0].Payloads != nil {
+		t.Fatalf("the installer lists the images it carries: %+v", pc.LatestImages)
 	}
 	if _, ok := models["arm64-efi"]; ok {
 		t.Fatal("a board without an image of the release is left out")
@@ -381,5 +407,25 @@ func TestMoveAPublishedReleaseToProduction(t *testing.T) {
 	}
 	if err := run([]string{"build", "-version", "1.0.1", "-channel", "production", "-boards", boards}, &out); err == nil {
 		t.Fatal("built without -dir and without -previous")
+	}
+}
+
+// A release up to 0.10.0 (v0.10.0 is published so) has installers without
+// payloads; built on, it stays valid, and readers take the target's base.
+func TestAnInstallerWithoutPayloadsStaysValid(t *testing.T) {
+	t0 := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	old := catalogFor(t, nil, "1.0.0", "test", t0)
+	inst := old.Releases["1.0.0"].Images["flockos-amd64-efi-installer"]
+	inst.Payloads = nil
+	old.Releases["1.0.0"].Images["flockos-amd64-efi-installer"] = inst
+	must(t, old.Validate())
+	next := catalogFor(t, &old, "1.0.1", "test", t0.Add(time.Hour))
+	if next.Releases["1.0.0"].Images["flockos-amd64-efi-installer"].Payloads != nil {
+		t.Fatal("the old release changed")
+	}
+	data, err := json.Marshal(next.Releases["1.0.0"].Images["flockos-amd64-efi-installer"])
+	must(t, err)
+	if bytes.Contains(data, []byte("payloads")) {
+		t.Fatalf("an installer without payloads gains the key: %s", data)
 	}
 }

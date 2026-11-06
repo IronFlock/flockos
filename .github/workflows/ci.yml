@@ -163,7 +163,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The installer stick (WP-3.2) carries the base image just built.
+  # The installer stick (WP-3.2) carries every image of its target just built;
+  # the test installs the base image (installer.conf payload=).
   # The stick installs to a blank NVMe unattended; the NVMe then boots alone.
   install-test:
     name: install-test (${{ matrix.target }})

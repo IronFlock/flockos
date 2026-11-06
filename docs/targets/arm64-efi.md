@@ -32,5 +32,6 @@ Raspberry Pi and Jetson Orin have their own targets.
 - GRUB's serial terminal is `serial_efi0` (the firmware's Serial I/O port);
   `GRUB_TERMINAL` in `target.conf`.
 - The installer stick (`just build arm64-efi installer`) works as on amd64-efi
-  ([amd64-efi.md](amd64-efi.md#installer-stick)): it writes the base image to
-  an internal disk and registers `\EFI\BOOT\BOOTAA64.EFI` as the boot entry.
+  ([amd64-efi.md](amd64-efi.md#installer-stick)): it carries `base` and
+  `base-rt`, writes the one `installer.conf` names to an internal disk and
+  registers `\EFI\BOOT\BOOTAA64.EFI` as the boot entry.

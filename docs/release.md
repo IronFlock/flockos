@@ -42,6 +42,13 @@ the two FlockOS trees of the download bucket and nothing else.
   only (the schema's enums, `tools/catalog`, `release/boards.json`); installed
   readers keep working and offer it once they know it. A change that would
   break a reader raises `schema`, which readers refuse.
+- **The installer stick carries every image of its target.** Its catalog entry
+  lists them as `payloads` (image ids, from the build's `.payloads` file);
+  FlockFlasher offers the stick for those variants and writes the chosen one as
+  `payload=<image id>` into `installer.conf`. A new variant goes onto the stick
+  through `INSTALLER_PAYLOADS` in its `target.conf`. Releases up to 0.10.0
+  have no `payloads`: their sticks carry the base image only, and readers take
+  it so.
 - FlockFlasher (from the release after v2.2.4) reloads the catalog when its
   board list is shown, at most every five minutes, so a new release appears
   without restarting it.
