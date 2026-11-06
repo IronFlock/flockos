@@ -460,12 +460,13 @@ class Runner:
         self.vm.run(f"cmp {boot}/mm{efi_arch}.efi /usr/lib/shim/mm{efi_arch}.efi.signed")
         self.vm.run(f"cmp {boot}/grub{efi_arch}.efi /usr/lib/grub/{grub_format}-signed/grub{efi_arch}.efi.signed")
         self.vm.run(f"test ! -e {boot}/fb{efi_arch}.efi && grep -q '^source ' /boot/efi/EFI/debian/grub.cfg")
-        # shim hands its MOK state to the kernel in a configuration table:
-        # shim started GRUB, with Secure Boot on or off.
-        self.vm.run("test -d /sys/firmware/efi/mok-variables")
+        # shim hands its MOK state to the kernel in a configuration table,
+        # which the kernel lists at boot (its sysfs view needs EFI runtime
+        # services): shim started GRUB, with Secure Boot on or off.
+        klog = "journalctl -k -b --no-pager -o cat"
+        self.vm.run(f"{klog} | grep -q '^efi: .* MOKvar=0x'")
         want_state, want_lockdown = ("enabled", "[integrity]") if self.secure_boot else ("disabled", "[none]")
-        kernel = self.vm.run("journalctl -k -b --no-pager -o cat | grep -m 1 -o 'secureboot: Secure boot [a-z]*'",
-                             check=False).strip()
+        kernel = self.vm.run(f"{klog} | grep -m 1 -o 'secureboot: Secure boot [a-z]*'", check=False).strip()
         lockdown = self.vm.run("cat /sys/kernel/security/lockdown").strip()
         if kernel != f"secureboot: Secure boot {want_state}" or want_lockdown not in lockdown:
             raise TestFailure(f"Secure Boot should be {want_state}: the kernel says {kernel!r}, lockdown {lockdown!r}")
