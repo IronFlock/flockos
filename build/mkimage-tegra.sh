@@ -10,7 +10,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${SOURCE_DATE_EPOCH:?}"
-require mke2fs e2fsck zstd
+require mke2fs e2fsck dumpe2fs zstd
 img=$WORK/image
 rm -rf "$img"
 mkdir -p "$img/input"
@@ -28,6 +28,7 @@ E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH mke2fs -q -t ext4 -L flockos-root -U "$fs
   -E "root_owner=0:0,hash_seed=$fs_uuid,lazy_itable_init=0,lazy_journal_init=0" \
   -d "$ROOT" "$rootfs" "$SLOT_SIZE"
 e2fsck -fn "$rootfs" >/dev/null || die "e2fsck found problems in the root filesystem image"
+check_slot_fill "$rootfs" "$NAME"
 
 # Keep rootfs.ext4 for the bundle stage; publish it compressed for the
 # flash package.

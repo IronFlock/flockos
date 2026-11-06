@@ -10,7 +10,7 @@ src=$(cd "$here/.." && pwd)
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${SOURCE_DATE_EPOCH:?}"
 : "${FLOCKOS_SIZE:?}" "${BOOT_SIZE:?}" "${FAT_PART_TYPE:?}" "${ROOT_PART_TYPE:?}" "${CONSOLE_CMDLINE:?}"
-require mkfs.vfat mmd mcopy mke2fs genimage pigz
+require mkfs.vfat mmd mcopy mke2fs dumpe2fs genimage pigz
 target_dir=$src/targets/$TARGET
 img=$WORK/image
 rm -rf "$img"
@@ -66,6 +66,7 @@ E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH mke2fs -q -t ext4 -L flockos-root -U "$fs
   -m 1 -E "root_owner=0:0,hash_seed=$fs_uuid,lazy_itable_init=0,lazy_journal_init=0" \
   -d "$ROOT" "$rootfs" "$SLOT_SIZE"
 e2fsck -fn "$rootfs" >/dev/null || die "e2fsck found problems in the root filesystem image"
+check_slot_fill "$rootfs" "$NAME"
 
 # --- the disk image --------------------------------------------------------
 IMAGE_NAME=$NAME.img

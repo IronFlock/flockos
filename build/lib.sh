@@ -42,6 +42,41 @@ load_conf() {
   done <"$file"
 }
 
+# slot_fill EXT4_IMAGE: how full a root slot's filesystem is, as
+# "<used percent> <used bytes> <size bytes>" from its superblock (ext4's own
+# overhead included).
+slot_fill() {
+  local info blocks free bsize used
+  info=$(dumpe2fs -h "$1" 2>/dev/null) || die "cannot read the superblock of $1"
+  blocks=$(awk -F: '/^Block count:/ { gsub(/ /, "", $2); print $2 }' <<<"$info")
+  free=$(awk -F: '/^Free blocks:/ { gsub(/ /, "", $2); print $2 }' <<<"$info")
+  bsize=$(awk -F: '/^Block size:/ { gsub(/ /, "", $2); print $2 }' <<<"$info")
+  [ -n "$blocks" ] && [ -n "$free" ] && [ -n "$bsize" ] && [ "$blocks" -gt 0 ] || die "no block counts in the superblock of $1"
+  used=$((blocks - free))
+  printf '%s %s %s\n' $((used * 100 / blocks)) $((used * bsize)) $((blocks * bsize))
+}
+
+# check_slot_fill EXT4_IMAGE NAME: a root slot's size is fixed for a
+# device's lifetime (rootfs-b and /data are made once, on the first boot), so
+# every later release has to fit the slots of the oldest device in the field.
+# This warns (and annotates the CI run) from FLOCKOS_SLOT_FILL_WARN percent
+# and fails the build from FLOCKOS_SLOT_FILL_MAX, releases before a tree
+# outgrows its slot.
+check_slot_fill() {
+  local warn_at=${FLOCKOS_SLOT_FILL_WARN:-75} max=${FLOCKOS_SLOT_FILL_MAX:-90} pct used size msg
+  read -r pct used size <<<"$(slot_fill "$1")"
+  msg="$2: the root slot is ${pct}% full ($((used >> 20)) MiB of $((size >> 20)) MiB)"
+  if [ "$pct" -ge "$max" ]; then
+    printf '::error title=root slot nearly full::%s; the limit is %s%%\n' "$msg" "$max"
+    die "$msg; the limit is ${max}%: shrink the image or plan a larger slot (a new image id, as devices cannot grow theirs)"
+  elif [ "$pct" -ge "$warn_at" ]; then
+    printf '::warning title=root slot filling up::%s (warning from %s%%, the build fails from %s%%)\n' "$msg" "$warn_at" "$max"
+    warn "$msg (warning from ${warn_at}%, the build fails from ${max}%)"
+  else
+    log "$msg"
+  fi
+}
+
 # read_list FILE...: print the entries of package-style lists, one per line,
 # without comments and blank lines. Missing files are skipped, so optional
 # per-architecture lists need no special case.
