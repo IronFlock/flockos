@@ -1,0 +1,62 @@
+# Accepted findings of the root filesystem scans (security.yml, the harness's
+# rootfs scans of every image), each with its reason and an expiry: when it
+# expires the finding counts again and blocks security / report. The fix is
+# the bump, not a longer expiry.
+#
+# FlockOS takes a release of a dependency once it is two weeks old.
+
+vulnerabilities:
+  # docker-buildx-plugin 0.38.1 (Debian and Ubuntu builds of Docker's
+  # repository) is built with moby/go-archive 0.2.0 and golang.org/x/net
+  # 0.59.0. buildx 0.38.2 (2026-11-03) is not in the repository yet; the next
+  # buildx build with go-archive >= 0.3.0 and x/net >= 0.60.0 is taken then.
+  # docker buildx runs on the device only when an app is built locally.
+  - id: CVE-2026-17106
+    paths:
+      - "usr/libexec/docker/cli-plugins/docker-buildx"
+    statement: "moby/go-archive 0.2.0 in docker-buildx 0.38.1 (tar extraction link following); no buildx build with go-archive 0.3.0 in Docker's repository yet"
+    expired_at: 2026-11-17
+  # x/net http2 SETTINGS flood: docker-buildx 0.38.1 (x/net 0.59.0) as above;
+  # docker-compose-plugin 5.6.1 (x/net 0.58.0), fixed in compose 5.7.0
+  # (2026-11-02, x/net 0.60.0), taken from 2026-11-16.
+  - id: CVE-2026-78669
+    paths:
+      - "usr/libexec/docker/cli-plugins/docker-buildx"
+      - "usr/libexec/docker/cli-plugins/docker-compose"
+    statement: "golang.org/x/net < 0.60.0 in docker-buildx 0.38.1 and docker-compose 5.6.1; compose 5.7.0 (x/net 0.60.0) is taken on 2026-11-16, buildx with the next build in Docker's repository"
+    expired_at: 2026-11-17
+  # NVIDIA Container Toolkit 1.20.1 (the nvidia variant; NVIDIA's latest,
+  # 2026-09-19) is built with Go 1.27.1. No release built with Go >= 1.27.3
+  # exists yet; revisit with NVIDIA's next release.
+  - id: CVE-2026-111943
+    paths:
+      - "usr/bin/nvidia-ctk"
+      - "usr/bin/nvidia-container-runtime"
+      - "usr/bin/nvidia-container-runtime-hook"
+      - "usr/bin/nvidia-cdi-hook"
+    statement: "Go 1.27.1 stdlib (crypto/x509) in NVIDIA Container Toolkit 1.20.1, NVIDIA's latest release; no fixed build yet"
+    expired_at: 2026-12-06
+  - id: CVE-2026-78667
+    paths:
+      - "usr/bin/nvidia-ctk"
+      - "usr/bin/nvidia-container-runtime"
+      - "usr/bin/nvidia-container-runtime-hook"
+      - "usr/bin/nvidia-cdi-hook"
+    statement: "Go 1.27.1 stdlib (net/http Range) in NVIDIA Container Toolkit 1.20.1, NVIDIA's latest release; no fixed build yet; they are OCI hooks and command-line tools, no network service"
+    expired_at: 2026-12-06
+  - id: CVE-2026-78669
+    paths:
+      - "usr/bin/nvidia-ctk"
+      - "usr/bin/nvidia-container-runtime"
+      - "usr/bin/nvidia-container-runtime-hook"
+      - "usr/bin/nvidia-cdi-hook"
+    statement: "Go 1.27.1 stdlib (net/http2 SETTINGS) in NVIDIA Container Toolkit 1.20.1, NVIDIA's latest release; no fixed build yet; they are OCI hooks and command-line tools, no network service"
+    expired_at: 2026-12-06
+  - id: CVE-2026-97031
+    paths:
+      - "usr/bin/nvidia-ctk"
+      - "usr/bin/nvidia-container-runtime"
+      - "usr/bin/nvidia-container-runtime-hook"
+      - "usr/bin/nvidia-cdi-hook"
+    statement: "Go 1.27.1 stdlib (crypto/tls ECH) in NVIDIA Container Toolkit 1.20.1, NVIDIA's latest release; no fixed build yet; they are OCI hooks and command-line tools, no network service"
+    expired_at: 2026-12-06

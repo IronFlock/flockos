@@ -56,7 +56,7 @@ decision), in progress.
 | 0.3 | Harness skeleton, docs, legacy tag, v0.9.0 | flockos | 2 | 0.1 | done |
 | 0.4 | `shell-gate.yml` in the harness | workflows | 2 | | done (#158) |
 | 0.5 | RAUC PKI in Cloud KMS and `docs/signing.md` | GCP, flockos | 2 | | done (ceremony 2026-11-05, #167) |
-| 0.6 | Security scan switches from report-only to blocking | flockos | 0.5 | 0.3 | open (due 2026-11-18) |
+| 0.6 | Security scan switches from report-only to blocking | flockos | 0.5 | 0.3 | done (2026-11-06; accepted findings in .trivyignore.yaml until 2026-11-17 and 2026-12-06) |
 | 1.1 | Build framework and `base` rootfs | flockos | 3 | 0.3 | done (#155) |
 | 1.2 | `amd64-efi` target: GRUB, partitions, disk image | flockos | 3 | 1.1 | done (#155) |
 | 1.3 | Shared overlay: `/data` redirections, os-release, enroll placeholder | flockos | 2 | 1.1 | done (#155) |
