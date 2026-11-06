@@ -1,6 +1,6 @@
 module github.com/ironflock/flockos/tools/rauc-pki
 
-go 1.27.0
+go 1.27.3
 
 require golang.org/x/oauth2 v0.37.0
 

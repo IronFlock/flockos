@@ -3,10 +3,11 @@
 # (govulncheck, SBOM), and the packages of every FlockOS image (the
 # harness's rootfs-recipe input below; master plan, section 3.8; WP-1.8).
 #
-# Report-only for the first two weeks, as the harness README asks; then set
-#   fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
-# Accepted findings go into .trivyignore.yaml / security/vex.openvex.json /
-# .gitleaks.toml with a reason and an expiry date.
+# Blocking since WP-0.6 (2026-11-06, after the report-only start the harness
+# README asks for): security / report fails on the standard categories, as in
+# device-init. Accepted findings go into .trivyignore.yaml /
+# security/vex.openvex.json / .gitleaks.toml with a reason and an expiry date;
+# an expired one blocks again.
 name: security
 
 on:
@@ -35,7 +36,7 @@ jobs:
       languages: go
       working-directory: tools/rauc-pki
       go-version-file: tools/rauc-pki/go.mod
-      fail-on: ""
+      fail-on: secrets,vuln-critical,vuln-high,misconfig-high,license-forbidden,semgrep-error
       # Public repository: findings also go to the Security tab.
       code-scanning: true
       # The packages of every image (WP-1.8): `just rootfs` builds each

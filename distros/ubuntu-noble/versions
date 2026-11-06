@@ -12,6 +12,6 @@ DISTRO_KEYRING=/usr/share/keyrings/ubuntu-archive-keyring.gpg
 # Docker CE (download.docker.com), the versions of the Debian pins.
 DOCKER_MIRROR=https://download.docker.com/linux/ubuntu
 DOCKER_CE_VERSION=5:29.9.2-1~ubuntu.24.04~noble
-CONTAINERD_VERSION=2.4.2-1~ubuntu.24.04~noble
-BUILDX_VERSION=0.38.0-1~ubuntu.24.04~noble
+CONTAINERD_VERSION=2.4.2-3~ubuntu.24.04~noble
+BUILDX_VERSION=0.38.1-1~ubuntu.24.04~noble
 COMPOSE_VERSION=5.6.1-1~ubuntu.24.04~noble
