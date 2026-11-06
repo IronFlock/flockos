@@ -61,7 +61,7 @@ keeps an image made from the same file.
   it so.
 - **The device-agent downloads a bundle from its own update base**, at
   `<update base>/flockos/<version>/<file>`, where `<file>` is the last part of
-  the bundle's `url` (from the device-agent release after 1.6.2). The `url`s
+  the bundle's `url` (from device-agent 1.6.3). The `url`s
   name the copy on the download server; the catalog is signed, so no mirror
   can change them. On the cloud both are the same file. A device behind an
   IronFlock appliance reaches only the appliance, whose OS mirror serves the
