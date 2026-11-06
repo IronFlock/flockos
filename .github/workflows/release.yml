@@ -238,6 +238,21 @@ jobs:
         if: env.MODE == 'release'
       - name: stage (${{ env.MODE }})
         run: build/publish.sh stage out "$(tr -d '[:space:]' < VERSION)"
+      # What the GitHub Release carries besides the catalog, kept apart from
+      # the images: the assets job then downloads a few hundred kilobytes,
+      # not every image and bundle (v0.10.0's assets job timed out on that).
+      - name: the release's checksums and SBOMs
+        run: |
+          mkdir meta
+          build/publish.sh sums out > meta/SHA256SUMS
+          cp out/*/*.cdx.json meta/
+          ls -l meta
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-meta-${{ env.MODE }}
+          path: meta/
+          if-no-files-found: error
+          retention-days: 7
 
   # The live release: the staged files to flockos/<version>/, then the
   # catalog (tools/catalog), built on the published one with this release on
@@ -424,8 +439,8 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-release
-          path: out
+          name: release-meta-release
+          path: meta
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: catalog-release
@@ -444,5 +459,4 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           version=$(tr -d '[:space:]' < VERSION)
-          build/publish.sh sums out > SHA256SUMS
-          gh release upload "v$version" --repo "$REPO" --clobber SHA256SUMS catalog/manifest.json out/*/*.cdx.json
+          gh release upload "v$version" --repo "$REPO" --clobber meta/SHA256SUMS catalog/manifest.json meta/*.cdx.json
