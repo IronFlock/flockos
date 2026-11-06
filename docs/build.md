@@ -81,6 +81,19 @@ hostname into the slot it has just written, so an update keeps the device's
 identity. On Jetson it also points that slot's `extlinux.conf` at the slot
 (`docs/targets/jetson-orin.md`). RAUC's own state is in `/data/rauc`.
 
+### Slot size
+
+A slot's size (`SLOT_SIZE_<VARIANT>` in `target.conf`) is fixed for a device's
+lifetime: slot B and `data` are created once, on the first boot, and an update
+rewrites a slot's contents, never its partition. Every later release of an image
+must therefore fit the slots of the oldest device in the field. The image stage
+checks the slot filesystem it has made (`check_slot_fill` in `build/lib.sh`,
+from the ext4 superblock, ext4's overhead included): it warns, and annotates the
+CI run, from 75% full, and fails the build from 90%
+(`FLOCKOS_SLOT_FILL_WARN`, `FLOCKOS_SLOT_FILL_MAX`). v0.10.0's trees fill about a
+third of their slots (1.2 to 1.4 GiB of 4 GiB, 2.1 GiB of nvidia's 8 GiB).
+Outgrowing a slot takes a new image id with a larger slot, not a bundle.
+
 ## Boot and A/B
 
 GRUB is one EFI binary at the removable-media path `EFI/BOOT/BOOTX64.EFI` (no
