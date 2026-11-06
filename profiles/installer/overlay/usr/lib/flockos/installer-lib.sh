@@ -7,7 +7,9 @@
 # optional):
 #   disk=largest | /dev/<name> | by-id:<id>   target disk (default largest)
 #   confirm=yes | no        ask on the console before writing (default yes)
-#   payload=<variant>       which embedded image when there are several (base, nvidia)
+#   payload=<variant|id>    which embedded image when there are several: a
+#                           variant (base, base-rt, nvidia) or an image id
+#                           (flockos-amd64-efi-nvidia), as FlockFlasher writes it
 #   after=poweroff | reboot what to do when done (default poweroff)
 #   allow-usb=no | yes      also offer USB disks as targets (default no)
 
@@ -120,16 +122,24 @@ installer_select() {
   printf '/dev/%s\n' "$name"
 }
 
-# installer_payload DIR VARIANT: the embedded image to install: the one for
-# VARIANT, or the only one when VARIANT is empty.
+# installer_payload DIR PAYLOAD: the embedded image to install: the one
+# PAYLOAD names (a variant such as base, base-rt or nvidia, or an image id
+# such as flockos-amd64-efi-base-rt), or the only one when PAYLOAD is empty.
+# The image's file is flockos-<target>-<variant>-<version>.img.zst: a target
+# is two words (amd64-efi) and a version starts with a digit, so base never
+# matches base-rt's file, nor rt base-rt's.
 installer_payload() {
-  local dir=$1 variant=$2 found=()
+  local dir=$1 variant=$2 found=() f name re
+  case "$variant" in
+    '') re='^flockos-.+\.img\.zst$' ;;
+    flockos-*) re="^${variant}-[0-9][^/]*\.img\.zst\$" ;;
+    *) re="^flockos-[a-z0-9]+-[a-z0-9]+-${variant}-[0-9][^/]*\.img\.zst\$" ;;
+  esac
   shopt -s nullglob
-  if [ -n "$variant" ]; then
-    found=("$dir"/flockos-*-"$variant"-*.img.zst)
-  else
-    found=("$dir"/flockos-*.img.zst)
-  fi
+  for f in "$dir"/flockos-*.img.zst; do
+    name=${f##*/}
+    [[ "$name" =~ $re ]] && found+=("$f")
+  done
   shopt -u nullglob
   case "${#found[@]}" in
     1) printf '%s\n' "${found[0]}" ;;

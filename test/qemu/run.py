@@ -631,15 +631,19 @@ class Runner:
         self.vm.run("rauc status mark-good")
 
 
-INSTALLER_CONF = "confirm=no\nafter=poweroff\n"
+def installer_conf(payload_id):
+    """installer.conf as FlockFlasher writes it (payload=<image id>: the stick
+    carries every variant of its target), unattended."""
+    return f"payload={payload_id}\nconfirm=no\nafter=poweroff\n"
 
 
 def install_test(args, conf, arch, version, accel, boot_timeout, port):
-    """WP-3.2: the installer stick (USB) writes the base image to a blank
-    NVMe unattended and powers off; the NVMe then boots alone like a flashed
-    disk."""
+    """WP-3.2: the installer stick (USB) writes the base image, one of the
+    images it carries, to a blank NVMe unattended and powers off; the NVMe
+    then boots alone like a flashed disk."""
     installer_id = f"flockos-{args.target}-installer"
     base_id = f"flockos-{args.target}-base"
+    conf_text = installer_conf(base_id)
     img_gz = os.path.join(args.out, installer_id, f"{installer_id}-{version}.img.gz")
     if not os.path.exists(img_gz):
         sys.exit(f"{img_gz} not found: run `just build {args.target} installer` first")
@@ -654,12 +658,12 @@ def install_test(args, conf, arch, version, accel, boot_timeout, port):
     offset = esp_offset(stick)
     conf_file = os.path.join(workdir, "installer.conf")
     with open(conf_file, "w") as fh:
-        fh.write(INSTALLER_CONF)
+        fh.write(conf_text)
     subprocess.run(["mcopy", "-n", "-o", "-i", f"{stick}@@{offset}", conf_file, "::/installer.conf"], check=True)
     set_test_cmdline(stick, workdir, debug_cmdline(arch))
     # The installer hands the stick's .flock to the new disk, which enrolls with it.
     flock = None if args.no_flock else put_test_flock(stick, workdir)
-    log(f"stick: {installer_id}-{version}, installer.conf {INSTALLER_CONF!r}; blank 20 GiB NVMe")
+    log(f"stick: {installer_id}-{version}, installer.conf {conf_text!r}; blank 20 GiB NVMe")
 
     results = []
     ok = False
@@ -678,6 +682,8 @@ def install_test(args, conf, arch, version, accel, boot_timeout, port):
         print(text)
         if "FlockOS is installed on /dev/nvme0n1" not in text:
             raise TestFailure("the installer did not report an installation on /dev/nvme0n1")
+        if f"image: {base_id}-{version}.img.zst" not in text:
+            raise TestFailure(f"the installer did not write the payload installer.conf names ({base_id})")
         if flock and f"copying {flock} to the new FLOCKOS partition" not in text:
             raise TestFailure(f"the installer did not copy {flock} to the new disk")
         results.append(("install from the stick", True, time.time() - start))

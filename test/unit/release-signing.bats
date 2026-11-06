@@ -132,8 +132,9 @@ print(len(entries))
   ! grep -qE 'pattern: image-|name: image-' "$wf/release.yml"
   ! grep -A6 'uses: ./.github/workflows/build.yml' "$wf/ci.yml" | grep -q 'prefix:'
   # every artifact build.yml uploads or downloads carries the prefix
-  ! grep -E '^\s+name: image-' "$wf/build.yml"
-  [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 3 ]
+  ! grep -E '^\s+(name|pattern): image-' "$wf/build.yml"
+  [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 2 ]
+  [ "$(grep -c 'pattern: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 1 ]
 }
 
 @test "the assets job downloads the release's checksums and SBOMs, not its images" {

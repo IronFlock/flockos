@@ -36,6 +36,10 @@ type Image struct {
 	Architecture string   `json:"architecture"`
 	Image        Artifact `json:"image"`
 	Bundle       *Bundle  `json:"bundle,omitempty"`
+	// Payloads are the image ids an installer stick carries (installer.conf
+	// payload= picks one). Only the installer has them; a release up to
+	// 0.10.0 has none, and readers take that as the target's base image.
+	Payloads []string `json:"payloads,omitempty"`
 }
 
 type Release struct {
@@ -58,6 +62,9 @@ type ImageInfo struct {
 	ImageID   string `json:"image_id"`
 	Variant   string `json:"variant"`
 	Kernel    string `json:"kernel"`
+	// Payloads as Image.Payloads: the images FlockFlasher offers to put on
+	// the installer stick.
+	Payloads []string `json:"payloads,omitempty"`
 }
 
 type Board struct {
@@ -156,8 +163,9 @@ func targetArch(repo, target string) (string, error) {
 
 // buildRelease reads one release from dir: one directory per image as the
 // release pipeline leaves them (flockos-<id>/ with <id>-<version>.img.gz, the
-// .raucb but for the installer, and <id>-<version>.os-release). Files are
-// published below baseURL.
+// .raucb but for the installer, <id>-<version>.os-release, and for the
+// installer <id>-<version>.payloads, the image ids it carries one per line).
+// Files are published below baseURL.
 func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -217,12 +225,62 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 		case variant != "installer":
 			return Release{}, fmt.Errorf("%s has no bundle (%s)", id, filepath.Base(bundlePath))
 		}
+		if variant == "installer" {
+			img.Payloads, err = payloads(filepath.Join(dir, id, name+".payloads"))
+			if err != nil {
+				return Release{}, fmt.Errorf("%s: %w", id, err)
+			}
+		}
 		rel.Images[id] = img
 	}
 	if len(rel.Images) == 0 {
 		return Release{}, fmt.Errorf("no image directories in %s", dir)
 	}
+	for id, img := range rel.Images {
+		if err := checkPayloads(id, img, rel.Images); err != nil {
+			return Release{}, err
+		}
+	}
 	return rel, nil
+}
+
+// payloads reads an installer's .payloads file: image ids, one per line.
+func payloads(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	ids := strings.Fields(string(data))
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("%s lists no image", filepath.Base(path))
+	}
+	return ids, nil
+}
+
+// checkPayloads holds an image's payloads to the images of its release: only
+// an installer has them, each is an updatable image of the installer's target
+// in the same release, and none twice.
+func checkPayloads(id string, img Image, images map[string]Image) error {
+	if img.Variant != "installer" {
+		if len(img.Payloads) > 0 {
+			return fmt.Errorf("%s: only the installer has payloads", id)
+		}
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, p := range img.Payloads {
+		pi, ok := images[p]
+		switch {
+		case seen[p]:
+			return fmt.Errorf("%s: payload %s twice", id, p)
+		case !ok:
+			return fmt.Errorf("%s: payload %s is not an image of the release", id, p)
+		case pi.Target != img.Target || pi.Variant == "installer" || pi.Bundle == nil:
+			return fmt.Errorf("%s: payload %s is not an updatable image of %s", id, p, img.Target)
+		}
+		seen[p] = true
+	}
+	return nil
 }
 
 // merge puts release under version into the previous catalog (nil for the
@@ -285,7 +343,7 @@ func merge(prev *Catalog, version, channel string, rel Release, boards []BoardDe
 			board.LatestImages = append(board.LatestImages, ImageInfo{
 				BuildTime: prod.BuildTime, Download: img.Image.URL, File: lastSegment(img.Image.URL), OSName: "FlockOS",
 				OSVariant: "image", SHA256: img.Image.SHA256, Size: img.Image.Size, Update: update,
-				Version: prodVersion, ImageID: id, Variant: img.Variant, Kernel: img.Kernel,
+				Version: prodVersion, ImageID: id, Variant: img.Variant, Kernel: img.Kernel, Payloads: img.Payloads,
 			})
 		}
 		if len(board.LatestImages) > 0 {
@@ -350,6 +408,9 @@ func (c Catalog) Validate() error {
 			}
 			if img.Bundle != nil && (img.Bundle.Compatible != id || !strings.HasSuffix(img.Bundle.URL, "/"+id+"-"+v+".raucb")) {
 				errs = append(errs, fmt.Errorf("%s %s: the bundle is not %s-%s.raucb, compatible %s", v, id, id, v, id))
+			}
+			if err := checkPayloads(id, img, r.Images); err != nil {
+				errs = append(errs, fmt.Errorf("%s %w", v, err))
 			}
 		}
 	}

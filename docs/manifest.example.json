@@ -37,6 +37,27 @@
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-installer-1.0.0.img.gz",
             "sha256": "2d7a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f6e5d4c",
             "size": 834567890
+          },
+          "payloads": [
+            "flockos-amd64-efi-base",
+            "flockos-amd64-efi-nvidia"
+          ]
+        },
+        "flockos-amd64-efi-nvidia": {
+          "target": "amd64-efi",
+          "variant": "nvidia",
+          "kernel": "std",
+          "architecture": "amd64",
+          "image": {
+            "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-nvidia-1.0.0.img.gz",
+            "sha256": "5a0d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f",
+            "size": 702345678
+          },
+          "bundle": {
+            "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-nvidia-1.0.0.raucb",
+            "sha256": "6b1e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a",
+            "size": 788765432,
+            "compatible": "flockos-amd64-efi-nvidia"
           }
         },
         "flockos-rpi-arm64-base": {
@@ -110,6 +131,20 @@
         },
         {
           "buildtime": "2026-11-20T09:55:12Z",
+          "download": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-nvidia-1.0.0.img.gz",
+          "file": "flockos-amd64-efi-nvidia-1.0.0.img.gz",
+          "osname": "FlockOS",
+          "osvariant": "image",
+          "sha256": "5a0d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f",
+          "size": 702345678,
+          "update": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-nvidia-1.0.0.raucb",
+          "version": "1.0.0",
+          "image_id": "flockos-amd64-efi-nvidia",
+          "variant": "nvidia",
+          "kernel": "std"
+        },
+        {
+          "buildtime": "2026-11-20T09:55:12Z",
           "download": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-installer-1.0.0.img.gz",
           "file": "flockos-amd64-efi-installer-1.0.0.img.gz",
           "osname": "FlockOS",
@@ -120,7 +155,11 @@
           "version": "1.0.0",
           "image_id": "flockos-amd64-efi-installer",
           "variant": "installer",
-          "kernel": "std"
+          "kernel": "std",
+          "payloads": [
+            "flockos-amd64-efi-base",
+            "flockos-amd64-efi-nvidia"
+          ]
         }
       ]
     },
