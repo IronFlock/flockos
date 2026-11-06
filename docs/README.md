@@ -26,6 +26,7 @@
 | [0007](adr/0007-update-mechanism-rauc-and-firmware-lanes.md) | RAUC stays the OS updater; firmware in three lanes (bundle, RAUC hooks, fwupd); alternatives compared | accepted |
 | [0008](adr/0008-jetson-orin-bsp-jetpack-7.md) | Jetson Orin on Jetson Linux r39.2.1 (JetPack 7.2.1), Ubuntu 24.04; rootfs from NVIDIA's apt repositories, BSP tarball for flashing and capsules | accepted (licence review before the first Jetson release) |
 | [0009](adr/0009-phase-2-decisions-hostname-channels-firmware.md) | Phase 2: hostname from the `.flock`, release channels production and test, boot firmware with OS releases and fwupd read-only first, the catalog schema | accepted |
+| [0010](adr/0010-flockos-images-for-virtual-devices.md) | Compute Engine images of every release for the virtual-device-manager; the `.flock` of a VM through its instance metadata | accepted |
 
 Planned additions as the phases land: `targets/<target>.md` for the other targets,
 `migration.md` (reflashing ReswarmOS devices).
