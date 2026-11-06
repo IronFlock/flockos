@@ -29,7 +29,9 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
   is needed; on boards that hide USB boot, enable it in the firmware setup.
 - Secure Boot (ADR-0011): leave it as the machine came. FlockOS boots with
   Microsoft's keys, as Windows and Debian do; `mokutil --sb-state` shows the
-  state. Two exceptions:
+  state (on `-rt` images, whose kernel turns EFI runtime services off,
+  `cat /sys/kernel/security/lockdown`: `[integrity]` with Secure Boot on).
+  Two exceptions:
   - Some Windows "Secured-core" PCs ship without the Microsoft third-party UEFI
     CA, which signed shim. The firmware then refuses the disk; switch on
     "Allow Microsoft 3rd party UEFI CA" (the name varies) or turn Secure Boot off.
