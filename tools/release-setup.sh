@@ -17,7 +17,10 @@
 #     object admin on gs://ironflock-downloads/staging/flockos/ and
 #     gs://ironflock-downloads/flockos/ only (an IAM condition), object
 #     viewer on the bucket for listing (its objects are public anyway), as
-#     device-init's publisher
+#     device-init's publisher; and the custom role flockosVmImagePublisher on
+#     the project for images named flockos-* only (an IAM condition): it makes
+#     the Compute Engine images of the releases (ADR-0010) and nothing else of
+#     Compute Engine
 # then writes pki/flockos-catalog.pub and prints the line for the agent's
 # FLOCKOS_CATALOG_PUBLIC_KEYS (device-agent src/osupdate/catalog.go).
 #
@@ -29,6 +32,7 @@ RING=ironflock-release
 KEY=flockos-catalog
 SIGNER=flockos-release
 PUBLISHER=flockos-publisher
+IMAGE_ROLE=flockosVmImagePublisher
 BUCKET=ironflock-downloads
 REPO=IronFlock/flockos
 POOL_PROVIDER_PROJECT_NUMBER=${POOL_PROVIDER_PROJECT_NUMBER:-615643915869}
@@ -85,7 +89,8 @@ exists iam service-accounts describe "$publisher_email" --project "$PROJECT" ||
   do_ "$gcloud" iam service-accounts create "$PUBLISHER" --project "$PROJECT" \
     --display-name "FlockOS publisher" --description "Publishes FlockOS releases from IronFlock/flockos release runs"
 condition=$(mktemp)
-trap 'rm -f "$condition"' EXIT
+images_condition=$(mktemp)
+trap 'rm -f "$condition" "$images_condition"' EXIT
 cat >"$condition" <<CONDITION
 title: flockos trees
 description: the FlockOS staging and live trees only
@@ -99,6 +104,23 @@ bind_ "$gcloud" storage buckets add-iam-policy-binding "gs://$BUCKET" \
   --member "serviceAccount:$publisher_email" --role roles/storage.objectViewer --condition=None
 bind_ "$gcloud" iam service-accounts add-iam-policy-binding "$publisher_email" --project "$PROJECT" \
   --member "$principal" --role roles/iam.workloadIdentityUser --condition=None
+
+echo "== the Compute Engine images of the releases (ADR-0010)"
+exists iam roles describe "$IMAGE_ROLE" --project "$PROJECT" ||
+  do_ "$gcloud" iam roles create "$IMAGE_ROLE" --project "$PROJECT" --stage GA \
+    --title "FlockOS VM image publisher" \
+    --description "Makes the Compute Engine images of FlockOS releases; bound for flockos-* images only" \
+    --permissions compute.images.create,compute.images.get,compute.images.setLabels,compute.globalOperations.get
+cat >"$images_condition" <<CONDITION
+title: flockos images
+description: Compute Engine images named flockos-* only
+expression: >-
+  resource.type != "compute.googleapis.com/Image" ||
+  resource.name.startsWith("projects/$PROJECT/global/images/flockos-")
+CONDITION
+bind_ "$gcloud" projects add-iam-policy-binding "$PROJECT" --format none \
+  --member "serviceAccount:$publisher_email" --role "projects/$PROJECT/roles/$IMAGE_ROLE" \
+  --condition-from-file "$images_condition"
 
 echo "== the catalog key's public key"
 if [ "$yes" = 1 ]; then

@@ -34,3 +34,13 @@ Raspberry Pi and Jetson Orin have their own targets.
 - The installer stick (`just build arm64-efi installer`) works as on amd64-efi
   ([amd64-efi.md](amd64-efi.md#installer-stick)): it writes the base image to
   an internal disk and registers `\EFI\BOOT\BOOTAA64.EFI` as the boot entry.
+
+## Compute Engine
+
+Every release makes a Compute Engine image of `base` for the
+virtual-device-manager's FlockOS VMs on C4A (Axion), in the image family
+`flockos-arm64-efi-base` of `record-1283`
+([ADR-0010](../adr/0010-flockos-images-for-virtual-devices.md)). It is the
+release image as published: GCE's serial port 1 is `ttyAMA0`, the disk NVMe, the
+NIC gVNIC. A VM gets its `.flock` from the instance metadata
+(`flockos-gce-flock.service`). The smallest disk is 10 GiB.

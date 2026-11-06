@@ -17,13 +17,23 @@ or published from a laptop.
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
 | `stage` | The signed files and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
 | `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
+| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates FlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
 | `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `flockos-release`, `flockos-publisher` |
 
 The workload identity pool gives the two FlockOS identities only to a push of
 `release.yml` on `main` and to runs on `v*` tags. `flockos-publisher` can write
-the two FlockOS trees of the download bucket and nothing else.
+the two FlockOS trees of the download bucket and make Compute Engine images named
+`flockos-*`, and nothing else.
+
+**The VM images.** An image is `flockos-<target>-<variant>-v<x-y-z>` in
+`record-1283`, stored in `eu`, in the family `flockos-<target>-<variant>`. The
+family serves the newest release, the test channel's. Its disk is the smallest
+the FlockOS layout fits (10 GiB for base, 18 GiB for nvidia), so a product's
+`minDiskSize_GB` must be at least that. The tarball Compute Engine reads goes to
+`staging/flockos/<version>/gce/` and is removed once the image exists. A re-run
+keeps an image made from the same file.
 
 **The catalog.** `tools/catalog` builds `dl/flockos/manifest.json`
 ([manifest.schema.json](manifest.schema.json), ADR-0009):
@@ -56,6 +66,7 @@ the two FlockOS trees of the download bucket and nothing else.
 - `sign` uses a throwaway stand-in for the bundle signer.
 - `e2e` boots and reboots only: no release image accepts a stand-in bundle.
 - `stage` and `promote` print their storage calls (`DRY_RUN=1`).
+- `vm-images` makes each VM image's tarball and prints the cloud calls.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
 
@@ -89,13 +100,18 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
    project owner on a branch. It creates the key, the `flockos-publisher`
    identity and its bucket permissions, and writes `pki/flockos-catalog.pub`
    for a pull request. Run it first without `--yes`: that shows every step and
-   changes nothing. At the end it prints the line for step 4. Done
+   changes nothing. At the end it prints the line for step 5. Done
    2026-11-05 (`pki/flockos-catalog.pub`, [pki/README.md](../pki/README.md)).
 3. **The download proxy** serves `gs://ironflock-downloads/flockos/` under
    `https://instance-registry.ironflock.com/dl/flockos/` (registry-proxy
    v0.2.9, 2026-11-05). Without it, `promote` would stop before the tag.
    Done.
-4. **The device-agent** trusts the catalog key: the line from step 2 goes into
+4. **The VM images:** `tools/release-setup.sh --yes` again, after it has gained
+   the role `flockosVmImagePublisher` (ADR-0010). It keeps everything that
+   exists and adds the role and its binding for `flockos-publisher`. Until
+   then `vm-images` fails, and with it the tag; re-run the failed jobs after
+   it.
+5. **The device-agent** trusts the catalog key: the line from step 2 goes into
    `FLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
    an agent release. `CATALOG_MIN_AGENT` names that release: device-agent
    1.6.1 (#204).

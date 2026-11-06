@@ -1,13 +1,14 @@
 # Release of FlockOS: the merge of a release pull request (`just
 # release-patch`: version bump, title `release flockos v<version>`) builds
 # every image, signs the RAUC bundles in Cloud KMS, publishes images, bundles
-# and the signed catalog, and sets the tag last (a tag means "devices can get
-# it"). Nothing is built, signed or published from a laptop.
+# and the signed catalog, makes the Compute Engine images of the virtual
+# devices, and sets the tag last (a tag means "devices can get it"). Nothing
+# is built, signed or published from a laptop.
 #
 # `build` builds every image as a release build (build.yml), `sign` gives
 # the bundles their release signature (WP-1.6). The stage, e2e and promote
-# jobs (WP-2.6) slot in after `sign`, each `needs` the one before, and `tag`
-# needs the last.
+# jobs (WP-2.6) slot in after `sign`, each `needs` the one before; vm-images
+# (ADR-0010) follows promote, and `tag` needs both.
 #
 # A no-release merge starts nothing: `paths` holds only VERSION, and when a
 # no-release pull request touches it anyway the jobs are skipped by its merge
@@ -353,6 +354,63 @@ jobs:
             build/publish.sh check "$version" manifest.json
           fi
 
+  # The Compute Engine images of the release (ADR-0010): the boot images of
+  # the virtual-device-manager's FlockOS VMs, amd64-efi base and nvidia and
+  # arm64-efi base (GCE_IMAGES in build/release.conf; no real-time kernel for
+  # VMs). Each is made from the published image, which it must match by
+  # SHA256SUMS, into its image family flockos-<target>-<variant>, from which
+  # the manager creates new VMs (build/gce-image.sh). After the promotion, so
+  # a family never offers an unpublished release; the tag waits for them. As
+  # the publisher, which may make flockos-* images in record-1283 and nothing
+  # else of Compute Engine (tools/release-setup.sh). A dry run makes the
+  # tarballs and prints the cloud calls.
+  vm-images:
+    name: vm image (${{ matrix.image }})
+    needs: [verify, promote]
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [amd64-efi-base, amd64-efi-nvidia, arm64-efi-base]
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      DRY_RUN: ${{ needs.verify.outputs.mode == 'release' && '0' || '1' }}
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The image as the build left it (signing re-signs only the bundles),
+      # and the release's SHA256SUMS, which it must match.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-${{ matrix.image }}
+          path: out/flockos-${{ matrix.image }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-meta-${{ env.MODE }}
+          path: meta
+      - name: authenticate the publisher (release only)
+        if: env.MODE == 'release'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        if: env.MODE == 'release'
+      - name: the Compute Engine image of ${{ env.IMAGE }} (${{ env.MODE }})
+        env:
+          FLOCKOS_WORK: /mnt/flockos-gce
+        run: |
+          sudo mkdir -p "$FLOCKOS_WORK"
+          sudo chown "$(id -u):$(id -g)" "$FLOCKOS_WORK"
+          build/gce-image.sh "out/flockos-$IMAGE" "$(tr -d '[:space:]' < VERSION)" meta/SHA256SUMS
+
   # Production promotion (docs/release.md): run by hand on a release's tag
   # (gh workflow run release.yml --ref v<version> -f promote-production=true).
   # The release's files are published already; the catalog's production
@@ -409,7 +467,7 @@ jobs:
           build/publish.sh check "$version" manifest.json
 
   tag:
-    needs: [verify, promote]
+    needs: [verify, promote, vm-images]
     if: needs.verify.outputs.mode == 'release'
     uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
     permissions:

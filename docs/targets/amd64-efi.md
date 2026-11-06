@@ -61,3 +61,15 @@ tuning.
 | Board | Firmware settings | Isolated CPUs | Max latency | Date |
 |-------|-------------------|---------------|-------------|------|
 | — | — | — | — | — |
+
+## Compute Engine
+
+Every release makes Compute Engine images of `base` and `nvidia` for the
+virtual-device-manager's FlockOS VMs, in the image families
+`flockos-amd64-efi-base` and `flockos-amd64-efi-nvidia` of `record-1283`
+([ADR-0010](../adr/0010-flockos-images-for-virtual-devices.md)). They are the
+release images as published: GCE's serial port 1 is `ttyS0`, the disk is
+virtio-scsi or NVMe, the NIC virtio-net or gVNIC. `nvidia` runs on G2 (L4) and
+on N1 with a T4. A VM gets its `.flock` from the instance metadata
+(`flockos-gce-flock.service`). The smallest disk is 10 GiB for `base` and 18 GiB
+for `nvidia`.
