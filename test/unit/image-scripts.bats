@@ -16,6 +16,32 @@ teardown() { rm -rf "$tmp"; }
   [ "$(stat -c %a "$tmp/network/connections")" = 700 ]
 }
 
+@test "data-layout mirrors the slot's /var/log skeleton into /data/log, modes kept" {
+  mkdir -p "$tmp/varlog/journal" "$tmp/varlog/private" "$tmp/varlog/apt"
+  chmod 0700 "$tmp/varlog/private"
+  echo old-image-log >"$tmp/varlog/apt/history.log"
+  FLOCKOS_DATA=$tmp/data FLOCKOS_VAR_LOG=$tmp/varlog run sh "$lib/data-layout"
+  [ "$status" -eq 0 ]
+  for d in log/journal log/private log/apt; do
+    [ -d "$tmp/data/$d" ]
+  done
+  [ "$(stat -c %a "$tmp/data/log/private")" = 700 ]
+  # directories only: the image's own log files stay in the slot
+  [ ! -e "$tmp/data/log/apt/history.log" ]
+  # a later run keeps what /data/log holds and adds what a newer image brings
+  echo kept >"$tmp/data/log/apt/term.log"
+  mkdir -p "$tmp/varlog/newpkg"
+  FLOCKOS_DATA=$tmp/data FLOCKOS_VAR_LOG=$tmp/varlog run sh "$lib/data-layout"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/data/log/apt/term.log")" = kept ]
+  [ -d "$tmp/data/log/newpkg" ]
+}
+
+@test "fstab puts all of /var/log on /data" {
+  grep -qE '^/data/log +/var/log +none +bind,x-systemd.requires=flockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+  ! grep -q '/var/log/journal' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+}
+
 @test "data-layout is idempotent and keeps what is there" {
   FLOCKOS_DATA=$tmp sh "$lib/data-layout"
   echo keep >"$tmp/home/file"

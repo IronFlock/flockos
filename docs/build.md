@@ -70,7 +70,7 @@ persistent paths from it (master plan, section 3.2):
 | `/opt/ironflock` | `/data/ironflock` (agent, `.flock` copy, Docker data-root) |
 | `/home` | `/data/home` |
 | `/etc/NetworkManager/system-connections` | `/data/network/connections` |
-| `/var/log/journal` | `/data/log/journal` |
+| `/var/log` | `/data/log` (the journal and every other log: logs never fill the fixed-size root slot) |
 | `/var/cache/flockos` | `/data/cache` (downloaded bundles) |
 | `/var/lib/fwupd` | `/data/fwupd` |
 
