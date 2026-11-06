@@ -74,15 +74,26 @@ from metadata keys: a second way in beside the one account from the `.flock`.
 - On other machines the unit is skipped at once. It waits for no network target, so an
   offline device still enrolls without delay.
 
-### 4. The manager boots FlockOS for products that ask for it
+### 4. The device chooses FlockOS; the product stays the hardware
 
-A product with `"os": "flockos"` in its config gets a FlockOS VM, as `"os": "windows"`
-gets Windows Server. The image family follows the product's architecture and GPU.
-`minDiskSize_GB` must be at least 10 for base and 18 for nvidia. Products without `os`
-keep the current images. Internal products (`email_domain`) are the field test.
+A product is the VM's hardware, which billing charges, and names no OS. The only
+exception is Windows, whose licence is in its price.
+
+- **The choice.** A virtual device runs FlockOS when it is created with a FlockOS image
+  id (`os_image_id`), the field the platform keeps for every device's FlockOS image. The
+  manager boots the image family of that id.
+- **Checks.** The id must have a VM image, and the image must fit the product's
+  architecture. The manager refuses any other id before the device exists.
+- **Rebuilds.** A device whose VM is gone comes back on the id stored on its row.
+- **No id.** Without an id, a device boots the product's images, as before.
+- **Disks.** The products' minimum disks (10 GB, 40 GB with a GPU) fit FlockOS (10 GiB,
+  18 GiB for nvidia).
 
 ## Consequences
 
+- **The device dialog.** Studio's dialog for virtual devices has to offer the FlockOS
+  images with a VM image and send the chosen `os_image_id`. That field comes with the
+  platform's FlockOS image work in backend, platform-db and Studio.
 - **Exposure window.** Between the VM's creation and the guest attribute, every process
   on the VM could read the device's secret from the metadata server. No app runs before
   the enrollment, and the window is a boot's length.
