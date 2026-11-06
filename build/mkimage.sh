@@ -36,15 +36,17 @@ done
 install -m 0644 "$shim" "$esp_dir/EFI/BOOT/$EFI_LOADER"
 install -m 0644 "$mok_manager" "$esp_dir/EFI/BOOT/mm$EFI_ARCH.efi"
 install -m 0644 "$grub" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi"
-# Debian's signed GRUB has its modules built in and reads its configuration
-# from /EFI/debian (its built-in prefix). That file hands over to the A/B
-# script in /EFI/BOOT, next to grubenv, where RAUC's system.conf, rt-tuning
-# and the devices flashed before ADR-0011 have it.
+# Debian's signed GRUB has its modules built in. It reads the A/B script
+# next to itself (/EFI/BOOT/grub.cfg, Debian's fw_path patch) before
+# /EFI/debian/grub.cfg (its built-in prefix); that file sources the same
+# script, for a GRUB without the patch. The script and grubenv stay in
+# /EFI/BOOT, where RAUC's system.conf, rt-tuning and the devices flashed
+# before ADR-0011 have them.
 cat >"$esp_dir/EFI/debian/grub.cfg" <<'CFG'
-# FlockOS: Debian's signed GRUB reads this file (its prefix is /EFI/debian).
-# The A/B script and grubenv are in /EFI/BOOT, next to the boot loader.
-set prefix=($root)/EFI/BOOT
-source ${prefix}/grub.cfg
+# FlockOS: the A/B script is in /EFI/BOOT, next to the boot loader. Debian's
+# GRUB reads it there first; this file is for a GRUB that reads only its
+# prefix, /EFI/debian.
+source ($root)/EFI/BOOT/grub.cfg
 CFG
 render "$target_dir/grub/grub.cfg" >"$esp_dir/EFI/BOOT/grub.cfg"
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" create

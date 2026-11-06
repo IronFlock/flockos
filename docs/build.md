@@ -102,8 +102,9 @@ removable-media path `EFI/BOOT/BOOTX64.EFI` (`BOOTAA64.EFI` on arm64; no boot
 entry is needed), shim starts and checks Debian's signed GRUB next to it
 (`grubx64.efi`), and GRUB has shim check Debian's kernel. With Secure Boot off
 the same chain boots without the checks. Debian's GRUB has its modules built
-in and reads `EFI/debian/grub.cfg`, which `build/mkimage.sh` writes: it sets
-`${prefix}` to `EFI/BOOT` and sources the A/B script there. `grub.cfg`
+in and reads `grub.cfg` next to itself, in `EFI/BOOT` (else its prefix's
+`EFI/debian/grub.cfg`, which `build/mkimage.sh` writes to source the same
+script); the script points `${prefix}` at `EFI/BOOT`, where `grubenv` is. `grub.cfg`
 (`targets/amd64-efi/grub/grub.cfg`) is RAUC's reference A/B script: it picks the
 first slot in `ORDER` that is good and not yet tried, sets its `_TRY` flag in
 `grubenv`, and boots that slot's `/vmlinuz` with `root=PARTUUID=…` and

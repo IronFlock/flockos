@@ -25,10 +25,12 @@ signed boot chain:
   two signatures, one under the Microsoft UEFI CA 2011 and one under its 2023
   successor, so it boots on firmware that has either.
 - **shim → GRUB.** Debian's `grub-efi-<arch>-signed` as `EFI/BOOT/grub<arch>.efi`,
-  which shim checks against Debian's certificate. Its modules are built in, and it
-  reads its configuration from `/EFI/debian/grub.cfg`. That file sets `${prefix}` to
-  `/EFI/BOOT` and sources FlockOS's A/B script there. The script, `grubenv` and their
-  paths are unchanged.
+  which shim checks against Debian's certificate. Its modules are built in. It reads
+  `grub.cfg` next to itself first (`$fw_path`, a patch Debian carries), so FlockOS's A/B
+  script in `/EFI/BOOT` runs as before; a GRUB without that patch reads its prefix,
+  `/EFI/debian/grub.cfg`, which sources the same script. `${prefix}` stays
+  `/EFI/debian` either way, so the script sets it to `/EFI/BOOT` before it loads
+  `grubenv`. The script's slot logic, `grubenv` and their paths are unchanged.
 - **GRUB → kernel.** Debian's kernels are signed already (`linux-signed-*`); GRUB has
   shim check them. With Secure Boot on, the kernel runs in lockdown (integrity mode).
 - **MokManager** (`mm<arch>.efi`, from `shim-helpers-<arch>-signed`) is next to shim,

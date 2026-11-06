@@ -80,13 +80,18 @@ setup() {
   grep -q 'install -m 0644 "$grub" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi"$' "$img"
   ! grep -q 'grub-mkimage\|fb\$EFI_ARCH' "$img"
   ! read_list "$repo/build/builder-packages" "$repo/build/builder-packages.amd64" "$repo/build/builder-packages.arm64" | grep -q '^grub-efi-'
-  # Debian's GRUB reads /EFI/debian/grub.cfg; it hands over to the A/B
-  # script in /EFI/BOOT, whose ${prefix}/grubenv is RAUC's.
+  # Debian's GRUB reads /EFI/BOOT/grub.cfg next to itself first, else
+  # /EFI/debian/grub.cfg, which sources it. Either way its ${prefix} is
+  # /EFI/debian: the A/B script points it at /EFI/BOOT before it touches
+  # grubenv, RAUC's file.
   stub=$(sed -n "/^cat >\"\$esp_dir\/EFI\/debian\/grub.cfg\" <<'CFG'$/,/^CFG$/p" "$img")
-  [[ "$stub" == *$'\nset prefix=($root)/EFI/BOOT\nsource ${prefix}/grub.cfg\nCFG' ]]
+  [[ "$stub" == *$'\nsource ($root)/EFI/BOOT/grub.cfg\nCFG' ]]
   load_conf "$repo/targets/amd64-efi/target.conf"
   COMPATIBLE=x render "$repo/targets/amd64-efi/system.conf" | grep -qx 'grubenv=/boot/efi/EFI/BOOT/grubenv'
-  grep -q 'load_env --file ${prefix}/grubenv' "$repo/targets/amd64-efi/grub/grub.cfg"
+  script=$(render "$repo/targets/amd64-efi/grub/grub.cfg" | grep -v '^#')
+  first_prefix_use=$(echo "$script" | grep -n 'prefix' | head -n 1)
+  [[ "$first_prefix_use" == *":set prefix=(\$root)/EFI/BOOT" ]]
+  echo "$script" | grep -qx 'load_env --file ${prefix}/grubenv'
 }
 
 @test "the rt kernel is offered for base on the EFI targets only" {
