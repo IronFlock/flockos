@@ -33,6 +33,18 @@ the two FlockOS trees of the download bucket and nothing else.
 - `releases` keeps the versions a channel names and no others.
 - The boards for FlockFlasher (`release/boards.json`) show production.
 - `min_agent` is `CATALOG_MIN_AGENT` in `build/release.conf`.
+- **Readers are forward-compatible.** They ignore fields they do not know. The
+  device-agent looks up only its own image id, so other images' variants,
+  kernels and architectures do not matter to it; FlockFlasher (from the release
+  after v2.2.4) skips an image whose variant, kernel or architecture it does not
+  know and keeps the rest of the catalog. A new
+  variant (or kernel or architecture) is therefore a change in this repository
+  only (the schema's enums, `tools/catalog`, `release/boards.json`); installed
+  readers keep working and offer it once they know it. A change that would
+  break a reader raises `schema`, which readers refuse.
+- FlockFlasher (from the release after v2.2.4) reloads the catalog when its
+  board list is shown, at most every five minutes, so a new release appears
+  without restarting it.
 - The catalog is signed in the device-agent's envelope with the Cloud KMS key
   `ironflock-release/flockos-catalog`. The tool verifies its own output, and
   `catalog verify -pubkey pki/flockos-catalog.pub manifest.json` checks a

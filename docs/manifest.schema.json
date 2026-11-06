@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/IronFlock/flockos/blob/main/docs/manifest.schema.json",
   "title": "FlockOS release manifest (dl/flockos/manifest.json payload), schema 1",
-  "description": "The document the release pipeline signs and publishes as dl/flockos/manifest.json (ADR-0009). Published inside the device-agent's envelope: {\"payload\": \"<base64 of this document>\", \"signature\": \"<base64 Ed25519 signature>\"}, at most 64 KiB, signed over the message \"flockos-manifest:v1\\nflockos/manifest.json\\n<sha256 hex of the payload>\". The device-agent reads channels, releases and images; FlockFlasher reads boards. Readers ignore fields they do not know; a change that breaks a reader raises schema.",
+  "description": "The document the release pipeline signs and publishes as dl/flockos/manifest.json (ADR-0009). Published inside the device-agent's envelope: {\"payload\": \"<base64 of this document>\", \"signature\": \"<base64 Ed25519 signature>\"}, at most 64 KiB, signed over the message \"flockos-manifest:v1\\nflockos/manifest.json\\n<sha256 hex of the payload>\". The device-agent reads channels, releases and images; FlockFlasher reads boards. Readers ignore fields they do not know, and skip an image whose variant, kernel or architecture they do not know (the enums below list what the pipeline publishes today; adding a value needs no reader update, and readers keep the images they know); a change that breaks a reader raises schema.",
   "type": "object",
   "required": ["schema", "issued_at", "channels", "releases", "boards"],
   "additionalProperties": false,
