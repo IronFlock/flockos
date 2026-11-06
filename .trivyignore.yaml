@@ -52,3 +52,11 @@ vulnerabilities:
       - "usr/bin/nvidia-cdi-hook"
     statement: "Go 1.27.1 stdlib (net/http2 SETTINGS) in NVIDIA Container Toolkit 1.20.1, NVIDIA's latest release; no fixed build yet; they are OCI hooks and command-line tools, no network service"
     expired_at: 2026-12-06
+  - id: CVE-2026-97031
+    paths:
+      - "usr/bin/nvidia-ctk"
+      - "usr/bin/nvidia-container-runtime"
+      - "usr/bin/nvidia-container-runtime-hook"
+      - "usr/bin/nvidia-cdi-hook"
+    statement: "Go 1.27.1 stdlib (crypto/tls ECH) in NVIDIA Container Toolkit 1.20.1, NVIDIA's latest release; no fixed build yet; they are OCI hooks and command-line tools, no network service"
+    expired_at: 2026-12-06
