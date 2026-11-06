@@ -62,7 +62,7 @@ decision), in progress.
 | 1.3 | Shared overlay: `/data` redirections, os-release, enroll placeholder | flockos | 2 | 1.1 | done (#155) |
 | 1.4 | RAUC integration and bundle build | flockos | 3 | 1.2, 1.3 | done (#155) |
 | 1.5 | QEMU test harness and `image-test` job | flockos | 3 | 1.4 | done (#155) |
-| 1.6 | Release signing through KMS/PKCS#11; `build` and `sign` jobs | flockos | 2 | 0.5, 1.4 | done (#168); the KMS signature is first used by the first release |
+| 1.6 | Release signing through KMS/PKCS#11; `build` and `sign` jobs | flockos | 2 | 0.5, 1.4 | done (#168); first used by v0.10.0 (2026-11-06) |
 | 1.7 | fwupd in the image | flockos | 1 | 1.3 | done (#155) |
 | 1.8 | Rootfs vulnerability scan and SBOM in `security.yml` | flockos, workflows | 1 | 1.1 | done (#169, the harness's rootfs-recipe input) |
 | 1.9 | Hardware acceptance on an x86 IPC; target and testing docs | flockos, hardware | 2 | 1.5 | open: needs an x86 IPC |
@@ -72,7 +72,7 @@ decision), in progress.
 | 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
 | 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done (device-agent #202 in 1.6.0, the catalog key in 1.6.1); the images' only health gate since flockos-mark-good went |
 | 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009) |
-| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | done (#170; catalog key 2026-11-05, trusted by device-agent 1.6.1) |
+| 2.6 | `release.yml`: stage, e2e, promote, signed manifest, GitHub Release | flockos, GCP | 4 | 1.6, 2.3 | done (#170; catalog key 2026-11-05, trusted by device-agent 1.6.1); first release v0.10.0 on 2026-11-06 |
 | 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | blocked on 2.6 |
 | 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | blocked on 2.4 |
 | 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | blocked on 2.5 |

@@ -135,3 +135,13 @@ print(len(entries))
   ! grep -E '^\s+name: image-' "$wf/build.yml"
   [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 3 ]
 }
+
+@test "the assets job downloads the release's checksums and SBOMs, not its images" {
+  wf=$repo/.github/workflows/release.yml
+  assets=$(sed -n '/^  assets:/,/^  [a-z-]*:$/p' "$wf")
+  [[ "$assets" == *"name: release-meta-release"* ]]
+  [[ "$assets" != *"name: release-release"* ]]
+  stage=$(sed -n '/^  stage:/,/^  promote:/p' "$wf")
+  [[ "$stage" == *'name: release-meta-${{ env.MODE }}'* ]]
+  [[ "$stage" == *"build/publish.sh sums out > meta/SHA256SUMS"* ]]
+}
