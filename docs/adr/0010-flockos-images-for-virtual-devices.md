@@ -74,26 +74,30 @@ from metadata keys: a second way in beside the one account from the `.flock`.
 - On other machines the unit is skipped at once. It waits for no network target, so an
   offline device still enrolls without delay.
 
-### 4. The device chooses FlockOS; the product stays the hardware
+### 4. Every Linux VM runs FlockOS; the image follows the hardware
 
-A product is the VM's hardware, which billing charges, and names no OS. The only
-exception is Windows, whose licence is in its price.
+The manager's Ubuntu and Debian images are deprecated (2026-11-06) and no longer
+offered. Every virtual device that is not Windows runs FlockOS.
 
-- **The choice.** A virtual device runs FlockOS when it is created with a FlockOS image
-  id (`os_image_id`), the field the platform keeps for every device's FlockOS image. The
-  manager boots the image family of that id.
-- **Checks.** The id must have a VM image, and the image must fit the product's
-  architecture. The manager refuses any other id before the device exists.
-- **Rebuilds.** A device whose VM is gone comes back on the id stored on its row.
-- **No id.** Without an id, a device boots the product's images, as before.
+- **The image.** The product's hardware decides it: `flockos-arm64-efi-base` on arm64,
+  `flockos-amd64-efi-nvidia` with a GPU, `flockos-amd64-efi-base` otherwise. No arm64
+  image has the NVIDIA driver, so an arm64 product with a GPU is refused before the
+  device exists.
+- **No OS in products.** A product is the VM's hardware, which billing charges. Only
+  Windows is a product of its own, as its licence is in the price.
+- **The device row.** The manager records the image as the device's `os_image_id`, the
+  field the platform keeps for every device's FlockOS image. Studio's dialog for
+  virtual devices needs no OS choice.
+- **Rebuilds.** A device whose VM is gone comes back on FlockOS, the image derived from
+  its product again. This holds for devices made on the old images too.
 - **Disks.** The products' minimum disks (10 GB, 40 GB with a GPU) fit FlockOS (10 GiB,
   18 GiB for nvidia).
 
 ## Consequences
 
-- **The device dialog.** Studio's dialog for virtual devices has to offer the FlockOS
-  images with a VM image and send the chosen `os_image_id`. That field comes with the
-  platform's FlockOS image work in backend, platform-db and Studio.
+- **Old devices.** Devices made on the old images keep running them until their VM is
+  rebuilt. device-init's end-to-end targets `vdm-amd64` and `vdm-arm64` still boot those
+  images, so they stay in `record-1283` until device-init moves on.
 - **Exposure window.** Between the VM's creation and the guest attribute, every process
   on the VM could read the device's secret from the metadata server. No app runs before
   the enrollment, and the window is a boot's length.
