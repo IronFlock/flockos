@@ -58,9 +58,11 @@ Sequence:
 
 1. **First boot.** System state `running`; os-release carries the image id; the
    FLOCKOS partition boots the image's own shim, MokManager and Debian's signed
-   GRUB (byte for byte the packaged files), without shim's fallback, and Secure
-   Boot is what the test asked for (`mokutil --sb-state`; with it on, the kernel
-   is locked down in integrity mode);
+   GRUB (byte for byte the packaged files), without shim's fallback; shim's MOK
+   table reached the kernel (`/sys/firmware/efi/mok-variables`), and Secure Boot
+   is what the test asked for, by the kernel's boot log and `mokutil --sb-state`
+   (not on `-rt` kernels, which turn EFI runtime services off); with it on, the
+   kernel is locked down in integrity mode;
    `systemd-repart` created `rootfs-b` (same size as `rootfs-a`) and `data` (grown
    to the disk); `/data` and its bind mounts are in place; machine-id
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses

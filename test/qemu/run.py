@@ -460,11 +460,21 @@ class Runner:
         self.vm.run(f"cmp {boot}/mm{efi_arch}.efi /usr/lib/shim/mm{efi_arch}.efi.signed")
         self.vm.run(f"cmp {boot}/grub{efi_arch}.efi /usr/lib/grub/{grub_format}-signed/grub{efi_arch}.efi.signed")
         self.vm.run(f"test ! -e {boot}/fb{efi_arch}.efi && grep -q '^source ' /boot/efi/EFI/debian/grub.cfg")
-        state = self.vm.run("mokutil --sb-state", check=False).strip()
-        lockdown = self.vm.run("cat /sys/kernel/security/lockdown").strip()
+        # shim hands its MOK state to the kernel in a configuration table:
+        # shim started GRUB, with Secure Boot on or off.
+        self.vm.run("test -d /sys/firmware/efi/mok-variables")
         want_state, want_lockdown = ("enabled", "[integrity]") if self.secure_boot else ("disabled", "[none]")
-        if f"SecureBoot {want_state}" not in state or want_lockdown not in lockdown:
-            raise TestFailure(f"Secure Boot should be {want_state}: mokutil says {state!r}, lockdown {lockdown!r}")
+        kernel = self.vm.run("journalctl -k -b --no-pager -o cat | grep -m 1 -o 'secureboot: Secure boot [a-z]*'",
+                             check=False).strip()
+        lockdown = self.vm.run("cat /sys/kernel/security/lockdown").strip()
+        if kernel != f"secureboot: Secure boot {want_state}" or want_lockdown not in lockdown:
+            raise TestFailure(f"Secure Boot should be {want_state}: the kernel says {kernel!r}, lockdown {lockdown!r}")
+        # PREEMPT_RT kernels turn EFI runtime services off: no variables to
+        # read. Elsewhere mokutil, what a user asks, has to agree.
+        if self.vm.run("ls /sys/firmware/efi/efivars 2>/dev/null | head -n 1", check=False).strip():
+            state = self.vm.run("mokutil --sb-state", check=False).strip()
+            if f"SecureBoot {want_state}" not in state:
+                raise TestFailure(f"Secure Boot should be {want_state}: mokutil says {state!r}")
 
     def first_boot(self):
         self.vm.wait_shell(self.boot_timeout)
