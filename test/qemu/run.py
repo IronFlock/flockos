@@ -447,7 +447,7 @@ class Runner:
         if int(sizes["data"]) < 10 * 1024**3:
             raise TestFailure(f"/data was not grown to the disk: {sizes['data']} bytes")
         for path, source in (("/data", None), ("/opt/ironflock", "/data/ironflock"), ("/home", "/data/home"),
-                             ("/var/log/journal", "/data/log/journal"), ("/var/lib/fwupd", "/data/fwupd"),
+                             ("/var/log", "/data/log"), ("/var/lib/fwupd", "/data/fwupd"),
                              ("/etc/NetworkManager/system-connections", "/data/network/connections"),
                              ("/boot/efi", None)):
             out = self.vm.run(f"findmnt -no SOURCE,FSROOT {path}", check=False).strip()
