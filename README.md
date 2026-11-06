@@ -26,7 +26,7 @@ starting with [docs/master-plan.md](docs/master-plan.md).
 | `jetson-orin` | NVIDIA Jetson Orin (Nano devkit SD image; NX/AGX flash package) | NVIDIA UEFI `nvbootctrl` + RAUC |
 
 Variants: `base`, `nvidia` (GPU in containers on x86), `installer` (a USB stick that
-installs FlockOS on an internal disk). Every target can be built with a PREEMPT_RT kernel
+installs any of its target's images on an internal disk). Every target can be built with a PREEMPT_RT kernel
 (`-rt`). Images are flashed with [FlockFlasher](https://github.com/IronFlock/flasher);
 devices are set up by [device-init](https://github.com/IronFlock/device-init), which the
 image ships and calls rather than re-implementing.

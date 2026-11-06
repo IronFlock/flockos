@@ -35,17 +35,23 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 
 ## Installer stick
 
-For sealed IPCs that cannot boot a USB-flashed system disk: flash the
-`installer` image with FlockFlasher, put `installer.conf` and the `.flock` on
-its FLOCKOS partition, boot the IPC from the stick. Example for a box with one
-NVMe and no keyboard:
+For sealed IPCs that cannot boot a USB-flashed system disk. The stick carries
+every amd64-efi image: `base`, `base-rt` and `nvidia`. In FlockFlasher choose
+the hardware, the FlockOS variant, and "Installer stick" as the way to
+install: it writes the stick, the `.flock` and an `installer.conf` that names
+the variant (`payload=<image id>`) to its FLOCKOS partition. Boot the IPC from
+the stick (8 GB or larger: the image is 5.3 GiB). Example for an NVIDIA box
+with one NVMe and no keyboard:
 
 ```ini
 # installer.conf
+payload=flockos-amd64-efi-nvidia
 disk=largest
 confirm=no
 after=poweroff
 ```
+
+Without `confirm=no` the installer asks on the console before it writes.
 
 The installer leaves out the stick itself, read-only, loop and too-small disks,
 and USB disks unless `allow-usb=yes`. When it is done the box powers off; remove

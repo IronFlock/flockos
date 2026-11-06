@@ -57,7 +57,7 @@ NAME="$IMAGE_ID-$FLOCKOS_VERSION"
 if [ "$VARIANT" = installer ]; then
   ESP_PART_NAME=flockos-installer-esp ROOT_PART_NAME=flockos-installer
   # The images the installer carries (built before it, in /out).
-  FLOCKOS_INSTALLER_PAYLOADS=${FLOCKOS_INSTALLER_PAYLOADS:-base}
+  FLOCKOS_INSTALLER_PAYLOADS=${FLOCKOS_INSTALLER_PAYLOADS:-${INSTALLER_PAYLOADS:-base}}
   for p in $FLOCKOS_INSTALLER_PAYLOADS; do
     f=/out/flockos-$TARGET-$p/flockos-$TARGET-$p-$FLOCKOS_VERSION.img.gz
     [ -f "$f" ] || die "the installer carries $p: build $TARGET $p first ($f is missing)"

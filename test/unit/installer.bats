@@ -94,6 +94,25 @@ teardown() { rm -rf "$tmp"; }
   [[ "$output" == *"set payload="* ]]
 }
 
+@test "payload: base never picks base-rt, and an image id selects exactly" {
+  mkdir -p "$tmp/p"
+  for v in base base-rt nvidia; do touch "$tmp/p/flockos-amd64-efi-$v-1.0.0.img.zst"; done
+  [ "$(installer_payload "$tmp/p" base)" = "$tmp/p/flockos-amd64-efi-base-1.0.0.img.zst" ]
+  [ "$(installer_payload "$tmp/p" base-rt)" = "$tmp/p/flockos-amd64-efi-base-rt-1.0.0.img.zst" ]
+  [ "$(installer_payload "$tmp/p" flockos-amd64-efi-base)" = "$tmp/p/flockos-amd64-efi-base-1.0.0.img.zst" ]
+  [ "$(installer_payload "$tmp/p" flockos-amd64-efi-nvidia)" = "$tmp/p/flockos-amd64-efi-nvidia-1.0.0.img.zst" ]
+  run installer_payload "$tmp/p" flockos-arm64-efi-base
+  [ "$status" -ne 0 ] && [[ "$output" == *"no payload for flockos-arm64-efi-base"* ]]
+  run installer_payload "$tmp/p" rt
+  [ "$status" -ne 0 ]
+}
+
+@test "installer.conf takes an image id as payload, as FlockFlasher writes it" {
+  printf 'payload=flockos-amd64-efi-base-rt\n' >"$tmp/installer.conf"
+  installer_conf "$tmp/installer.conf"
+  [ "$CONF_PAYLOAD" = flockos-amd64-efi-base-rt ]
+}
+
 @test "the boot entry's loader is the target's EFI_LOADER" {
   [ "$(installer_loader x86_64)" = '\EFI\BOOT\BOOTX64.EFI' ]
   [ "$(installer_loader aarch64)" = '\EFI\BOOT\BOOTAA64.EFI' ]

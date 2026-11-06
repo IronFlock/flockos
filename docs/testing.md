@@ -82,10 +82,11 @@ Sequence:
    an update); the next boot falls back to B.
 
 **Install test** (`--variant installer`, the `install-test` job, for amd64-efi
-under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to `confirm=no` and
-the test `.flock`, next to a blank 20 GiB NVMe. The stick must install to
-`/dev/nvme0n1` on its own, copy the `.flock` to the new disk and power off; its
-log must say both. The NVMe then boots alone, with the UEFI variables the
+under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to
+`payload=flockos-<target>-base` (the stick carries every image of its target)
+and `confirm=no`, and the test `.flock`, next to a blank 20 GiB NVMe. The stick
+must install that image to `/dev/nvme0n1` on its own, copy the `.flock` to the
+new disk and power off; its log must say all three. The NVMe then boots alone, with the UEFI variables the
 installer wrote, passes the first-boot checks above and enrolls with that
 `.flock` (`--no-flock` leaves it out).
 

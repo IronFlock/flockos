@@ -53,6 +53,10 @@ else
     rm -f "$WORK/payload.img"
     log "installer payload: $base ($(du -h "$payload_dir/$base.img.zst" | cut -f1))"
   done
+  # The image ids the stick carries, for the release catalog (tools/catalog:
+  # the installer image's payloads; FlockFlasher writes the chosen one into
+  # installer.conf).
+  for p in $FLOCKOS_INSTALLER_PAYLOADS; do printf 'flockos-%s-%s\n' "$TARGET" "$p"; done >"$OUT/$NAME.payloads"
 fi
 
 # --- identity --------------------------------------------------------------

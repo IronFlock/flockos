@@ -171,20 +171,30 @@ unsigned; FlockOS 1.x boots without Secure Boot.
 ## The installer variant
 
 `just build amd64-efi installer` (or `arm64-efi installer`) builds the FlockOS
-installer stick of that target (master plan, section 3.6) from the base image
-built before it (`just build amd64-efi base`; `FLOCKOS_INSTALLER_PAYLOADS`
-names more variants). The boot entry it writes names the target's loader
-(`BOOTX64.EFI`, `BOOTAA64.EFI`). It is the base system plus
-`profiles/installer` (the installer program, `efibootmgr`, its own `fstab`),
-with the base image embedded as `/usr/share/flockos/payload/<image>.img.zst`
-and its raw size next to it. It has no RAUC bundle, no slot B, no `/data`, no
-SSH and no device services, and its GPT names differ (`flockos-installer-esp`,
-`flockos-installer`), so a disk it installed and the stick never collide; its
-FAT label is `FLOCKOS` as on every image, for FlockFlasher.
+installer stick of that target (master plan, section 3.6). One stick per target
+carries every image of it: the variants in `INSTALLER_PAYLOADS` of
+`target.conf` (amd64-efi `base base-rt nvidia`, arm64-efi `base base-rt`),
+built before it (`just build amd64-efi base`, `... base rt`, `... nvidia`);
+`FLOCKOS_INSTALLER_PAYLOADS` overrides the list for a local build, for example
+`FLOCKOS_INSTALLER_PAYLOADS=base just build amd64-efi installer`. The boot
+entry it writes names the target's loader (`BOOTX64.EFI`, `BOOTAA64.EFI`). It
+is the base system plus `profiles/installer` (the installer program,
+`efibootmgr`, its own `fstab`), with each image embedded as
+`/usr/share/flockos/payload/<image id>-<version>.img.zst` and its raw size next
+to it, and `<image id>-<version>.payloads` next to the image in `out/`: the
+image ids it carries, for the catalog's `payloads`. Its root slot is
+`SLOT_SIZE_INSTALLER` (5 GiB on amd64-efi, 4 GiB on arm64-efi), sized for the
+payloads; the build's slot-fill check holds it to them. It has no RAUC bundle,
+no slot B, no `/data`, no SSH and no device services, and its GPT names differ
+(`flockos-installer-esp`, `flockos-installer`), so a disk it installed and the
+stick never collide; its FAT label is `FLOCKOS` as on every image, for
+FlockFlasher.
 
 On boot `flockos-installer.service` runs on the console: it reads
 `installer.conf` and the `.flock` from the stick's FLOCKOS partition, picks the
-target disk (`disk=largest`, `/dev/<name>` or `by-id:<id>`; never the stick,
+image (`payload=`: an image id as FlockFlasher writes it, such as
+`flockos-amd64-efi-nvidia`, or a variant, such as `base-rt`; it may be left out
+only on a stick with one image), picks the target disk (`disk=largest`, `/dev/<name>` or `by-id:<id>`; never the stick,
 read-only, loop or too small disks; USB disks only with `allow-usb=yes`), asks
 unless `confirm=no`, writes the image, copies the `.flock` to the new FLOCKOS
 partition, adds a UEFI boot entry, and powers off (`after=reboot` reboots). The
