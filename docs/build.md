@@ -54,6 +54,7 @@ Artefacts land in `out/<image-id>/`:
 | `<image-id>-<version>.img.gz` | the disk image FlockFlasher writes |
 | `<image-id>-<version>.raucb` | the update bundle |
 | `<image-id>-<version>.packages.tsv` | every Debian package in the image with its version |
+| `<image-id>-<version>.sources.tsv` | the source packages of the image, from which the release publishes their source ([release.md](release.md#source-code)) |
 | `<image-id>-<version>.os-release` | the image's `/etc/os-release` |
 | `SHA256SUMS` | checksums of the image and the bundle |
 

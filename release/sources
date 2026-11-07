@@ -1,0 +1,28 @@
+# The source packages of the images that are in neither Debian nor the
+# Raspberry Pi archive (build/sources.sh, docs/release.md "Source code"):
+# their vendors' repositories have no source packages. One per line, the
+# source package (dpkg-query's source:Package), then
+#   upstream URL   its source is the upstream tarball at URL ({upstream}:
+#                  the version without epoch and Debian revision), which
+#                  the release publishes like a Debian source package
+#   none REASON    no source is published; SOURCES gives the reason. Only
+#                  for software under no copyleft licence.
+# A source package that is in neither the archives nor this list fails the
+# release, so a new repository gets a decision here first.
+
+# Docker's repository (profiles/base). containerd.io's runc links libseccomp
+# (LGPL, Debian's package) dynamically.
+docker-ce                 none Apache-2.0 (https://github.com/docker/docker-ce-packaging)
+containerd.io             none Apache-2.0 (https://github.com/containerd/containerd)
+docker-buildx-plugin      none Apache-2.0 (https://github.com/docker/buildx)
+docker-compose-plugin     none Apache-2.0 (https://github.com/docker/compose)
+
+# NVIDIA's repositories (profiles/nvidia).
+nvidia-graphics-drivers   none NVIDIA's proprietary driver licence: binaries only
+nvidia-persistenced       none MIT (https://github.com/NVIDIA/nvidia-persistenced)
+libnvidia-container       none Apache-2.0 (https://github.com/NVIDIA/libnvidia-container)
+nvidia-container-toolkit  none Apache-2.0 (https://github.com/NVIDIA/nvidia-container-toolkit)
+nvidia-modprobe           upstream https://github.com/NVIDIA/nvidia-modprobe/archive/refs/tags/{upstream}.tar.gz
+# The open kernel modules the build makes from nvidia-kernel-open-dkms
+# (build/nvidia-modules.sh): MIT, the linked modules MIT/GPL-2.0.
+flockos-nvidia-modules    upstream https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/{upstream}.tar.gz

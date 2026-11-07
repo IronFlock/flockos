@@ -16,6 +16,7 @@ or published from a laptop.
 | `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)); attests the SLSA provenance of every image and bundle | `flockos-release` |
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
 | `stage` | The signed files and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
+| `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |
 | `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
 | `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates FlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
@@ -82,9 +83,48 @@ keeps an image made from the same file.
 - `sign` uses a throwaway stand-in for the bundle signer.
 - `e2e` boots and reboots only: no release image accepts a stand-in bundle.
 - `stage` and `promote` print their storage calls (`DRY_RUN=1`).
+- `sources` looks up every source package as a release does, so one without
+  source fails the run, and prints its storage calls.
 - `vm-images` makes each VM image's tarball and prints the cloud calls.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
+
+## Source code
+
+This repository is under the Apache License 2.0. An image is a collection of
+separate programs, each under its own licence, which
+`/usr/share/doc/<package>/copyright` in the image names. Many are under the GPL
+or LGPL (the kernel, GRUB, systemd, bash, RAUC), whose source has to be
+available to everyone who gets the image. Each release therefore publishes the
+source of every package in its images next to them:
+
+- `customize.sh` records an image's source packages in
+  `<image-id>-<version>.sources.tsv`: each package's source and the sources
+  its `Built-Using` names. Debian keeps that field for licence compliance: the
+  source of the signed kernel and GRUB is the unsigned `linux` and `grub2`.
+- The `sources` job looks up every file of every source package with apt in
+  the build container, from the source indexes of Debian and the Raspberry Pi
+  archive. A version the archive no longer has comes from
+  snapshot.debian.org. Each file must have the hash of the archive's signed
+  index (or snapshot's).
+- The packages from Docker's and NVIDIA's repositories have no source packages.
+  [`release/sources`](../release/sources) decides each one: the upstream
+  tarball (`nvidia-modprobe`, the NVIDIA kernel modules the build makes), or
+  no source, with the reason (Apache-2.0, MIT, NVIDIA's binary driver).
+  A source package in neither the archives nor that file fails the release,
+  so a new repository needs a decision there first.
+- The files go to the pool `flockos/sources/<archive>/<source>/<file>`
+  (`debian`, `raspberrypi`, `upstream`), which every release shares: a file
+  there is never replaced, and only new ones are uploaded. The first release
+  uploads about 1.7 GB.
+- `flockos/<version>/SOURCES` lists every file of the release, with the
+  reason for each package without source. `dget <URL of a .dsc>` fetches a
+  Debian source package. `check` makes sure `SOURCES` and the pool answer
+  through the download proxy.
+- Each image says where `SOURCES` is in `/usr/share/doc/flockos/copyright`, so
+  a copy that is passed on carries the directions too.
+- Releases up to 0.11.0 have no `SOURCES`: their images record no source
+  packages.
 
 ## Moving a release to production
 
@@ -139,3 +179,8 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
   from the previous release to this one and back through the agent's
   `perform_os_update`. That needs the test flock's credentials in the
   `release` environment, and an agent with the catalog key on the images.
+- **The source code of Jetson images.** `build/sources.sh` knows Debian and the
+  Raspberry Pi archive, not Ubuntu or NVIDIA's L4T repositories. Jetson's
+  sources (Ubuntu's source packages, NVIDIA's `public_sources.tbz2`) come with
+  its licence compliance, WP-6.8 ([jetson-licence-review.md](jetson-licence-review.md)),
+  before the first Jetson release.

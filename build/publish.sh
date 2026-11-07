@@ -6,6 +6,10 @@
 #   publish.sh promote VERSION       the staged release to the live tree
 #                                    LIVE/<version>/; a live file is never
 #                                    replaced by different bytes
+#   publish.sh sources PLAN VERSION  the release's source code (a plan of
+#                                    build/sources.sh): the files the pool
+#                                    LIVE/sources/ lacks to it, the index
+#                                    SOURCES to STAGING/<version>/
 #   publish.sh catalog FILE          the signed catalog to LIVE/manifest.json, last
 #   publish.sh check   VERSION FILE  every file of the release and the catalog
 #                                    answer through the download proxy
@@ -52,6 +56,18 @@ sums() {
   done
 }
 
+# hash_ok FILE HASH: FILE has the hash a plan names ("-": none to check).
+hash_ok() {
+  local got
+  case "$2" in
+    -) return 0 ;;
+    SHA256:*) got=$(sha256sum <"$1") ;;
+    SHA1:*) got=$(sha1sum <"$1") ;;
+    *) die "$1: unknown hash $2" ;;
+  esac
+  [ "${got%% *}" = "${2#*:}" ]
+}
+
 cmd=${1:-}
 case "$cmd" in
   sums)
@@ -87,6 +103,43 @@ case "$cmd" in
     done
     done_ "promoted $STAGING/$version/ to $LIVE/$version/"
     ;;
+  sources)
+    # Every release names its source files in SOURCES, so a file in the pool
+    # is never replaced (no-clobber); one that is there is not downloaded
+    # again. A downloaded file must have the plan's hash, which apt took
+    # from the archive's signed index. SOURCES goes to the staging tree, and
+    # promote publishes it with the release. A dry run downloads nothing.
+    plan=${2:?usage: publish.sh sources PLAN VERSION} version=${3:?usage: publish.sh sources PLAN VERSION}
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    bash "$here/sources.sh" index "$plan" "$version" >"$tmp/SOURCES"
+    # pool path, URL, hash; one line per path (two versions of a source
+    # package share their orig tarball, maybe one from the archive and one
+    # from snapshot.debian.org)
+    awk -F'\t' '$3 != "-" { print $3 "\t" $4 "\t" $5 }' "$plan" | LC_ALL=C sort -t "$(printf '\t')" -k 1,1 -u >"$tmp/files"
+    bad=$(cut -f 1 "$tmp/files" | grep -vE '^(debian|raspberrypi|upstream)/[a-z0-9][a-z0-9+.-]*/[A-Za-z0-9][A-Za-z0-9+._~-]*$' || true)
+    [ -z "$bad" ] || die "not a path in the pool: $(echo "$bad" | tr '\n' ' ')"
+    if [ "${DRY_RUN:-0}" = 1 ]; then
+      cp "$tmp/files" "$tmp/new"
+      storage cp --recursive --no-clobber --quiet --cache-control="public, max-age=0" "<the new files>/*" "$LIVE/sources/"
+    else
+      require curl
+      # No pool yet (or no listing): every file is downloaded, and
+      # no-clobber still keeps what is there.
+      { storage ls "$LIVE/sources/**" 2>/dev/null || true; } | sed -n "s|^$LIVE/sources/||p" >"$tmp/pool"
+      awk -F'\t' -v pool="$tmp/pool" 'BEGIN { while ((getline p <pool) > 0) have[p] = 1 } !($1 in have)' "$tmp/files" >"$tmp/new"
+      while IFS=$'\t' read -r path url hash; do
+        mkdir -p "$tmp/up/${path%/*}"
+        curl -fsSL --proto '=http,https' --retry 5 -o "$tmp/up/$path" "$url" || die "cannot download $url"
+        hash_ok "$tmp/up/$path" "$hash" || die "$url is not the file the plan names ($hash)"
+      done <"$tmp/new"
+      if [ -s "$tmp/new" ]; then
+        storage cp --recursive --no-clobber --quiet --cache-control="public, max-age=0" "$tmp/up"/* "$LIVE/sources/"
+      fi
+    fi
+    put "$tmp/SOURCES" "$STAGING/$version/SOURCES"
+    done_ "uploaded $(wc -l <"$tmp/new" | tr -d ' ') of the release's $(wc -l <"$tmp/files" | tr -d ' ') source files to $LIVE/sources/, staged $STAGING/$version/SOURCES"
+    ;;
   catalog)
     file=${2:?usage: publish.sh catalog FILE}
     put "$file" "$LIVE/manifest.json"
@@ -108,9 +161,17 @@ case "$cmd" in
         awk 'tolower($1) == "content-length:" { print $2 }' | tail -n 1)
       [ -n "$got" ] && [ "$got" = "$want" ] || die "$name answers with ${got:-no} bytes, the bucket holds $want"
     done <"$tmp/SHA256SUMS"
+    # The source code: SOURCES byte for byte, and its first file in the pool.
+    curl -fsS --proto '=https' --retry 5 -o "$tmp/SOURCES" "$DL_BASE/flockos/$version/SOURCES" ||
+      die "$DL_BASE/flockos/$version/SOURCES does not answer"
+    storage cat "$LIVE/$version/SOURCES" | cmp -s - "$tmp/SOURCES" || die "the proxy's SOURCES is not the live one"
+    url=$(awk -F'\t' '!/^#/ && $3 != "-" { print $3; exit }' "$tmp/SOURCES")
+    [ -n "$url" ] || die "SOURCES lists no source file"
+    curl -fsSI --proto '=https' --retry 5 "$url" >/dev/null ||
+      die "$url does not answer: does the download proxy serve /dl/flockos/sources/?"
     curl -fsS --proto '=https' --retry 5 -o "$tmp/manifest.json" "$DL_BASE/flockos/manifest.json" || die "the catalog does not answer"
     cmp -s "$tmp/manifest.json" "$file" || die "the catalog the proxy serves is not the one published"
-    log "every file of $version and the catalog answer through $DL_BASE/flockos/"
+    log "every file of $version, its SOURCES and the catalog answer through $DL_BASE/flockos/"
     ;;
-  *) die "usage: publish.sh stage|promote|catalog|check ..." ;;
+  *) die "usage: publish.sh stage|promote|sources|catalog|check ..." ;;
 esac
