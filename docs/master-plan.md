@@ -686,9 +686,26 @@ capsule generated from the BSP and staged by a RAUC hook (3.10), release matrix 
 Follow-up: the RT kernel from NVIDIA's configuration (3.11), offered only after CUDA on
 the RT kernel is verified on the chosen JetPack release.
 
-Acceptance: Orin Nano devkit flashed from FlockFlasher enrolls and runs a CUDA
-container; an Orin NX on NVMe is flashed from a Linux host with the package, enrolls,
-and updates N→N+1 with rollback.
+Licence: Jetson Linux is under the NVIDIA Driver License Agreement. It allows
+redistributing NVIDIA's binaries unchanged for use with an open source kernel, with
+the Agreement given to every recipient. The
+[licence review](jetson-licence-review.md) sets how FlockOS ships Jetson images:
+
+- NVIDIA's packages stay unchanged in the image, and the Agreement goes next to every
+  Jetson file.
+- NVIDIA's GPL and FreeRTOS sources are mirrored with each release.
+- The QSPI capsules are NVIDIA's own where NVIDIA ships them.
+- Users get a flash kit that fetches the BSP from NVIDIA, instead of a published flash
+  package.
+- Images that NVIDIA's tools make from the BSP are published only if legal accepts
+  them.
+
+IronFlock's legal check signs off before the first Jetson release (ADR-0008, WP-6.8).
+
+Acceptance: Orin Nano devkit flashed from FlockFlasher (or, if legal does not accept
+the SD image, from a host with the flash kit) enrolls and runs a CUDA container; an
+Orin NX on NVMe is flashed from a Linux host with the flash kit, enrolls, and updates
+N→N+1 with rollback.
 
 ### Phase 7: Generic arm64 EFI, decommission, documentation (1 to 2 weeks)
 
@@ -738,6 +755,7 @@ Acceptance: an arm64 VM boots the image and enrolls; all docs reviewed.
 | Raspberry Pi tryboot + RAUC is not an upstream RAUC backend; the firmware feature is only partly documented | Follow the Bootlin/Oniro implementations, pin firmware versions, keep U-Boot as the documented fallback |
 | Jetson rootfs A/B has reported edge cases (retry counter only decrements on warm reboot; redundancy triggers only when the slot fails to mount) | The agent's health gate plus a watchdog-driven warm reboot on failed enroll; test on r36.4.x before committing |
 | JetPack generation drift (r36 Ubuntu 22.04 vs r38 Ubuntu 24.04) | Decide at Phase 6 start; the pipeline is distro-agnostic |
+| NVIDIA's Jetson licence is proprietary and revocable: redistribution only of unchanged binaries with the Agreement, an indemnity for products that use the software, no Critical Applications | [Licence review](jetson-licence-review.md): NVIDIA's packages and capsules shipped unchanged with the Agreement, sources mirrored, BSP-made images only after legal accepts them (flash kit otherwise); legal signs off before the first Jetson release (WP-6.8) |
 | Runner disk (14 GB) and no GPU/arm hardware in CI | Build on `/mnt`, sparse images; hardware acceptance is a documented manual gate per phase; consider one self-hosted arm64 runner with a Pi 5 later |
 | NVIDIA driver vs kernel ABI | Module built per release against the pinned kernel; `nvidia` variant has its own `compatible` |
 | `.flock` on a FAT partition is readable until enrollment | Enroll shreds it; document that an unenrolled flashed medium holds secrets |

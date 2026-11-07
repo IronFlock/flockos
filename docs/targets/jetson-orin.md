@@ -173,5 +173,15 @@ the flash package from the image (`jetson-flash`, above).
   module needs them once (r39 bootloader; NVIDIA's two-step `--no-flash
   --reuse ... internal`, then `--external-only --append`) (WP-6.4).
 - The `.flock` on the ESP for enrollment (WP-6.4).
-- The licence review of what the image redistributes, before the first
-  published Jetson image (ADR-0008).
+- Licences ([jetson-licence-review.md](../jetson-licence-review.md); done
+  2026-11-07, legal sign-off in WP-6.8). Jetson Linux is under the NVIDIA
+  Driver License Agreement: NVIDIA's binaries may be redistributed only
+  unchanged, and every recipient must get the Agreement. What follows for this
+  target:
+  - the build keeps NVIDIA's packages and their `/usr/share/doc` unchanged
+    (a rootfs check will enforce it);
+  - `apt/jetson-ota-public.asc` is replaced with the key as
+    `repo.download.nvidia.com` serves it, without NVIDIA's licence header;
+  - the flash package stays a CI test, and users get a flash kit that
+    downloads the BSP from NVIDIA (WP-6.4);
+  - the QSPI capsule comes unchanged from `nvidia-l4t-bootloader` (WP-6.5).

@@ -94,13 +94,14 @@ decision), in progress.
 | 5.3 | Pi EEPROM lane and boot configuration | flockos | 2 | 5.2 | open: needs a Pi 4 and a Pi 5 |
 | 5.4 | Pi hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 4 | 5.2, 5.3 | open: needs a Pi 4 and a Pi 5 |
 | 5.5 | Follow-up: Raspberry Pi RT kernel built in CI | flockos | 8 | 5.4, 4b.1 | open |
-| 6.1 | BSP decision, download and cache | flockos | 2 | | done (#164, ADR-0008 accepted) |
+| 6.1 | BSP decision, download and cache | flockos | 2 | | done (#164, ADR-0008 accepted; licence review 2026-11-07, [jetson-licence-review.md](jetson-licence-review.md)) |
 | 6.2 | `jetson-orin` rootfs and layout | flockos | 6 | 6.1, 2.3 | done (#171, #173, #174, #177) |
 | 6.3 | RAUC `custom` backend over `nvbootctrl`; health gate | flockos | 4 | 6.2 | open (`system.conf` names the backend; the backend itself is to do) |
-| 6.4 | Orin Nano SD image and NX/AGX flash package | flockos | 5 | 6.3 | open |
-| 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open |
-| 6.6 | Jetson hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 5 | 6.4, 6.5 | open |
+| 6.4 | Orin Nano SD image and NX/AGX flash package | flockos | 5 | 6.3 | open (licence review: a flash kit for users; the package and the SD image published only after WP-6.8 allows it) |
+| 6.5 | Jetson QSPI capsule lane | flockos | 3 | 6.3 | open (licence review: NVIDIA's own capsules from `nvidia-l4t-bootloader`) |
+| 6.6 | Jetson hardware acceptance; FlockFlasher entries; target docs | flockos, flasher, hardware | 5 | 6.4, 6.5, 6.8 | open |
 | 6.7 | Follow-up: Jetson RT kernel | flockos | 5 | 6.6, 4b.1 | open |
+| 6.8 | Jetson licence compliance; legal sign-off | flockos, flasher, legal | 3 | 6.2 | open (review done 2026-11-07; the sign-off is IronFlock's legal check) |
 | 7.1 | `arm64-efi` target and installer payload | flockos | 3 | 1.5 | done (#161; arm64-efi installer #172) |
 | 7.2 | ReswarmOS migration guide and sunset | flockos, GCS, flasher, device-agent | 2 | 2.10 | open |
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
@@ -609,7 +610,9 @@ Goal and acceptance: see master plan, Phase 6 and sections 3.2, 3.7, 3.10. Miles
 - Scope: check whether JetPack 7 (L4T r38, Ubuntu 24.04) supports Orin at phase start,
   otherwise L4T r36.x; record the decision in an ADR; `build/fetch-bsp.sh` downloading
   the BSP and sample rootfs from NVIDIA's public archive with checksums; `actions/cache`
-  keyed on the L4T version; licence review of what the image redistributes.
+  keyed on the L4T version; licence review of what the image redistributes (done
+  2026-11-07: [jetson-licence-review.md](jetson-licence-review.md); its outcome goes to
+  WP-6.4, WP-6.5 and WP-6.8).
 - Acceptance: the BSP is fetched and cached in CI in under five minutes on a warm cache;
   the ADR names the L4T release and the Ubuntu base.
 
@@ -633,19 +636,33 @@ Goal and acceptance: see master plan, Phase 6 and sections 3.2, 3.7, 3.10. Miles
 
 ### WP-6.4 Orin Nano SD image and NX/AGX flash package (5 days)
 
-- Scope: the Orin Nano Developer Kit SD image via `jetson-disk-image-creator.sh`
-  (flashable by FlockFlasher; QSPI generation noted), the flash package for Orin NX/AGX
-  on NVMe/eMMC via `l4t_initrd_flash.sh` with our rootfs and layout, host-side flashing
-  documented step by step, both in the release matrix.
-- Acceptance: the SD image boots a Nano devkit to `flockos-enroll`; the flash package
-  flashes an Orin NX from a Linux host with the module in recovery mode.
+- Scope: the flash package for Orin NX/AGX on NVMe/eMMC via `l4t_initrd_flash.sh` with
+  our rootfs and layout, host-side flashing documented step by step. Under the licence
+  review (point 4), users do not get the package from FlockOS. They get a **flash kit**:
+  FlockOS's scripts, published with each release. On the flashing host, the kit
+  downloads the pinned BSP from NVIDIA, checks its SHA-256 from `bsp.conf`, and runs
+  `build/tegra-flash-package.sh` with the published slot image. CI keeps making the
+  package as a test. The Orin Nano Developer Kit SD image via
+  `jetson-disk-image-creator.sh` (flashable by FlockFlasher; QSPI generation noted)
+  goes into the release matrix only if WP-6.8's legal check accepts images that
+  NVIDIA's tools make (review, question 1). Otherwise the developer kit uses the flash
+  kit too. The same answer decides whether the package itself is published later.
+- Acceptance: the flash kit flashes an Orin NX from a Linux host with the module in
+  recovery mode, with nothing from NVIDIA except what it downloads from NVIDIA; if the
+  SD image is in, it boots a Nano devkit to `flockos-enroll`.
 
 ### WP-6.5 Jetson QSPI capsule lane (3 days)
 
-- Scope: `TEGRA_BL.Cap` generated in CI with `l4t_generate_soc_capsule.sh` from the
-  pinned BSP; RAUC post-install hook copying it to `EFI/UpdateCapsule/` and setting bit 2
-  of `OsIndications`; QSPI and rootfs L4T versions in lock-step; applied only inside a
-  platform maintenance window (platform flag).
+- Scope: `TEGRA_BL.Cap` taken unchanged from NVIDIA's `nvidia-l4t-bootloader` at the
+  pinned L4T version (`/opt/ota_package/t23x/TEGRA_BL_3767*.Cap`, `TEGRA_BL_3701*.Cap`),
+  after a check that it matches the QSPI firmware the flash kit writes (licence review,
+  point 6). The capsule is generated with `l4t_generate_soc_capsule.sh` from the pinned
+  BSP only for carrier boards NVIDIA ships no capsule for, and only after WP-6.8's
+  legal check allows it. The bundle carries the FreeRTOS statement and source offer
+  that the SPE firmware needs. A RAUC post-install hook copies the capsule to
+  `EFI/UpdateCapsule/` and sets bit 2 of `OsIndications`. QSPI and rootfs L4T versions
+  stay in lock-step. The capsule is applied only inside a platform maintenance window
+  (platform flag).
 - Acceptance: on a module, a release carrying a capsule updates the inactive bootloader
   slot on the same reboot that switches rootfs slots, and a failed capsule leaves the
   device booting.
@@ -655,11 +672,36 @@ Goal and acceptance: see master plan, Phase 6 and sections 3.2, 3.7, 3.10. Miles
 The master plan's Phase 6 acceptance (Nano devkit from FlockFlasher enrolls and runs a
 CUDA container; Orin NX on NVMe flashed from a host enrolls and updates with rollback);
 `docs/targets/jetson-orin.md` including host flashing; FlockFlasher entries. Milestone M8.
+The first Jetson release waits for WP-6.8's legal sign-off (ADR-0008's condition). If
+the SD image is not allowed, the Nano devkit is flashed with the flash kit for this
+acceptance.
 
 ### WP-6.7 Follow-up: Jetson RT kernel (5 days)
 
 Only after CUDA on the RT kernel is verified on the chosen JetPack release: `nvbuild.sh
 -r` in CI, `-rt-tegra` images, acceptance as in WP-4b.2.
+
+### WP-6.8 Jetson licence compliance; legal sign-off (3 days)
+
+- Scope: what [jetson-licence-review.md](jetson-licence-review.md) asks for, except
+  the flash kit (WP-6.4) and the capsule (WP-6.5):
+  - `NVIDIA-LICENSE.txt` (NVIDIA's Driver License Agreement, byte for byte the BSP's)
+    next to every Jetson file in `flockos/<version>/`, linked from the release notes;
+  - FlockFlasher shows the Agreement before it writes a Jetson image, and asks for
+    acceptance if legal requires it (flasher);
+  - NVIDIA's `public_sources.tbz2` of the pinned L4T version and the
+    `libnvidia-container` source of its tag mirrored to `flockos/sources/l4t-<version>/`
+    by the release, pinned by SHA-256 in `bsp.conf` as the BSP is (NVIDIA publishes
+    no hash for the sources tarball);
+  - `test/image/jetson-rootfs-check.sh` fails when an installed `nvidia-l4t-*`
+    package has no `/usr/share/doc/<package>/copyright`;
+  - `targets/jetson-orin/apt/jetson-ota-public.asc` replaced with the key as
+    `repo.download.nvidia.com` serves it (same key block, no NVIDIA licence header);
+  - the review's eight questions answered by IronFlock's legal check, and the answers
+    recorded in the review.
+- Acceptance: a dry run of the release publishes the Agreement and the source mirror
+  next to the Jetson files; the rootfs check fails on a tree without the copyright
+  files; the legal sign-off is recorded in the review and in ADR-0008.
 
 ## Phase 7: Generic arm64 EFI, decommission, documentation
 
