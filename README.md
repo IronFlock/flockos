@@ -9,13 +9,42 @@
 
 # FlockOS
 
-FlockOS is the operating system of IronFlock edge devices. It is a Debian-based
-appliance OS whose only job is to run the
-[IronFlock device-agent](https://github.com/IronFlock/device-agent) and Docker. A device
-has two root slots: an update is written to the inactive slot with
-[RAUC](https://rauc.io) and booted once, and a slot that does not reach IronFlock after
-an update falls back to the previous one. Release images are built, signed and
-published only by GitHub Actions.
+FlockOS is the operating system for industrial edge devices managed with IronFlock. Its
+aim is a trusted, hardened OS that updates over the air reliably and without a site
+visit, wherever a device runs: an industrial PC in a machine cabinet, a Raspberry Pi on
+the shop floor, a GPU host, a plant network without internet access, or a virtual
+machine.
+
+FlockOS is a Debian-based appliance OS. It runs the
+[IronFlock device-agent](https://github.com/IronFlock/device-agent) and Docker, and
+nothing else. Applications run as containers that IronFlock deploys. FlockOS is the
+small, signed base underneath them, and each update replaces its whole root filesystem,
+kernel included.
+
+## Purpose
+
+- **Part of IronFlock's over-the-air updates.** An OS update is started from IronFlock
+  and installed by the device-agent, the same agent that runs the apps.
+  [RAUC](https://rauc.io) writes the new system into the inactive one of two slots. The
+  device boots it once and keeps it only if the agent reaches IronFlock from it;
+  otherwise the device falls back to the previous slot by itself. Data, Docker's images
+  and containers, and the device's enrollment stay across updates.
+- **Trusted.** A device installs only update bundles signed with the FlockOS key, which
+  never leaves a Cloud KMS HSM, and finds them through a signed catalog. Every release is
+  built and signed in GitHub Actions and has SLSA provenance
+  ([Supply chain and security](#supply-chain-and-security)).
+- **Hardened.** An image has no user accounts and no passwords, and SSH refuses
+  passwords and root. The EFI targets boot with Secure Boot on. A verified read-only root
+  and Secure Boot with IronFlock's own keys are planned.
+- **Reliable on site.** The first boot needs no network: the device enrolls from its
+  `.flock` file and connects once the network is there. Devices behind an IronFlock
+  appliance get the catalog and their updates from the appliance, without internet
+  access. Each release goes to a test channel before production.
+- **One OS for many deployments.** x86 PCs and industrial PCs, with an installer stick
+  for those whose disk cannot be taken out; arm64 machines; Raspberry Pi 4 and 5; GPU
+  hosts whose containers use the GPU; PREEMPT_RT images for real-time workloads; Compute
+  Engine images for IronFlock's virtual devices. One version number covers every image
+  of a release. Jetson Orin is in progress.
 
 ## Status
 
