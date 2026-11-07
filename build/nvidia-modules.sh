@@ -2,7 +2,7 @@
 # NVIDIA's open kernel modules for the nvidia variant (WP-4.1; master plan,
 # section 3.7). Runs inside the image tree as mmdebstrap's chrooted
 # customize hook (build/mkrootfs.sh), with the image's apt sources:
-#   nvidia-modules.sh DRIVER_VERSION        e.g. 615.71.10-1
+#   nvidia-modules.sh DRIVER_VERSION        e.g. 620.70.06-1
 #
 # 1. Installs the headers of the image's kernel and nvidia-kernel-open-dkms
 #    at DRIVER_VERSION; DKMS builds the modules for that kernel (not for the
