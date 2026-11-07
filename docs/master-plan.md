@@ -234,7 +234,8 @@ flockos/
 
 The old `buildroot/`, `cubic/` and `flockos-vm-setup.md` are deleted in Phase 0 together
 with the harness skeleton: they cannot pass the gate, and the security scan would stop on
-their embedded credentials. History and the `legacy/reswarmos-0.5.7` tag keep them.
+their embedded credentials. The git history keeps them; the last commit with them is
+`82b9a03`.
 
 ### 3.4 Provisioning: reuse device-init
 
@@ -589,7 +590,7 @@ Deliverables:
   `just` skeleton (`lint`, `test`, `build` recipes exist and succeed); `VERSION` = `0.9.0`.
 - `shell-gate.yml` contributed to `IronFlock/workflows`.
 - `docs/` (this plan, audit, ADRs) merged; top-level README states the status.
-- `legacy/reswarmos-0.5.7` tag on the last commit before deletion of the old trees.
+- The last commit before deletion of the old trees is recorded: `82b9a03`.
 
 Acceptance: a no-op PR goes green through `ci-ok` and `security / report`.
 
@@ -739,7 +740,7 @@ Acceptance: an arm64 VM boots the image and enrolls; all docs reviewed.
 2. Remove the plaintext VM password and the root hashes from the tree; rotate the VM
    password; empty `gs://reswarmos-certs`; archive the old `IronFlock/flockos` with a
    README noting the committed key.
-3. Tag `legacy/reswarmos-0.5.7`; delete `buildroot/`, `cubic/`, `flockos-vm-setup.md`
+3. Delete `buildroot/`, `cubic/`, `flockos-vm-setup.md` (last in `82b9a03`)
    in the same PR that adds the `just` skeleton and the three workflow callers (they
    cannot lint the old trees anyway).
 4. Open the `shell-gate.yml` PR in `IronFlock/workflows`.

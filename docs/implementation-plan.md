@@ -178,8 +178,8 @@ that `cubic/README.md` exposed (owner action, outside the repository).
 
 `Justfile` with `lint`, `test`, `build TARGET VARIANT` (placeholder), `merge`,
 `release-*`; `ci.yml`, `security.yml` (report-only), `release.yml` (verify, tag);
-`docs/` with the master plan, audit and ADRs 0001 to 0007; tag `legacy/reswarmos-0.5.7`;
-release `v0.9.0`.
+`docs/` with the master plan, audit and ADRs 0001 to 0007; the old trees removed (the
+last commit with them is `82b9a03`); release `v0.9.0`.
 
 ### WP-0.4 `shell-gate.yml` in the harness (2 days, `IronFlock/workflows`)
 
