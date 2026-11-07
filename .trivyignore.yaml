@@ -23,6 +23,17 @@ vulnerabilities:
       - "usr/libexec/docker/cli-plugins/docker-buildx"
     statement: "golang.org/x/net < 0.60.0 in docker-buildx 0.38.1; no buildx build with x/net 0.60.0 in Docker's repository yet"
     expired_at: 2026-11-17
+  # x/net/html parser, O(n^2) on crafted input (GO-2026-6860), fixed in x/net
+  # 0.62.0; no compose or buildx release has it yet. Trivy matches the module
+  # version only: neither binary links golang.org/x/net/html (govulncheck
+  # -mode=binary finds the module, no package; go tool nm, no html symbol in
+  # compose 5.7.0 or buildx 0.38.1).
+  - id: CVE-2026-78661
+    paths:
+      - "usr/libexec/docker/cli-plugins/docker-buildx"
+      - "usr/libexec/docker/cli-plugins/docker-compose"
+    statement: "golang.org/x/net < 0.62.0 in docker-buildx 0.38.1 and docker-compose 5.7.0, but the vulnerable package golang.org/x/net/html is not in either binary; no release with x/net 0.62.0 yet"
+    expired_at: 2026-12-06
   # NVIDIA Container Toolkit 1.20.1 (the nvidia variant; NVIDIA's latest,
   # 2026-09-19) is built with Go 1.27.1. No release built with Go >= 1.27.3
   # exists yet; revisit with NVIDIA's next release.
