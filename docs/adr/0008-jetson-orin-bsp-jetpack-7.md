@@ -1,7 +1,8 @@
 # ADR-0008: Jetson Orin on Jetson Linux r39.2.1 (JetPack 7.2.1), Ubuntu 24.04
 
 Status: accepted, 2026-11-05 (WP-6.1), on one condition: the licence review below passes
-before FlockOS publishes a Jetson image.
+before FlockOS publishes a Jetson image. The review was done on 2026-11-07; the legal
+sign-off is open (WP-6.8).
 
 ## Context
 
@@ -68,11 +69,31 @@ index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
 
 ## Condition and open points
 
-- Condition: a licence review of what the image redistributes. The `nvidia-l4t-*`
-  packages and the BSP's bootloader binaries are under NVIDIA's Jetson software licence,
-  not an open source licence. The images carry them as NVIDIA's own SDK Manager images
-  do, but a legal check must pass before FlockOS publishes a Jetson image (the release
-  of WP-6.6). Building and testing in CI does not wait for it.
+- Condition: a licence review of what the image redistributes, and a legal check of it,
+  before FlockOS publishes a Jetson image (the release of WP-6.6). Building and testing
+  in CI do not wait for it. The review is done
+  ([jetson-licence-review.md](../jetson-licence-review.md), 2026-11-07). The legal
+  check is WP-6.8. What the review found:
+  - The BSP and every `nvidia-l4t-*` package of r39.2.1 are under one agreement, the
+    **NVIDIA Driver License Agreement**. It is not an open source licence. Its section
+    1.1(d) permits distribution for use with an open source kernel, on two conditions:
+    the binary files stay unmodified, and every recipient gets the Agreement. The
+    kernel, its modules and the DTBs are GPL-2.0, so their source has to be
+    available. The SPE firmware in the bootloader contains FreeRTOS, which needs a
+    written source offer with every copy.
+  - As a result, the image and the bundle carry NVIDIA's packages unchanged, with their
+    notices. The Agreement goes next to every Jetson file. NVIDIA's
+    `public_sources.tbz2` is mirrored with each release. The QSPI capsule is NVIDIA's
+    own from `nvidia-l4t-bootloader` where NVIDIA ships one. FlockOS does not publish
+    the flash package: a flash kit fetches the BSP from NVIDIA on the user's host.
+    FlockOS publishes images that NVIDIA's tools make from the BSP (the flash package,
+    the SD image, generated capsules) only if legal accepts them as unmodified
+    binaries. This changes decision 3: the BSP still provides the flash tools in CI and
+    in the flash kit. Capsule generation is needed only for carrier boards that
+    NVIDIA ships no capsule for.
+  - Open for legal: the review's eight questions (the points above, the indemnity, the
+    critical-applications exclusion, export control, Canonical's IP policy for the
+    Ubuntu userspace, and the revocable licence).
 - First modules and carrier boards: the master plan's Orin Nano developer kit (SD image)
   and Orin NX (flash package), unless the hardware available for the acceptance tests
   says otherwise (master plan, open question 3).
