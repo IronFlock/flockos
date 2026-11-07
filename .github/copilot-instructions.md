@@ -8,4 +8,4 @@ the architecture decisions are in `docs/adr/`.
 - Releases: bump `VERSION` through `just release-patch|minor|major`; never tag by hand.
 - Host setup logic belongs to `IronFlock/device-init` (`ironflock-init`), not to this repo.
 - No secrets, keys or passwords in the tree; signing uses Cloud KMS from the release workflow.
-- The pre-rebuild Buildroot and Cubic trees are at the git tag `legacy/reswarmos-0.5.7`.
+- Buildroot and Cubic are retired (ADR-0001); do not bring them back.
