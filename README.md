@@ -187,4 +187,11 @@ and sets the tag last ([docs/release.md](docs/release.md)).
 
 ## License
 
-Apache License 2.0, see [license.md](license.md).
+Copyright 2026 IronFlock GmbH. This repository is licensed under the Apache License 2.0,
+see [license.md](license.md).
+
+An image is a collection of separate programs, each under its own licence, which
+`/usr/share/doc/<package>/copyright` in the image names. The source code of every package
+in a release's images is on the download server: `SOURCES` next to the images,
+`https://instance-registry.ironflock.com/dl/flockos/<version>/SOURCES`, lists it
+([docs/release.md](docs/release.md#source-code)). Releases up to 0.11.0 have no `SOURCES`.

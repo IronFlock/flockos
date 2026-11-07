@@ -53,6 +53,13 @@ got=$(modinfo -F version "$pkg/usr/lib/modules/$kver/updates/nvidia/"nvidia.ko*)
 [ "$got" = "$modver" ] || die "the built nvidia module is version $got, not $modver"
 vermagic=$(modinfo -F vermagic "$pkg/usr/lib/modules/$kver/updates/nvidia/"nvidia.ko*)
 [ "${vermagic%% *}" = "$kver" ] || die "the built nvidia module is for ${vermagic%% *}, not $kver"
+# The licence of the modules is their source's: nvidia-kernel-open-dkms's
+# copyright file (MIT; a kernel module linked from it is MIT/GPL-2.0). The
+# release publishes the source (release/sources).
+doc=$pkg/usr/share/doc/flockos-nvidia-modules
+mkdir -p "$doc"
+[ -f /usr/share/doc/nvidia-kernel-open-dkms/copyright ] || die "nvidia-kernel-open-dkms $driver has no copyright file"
+cp /usr/share/doc/nvidia-kernel-open-dkms/copyright "$doc/copyright"
 
 cat >"$pkg/DEBIAN/control" <<CONTROL
 Package: flockos-nvidia-modules

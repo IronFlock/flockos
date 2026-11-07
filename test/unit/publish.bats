@@ -87,6 +87,9 @@ needs() {
   [[ "$(needs e2e)" == *sign* ]]
   [[ "$(needs stage)" == *sign* ]]
   [[ "$(needs promote)" == *stage* && "$(needs promote)" == *e2e* ]]
+  # the release's source code, staged before the promotion publishes it
+  [[ "$(needs sources)" == *stage* ]]
+  [[ "$(needs promote)" == *sources* ]]
   [[ "$(needs tag)" == *promote* ]]
   # the VM images of a published release, before the tag
   [[ "$(needs vm-images)" == *promote* ]]
@@ -108,7 +111,7 @@ needs() {
 }
 
 @test "release.yml: a run on a tag builds nothing" {
-  for job in build sign e2e stage promote vm-images; do
+  for job in build sign e2e stage sources promote vm-images; do
     run awk -v job="  $job:" '$0 == job { f = 1; next } f && /^  [a-z][a-z-]*:$/ { exit } f && /^    if:/ { print; exit }' \
       "$repo/.github/workflows/release.yml"
     [[ "$output" == *"mode == 'release' || needs.verify.outputs.mode == 'dry-run'"* ]] || { echo "$job: $output"; return 1; }

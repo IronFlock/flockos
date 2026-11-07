@@ -241,6 +241,9 @@ fi
 # --- record what is in the image, then clean ------------------------------
 dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${Package}\t${Version}\t${Architecture}\n' |
   sort >"$OUT/$NAME.packages.tsv"
+# The source packages, which the release publishes (its SOURCES).
+dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${source:Package}\t${source:Version}\t${Built-Using}\n' |
+  bash "$here/sources.sh" image >"$OUT/$NAME.sources.tsv"
 cp "$ROOT/usr/lib/os-release" "$OUT/$NAME.os-release"
 rm -rf "$ROOT"/var/lib/apt/lists/* "$ROOT"/var/cache/apt/*.bin "$ROOT"/var/cache/apt/archives/*.deb
 rm -rf "$ROOT"/tmp/* "$ROOT"/var/tmp/* "$ROOT"/var/log/*.log "$ROOT"/var/log/apt/*
