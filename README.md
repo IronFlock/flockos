@@ -1,6 +1,9 @@
 <p align="center">
   <a href="https://www.ironflock.com">
-    <img alt="IronFlock" src="https://res.cloudinary.com/dotw7ar1m/image/upload/v1708079370/vli89gsgy2siqcrmvzfm.png" width="400" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/ironflock-white.svg" />
+      <img alt="IronFlock" src="docs/assets/ironflock.svg" width="160" />
+    </picture>
   </a>
 </p>
 
@@ -21,10 +24,6 @@ has images for three targets. On every pull request, CI boots each EFI image in 
 tests the first boot, enrollment, an A/B update and the fallback. No target has passed
 its hardware acceptance yet; `v1.0.0` follows the first one, on an x86 industrial PC.
 The status of each work package is in [docs/implementation-plan.md](docs/implementation-plan.md).
-
-This repository was ReswarmOS (Buildroot images for 32-bit Raspberry Pis and an
-Ubuntu-based x86 installer). That code is at the tag `legacy/reswarmos-0.5.7`.
-ReswarmOS devices do not update to FlockOS; they are flashed again.
 
 ## Targets and images
 
