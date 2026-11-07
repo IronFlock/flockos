@@ -105,7 +105,7 @@ decision), in progress.
 | 7.2 | ReswarmOS migration guide and sunset | flockos, GCS, flasher, device-agent | 2 | 2.10 | open |
 | 7.3 | Documentation refresh and review | flockos | 3 | 7.1, 7.2 | open |
 | X.1 | Public install guides per target | website | 1 per target | 2.10, 5.4, 6.6 | open |
-| X.2 | Compute Engine images for virtual devices | flockos, GCP, virtual-device-manager | unplanned | 2.6 | done in flockos (#187, ADR-0010; the first images come with the next release); open: the virtual-device-manager side, in review |
+| X.2 | Compute Engine images for virtual devices | flockos, GCP, virtual-device-manager | unplanned | 2.6 | done in flockos (#187, ADR-0010; first images from `v0.10.1`); open: the virtual-device-manager side, in review |
 | X.3 | Secure Boot with Debian's signed boot chain | flockos | unplanned | 1.5, 3.2 | done in flockos (ADR-0011; QEMU tests with Secure Boot on); open: a boot with Secure Boot on on the x86 IPC of 1.9 |
 
 Totals in days as planned: Phase 0 remaining 4.5; Phase 1 20; Phase 2 31.5 across four
@@ -515,6 +515,11 @@ The master plan's Phase 4 acceptance: `docker run --rm --gpus all nvidia/cuda:12
 nvidia-smi` on a real GPU host, A/B update between two `nvidia` builds keeps the module
 working; `nvidia` as installer payload option; `docs/targets/amd64-efi.md` lists
 supported GPU generations (Turing and newer). Milestone M5.
+
+Also decided here, on the GPU host: whether the `nvidia` variant follows NVIDIA's
+feature branches (620 since `v0.11.0`, the branch of the newest CUDA, each supported
+only until the next one) or a production branch (longer support, a smaller range of
+CUDA versions for apps).
 
 ## Phase 4b: Real-time kernel option on EFI targets
 

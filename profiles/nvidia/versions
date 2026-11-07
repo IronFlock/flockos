@@ -11,9 +11,13 @@ NVIDIA_CUDA_SIGNER_FINGERPRINT=02182E60104FCDC26EAE1B8597A5D4CB8793F200
 NVIDIA_CTK_MIRROR=https://nvidia.github.io/libnvidia-container/stable/deb/amd64
 NVIDIA_CTK_SIGNER_FINGERPRINT=C95B321B61E88C1809C4F759DDCAE044F796ECB0
 
-# Driver 615.71.10 (2026-09-24): nvidia-driver-cuda, its libraries and
-# firmware-nvidia-gsp at this version, and the open kernel modules built in
-# the image from nvidia-kernel-open-dkms at the same version.
-NVIDIA_DRIVER_VERSION=615.71.10-1
+# Driver 620.70.06 (2026-11-01, the branch of CUDA 13.5): nvidia-driver-cuda,
+# its libraries and firmware-nvidia-gsp at this version, and the open kernel
+# modules built in the image from nvidia-kernel-open-dkms at the same version.
+# 620 drops no GPU of 615's list. NVIDIA's feature branches seem to get fixes
+# only until the next one: October's fixes (2026-10-21) went to 580, 595 and
+# 615, not to 610. Whether FlockOS follows them or a production branch is
+# decided in WP-4.2.
+NVIDIA_DRIVER_VERSION=620.70.06-1
 # NVIDIA Container Toolkit 1.20.1 (2026-09-19).
 NVIDIA_CONTAINER_TOOLKIT_VERSION=1.20.1-1

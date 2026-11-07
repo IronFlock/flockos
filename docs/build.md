@@ -261,3 +261,10 @@ distribution's archive is not pinned to a snapshot, so two builds of one commit
 on different days can differ in package versions; `packages.tsv` records what
 went in. Docker CE and its companions are pinned in `distros/<distro>/versions`,
 the NVIDIA packages in `profiles/nvidia/versions`.
+
+A pin moves for a security fix as soon as the fixed package is in the vendor's
+signed repository and CI passes; there is no waiting period. Other updates go
+in with the next sweep of the pins. A new major line, such as a new NVIDIA
+driver branch, is weighed on its own: whether the vendor still supports the old
+one, the hardware and APIs it adds or drops. Findings that no installable
+release fixes yet are accepted in `.trivyignore.yaml`, with an expiry.
