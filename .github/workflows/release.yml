@@ -101,9 +101,8 @@ jobs:
   # workload identity flockos-release: the pool grants it to a push of
   # release.yml on main (a release merge) and to runs on v* tags. This job
   # re-signs every bundle with the bundle signer in Cloud KMS through PKCS#11
-  # and checks it against the FlockOS root CA (build/sign-bundles.sh), then
-  # attests the provenance of every image and bundle. A dry run does the same
-  # with a throwaway stand-in for the signer and attests nothing.
+  # and checks it against the FlockOS root CA (build/sign-bundles.sh). A dry
+  # run does the same with a throwaway stand-in for the signer.
   sign:
     needs: [verify, build]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
@@ -112,7 +111,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      attestations: write
     env:
       MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
     steps:
@@ -136,13 +134,6 @@ jobs:
           service_account: flockos-release@record-1283.iam.gserviceaccount.com
       - name: sign the bundles (${{ env.MODE }})
         run: build/sign-in-builder.sh "$MODE" out
-      - name: attest the provenance of the images and bundles (release only)
-        if: env.MODE == 'release'
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: |
-            out/*/*.img.gz
-            out/*/*.raucb
       - name: upload the signed images and bundles
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -151,6 +142,26 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+
+  # The SLSA provenance of every image and bundle as signed (Build Level 3),
+  # by the harness in a job that runs none of this repository's code: sign
+  # holds a workload identity and runs this repository's scripts, so it can
+  # never hold the identity a verifier pins (docs/signing.md). Before stage,
+  # so nothing is published without it. A dry run only checks the files.
+  attest:
+    needs: [verify, sign]
+    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    uses: IronFlock/workflows/.github/workflows/attest-provenance.yml@v1
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      artifact: release-${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      subject-path: |
+        */*.img.gz
+        */*.raucb
+      dry-run: ${{ needs.verify.outputs.mode != 'release' }}
 
   # The release images as published, in QEMU (test/qemu/run.py, amd64-efi
   # base under KVM, with Secure Boot on and Microsoft's keys as PCs ship,
@@ -213,7 +224,7 @@ jobs:
   # The signed release to the staging tree, as the publisher identity
   # (flockos-publisher: the FlockOS trees of the download bucket only).
   stage:
-    needs: [verify, sign]
+    needs: [verify, sign, attest]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     runs-on: ubuntu-latest
     timeout-minutes: 30

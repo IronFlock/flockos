@@ -13,7 +13,8 @@ or published from a laptop.
 |-----|--------------|----------|
 | `verify` | Decides what the run is: a release, a re-run after the tag, or a dry run (harness `release.sh mode`) | none |
 | `build` | Every image as a release build (`build.yml`, `signing: release`): the images trust the FlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM | none |
-| `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)); attests the SLSA provenance of every image and bundle | `flockos-release` |
+| `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)) | `flockos-release` |
+| `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code; `stage` waits for it | the harness workflow (Sigstore) |
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
 | `stage` | The signed files and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
 | `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |

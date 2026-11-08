@@ -116,20 +116,24 @@ the SBOMs and the signed catalog are attached to each
   go -C tools/catalog run . verify -pubkey "$PWD/pki/flockos-catalog.pub" "$PWD/manifest.json"
   ```
 
-- **SLSA Build Level 2.** Every disk image and update bundle of a release has
-  [SLSA v1.0](https://slsa.dev/spec/v1.0/levels) build provenance. It is built on
-  GitHub-hosted runners, and `release.yml` attests it with
+- **SLSA Build Level 3.** Every disk image and update bundle of a release after 0.11.0
+  has [SLSA v1.0](https://slsa.dev/spec/v1.0/levels) build provenance. It is built on
+  GitHub-hosted runners, with no build cache shared with other builds. A separate job
+  then attests it with
   [GitHub artifact attestations](https://docs.github.com/en/actions/concepts/security/artifact-attestations)
-  (Sigstore). To check a file with the GitHub CLI:
+  (Sigstore). That job is a reusable workflow in
+  [IronFlock/workflows](https://github.com/IronFlock/workflows) and runs none of this
+  repository's code, so this repository's build steps cannot reach the identity that
+  signs the provenance. To check a file with the GitHub CLI:
 
   ```sh
-  gh attestation verify flockos-amd64-efi-base-0.11.0.img.gz --repo IronFlock/flockos \
-    --signer-workflow IronFlock/flockos/.github/workflows/release.yml --source-ref refs/heads/main
+  gh attestation verify flockos-amd64-efi-base-<version>.img.gz --repo IronFlock/flockos \
+    --signer-workflow IronFlock/workflows/.github/workflows/attest-provenance.yml --source-ref refs/heads/main
   ```
 
-  It is not Build Level 3. The job that attests also runs this repository's
-  bundle-signing script, so the repository's own build steps can reach the identity that
-  signs the provenance. Level 3 needs that identity out of their reach.
+  Releases up to 0.11.0 meet Build Level 2: the job that attested them also ran this
+  repository's bundle-signing script. Check them with
+  `--signer-workflow IronFlock/flockos/.github/workflows/release.yml`.
 - **SBOMs and vulnerability scans.** Each release attaches a CycloneDX SBOM for each
   image except the installers. A Trivy scan of the images' root filesystems is part of
   the required `security / report` check, which fails on critical and high
