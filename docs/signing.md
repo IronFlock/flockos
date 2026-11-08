@@ -85,9 +85,12 @@ runs the build's packages never holds the release identity:
 
    The signed bundle must verify as the device verifies it: against the root
    CA, with `check-purpose=codesign` and the signing time. It must not verify
-   against the sealing CA any more. `SHA256SUMS` is rewritten, and the job
-   attests the SLSA build provenance of every image and bundle
-   (`actions/attest`).
+   against the sealing CA any more. `SHA256SUMS` is rewritten.
+   The `attest` job then attests the SLSA build provenance of every image and
+   bundle (Build Level 3). It is the harness's `attest-provenance.yml`, which
+   runs none of this repository's code. `sign` holds a workload identity and
+   runs this repository's scripts, but its token names `release.yml`, so a
+   check pinned to the harness workflow refuses anything it could attest.
 3. `tag` runs only after `sign`, so a tag always means signed bundles.
 
 The object is addressed by label (the key's name), not by id: OpenSC's libp11
