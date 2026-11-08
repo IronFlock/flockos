@@ -3,7 +3,8 @@
 NVIDIA Jetson AGX Orin, Orin NX and Orin Nano on Jetson Linux r39.2.1 (JetPack
 7.2.1) with an Ubuntu 24.04 userspace (ADR-0008; Phase 6). Work in progress:
 CI builds slot A's filesystem image and the RAUC bundle and checks the root
-tree (WP-6.2). Still to come:
+tree (WP-6.2). Those CI jobs (`jetson-rootfs`, `jetson-flash`) are switched
+off for now to save CI time, until the Jetson work continues. Still to come:
 
 - the flash dry run (WP-6.2);
 - the flash package and the SD image (WP-6.4);

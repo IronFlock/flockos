@@ -144,6 +144,9 @@ The `jetson-flash` job then makes the flash package from the image with
 NVIDIA's tools on an x86_64 runner (`build/tegra-flash-package.sh`): the dry
 run that the layout and the slot images pass the BSP's checks.
 
+Both jobs are switched off for now to save CI time, until the Jetson work
+continues. `ci.yml` says how to switch them on.
+
 ## Hardware checklist
 
 Per target, recorded in `docs/targets/<target>.md` with the board model and its
