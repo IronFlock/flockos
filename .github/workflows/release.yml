@@ -313,7 +313,8 @@ jobs:
       - name: publish the sources (${{ env.MODE }})
         run: build/publish.sh sources sources.plan "$(tr -d '[:space:]' < VERSION)"
 
-  # The live release: the staged files to flockos/<version>/, then the
+  # The live release: the staged files to flockos/<version>/, the release
+  # notes (release-notes/*.md) to flockos/release-notes.json, then the
   # catalog (tools/catalog), built on the published one with this release on
   # the test channel (the first release is production too), signed with the
   # catalog key in Cloud KMS as flockos-release, and published last. Then
@@ -407,6 +408,7 @@ jobs:
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           build/publish.sh promote "$version"
+          build/publish.sh notes release-notes
           build/publish.sh catalog manifest.json
           if [ "$MODE" = release ]; then
             build/publish.sh check "$version" manifest.json
