@@ -170,7 +170,7 @@ else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
-    flockos-enroll.service flockos-gce-flock.service flockos-fwupd-shim.service ssh.service docker.service \
+    flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
     NetworkManager.service systemd-timesyncd.service
   # The device's own enroll settings live on /data, so they outlive updates.
   mkdir -p "$ROOT/etc/flockos"
