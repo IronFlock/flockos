@@ -1,0 +1,12 @@
+[Unit]
+Description=FlockOS: shim where fwupd looks for it
+Documentation=https://github.com/IronFlock/flockos/blob/main/docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md
+RequiresMountsFor=/boot/efi
+ConditionPathIsDirectory=/boot/efi/EFI/debian
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/flockos/fwupd-shim
+
+[Install]
+WantedBy=multi-user.target

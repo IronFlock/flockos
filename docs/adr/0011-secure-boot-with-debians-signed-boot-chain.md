@@ -42,6 +42,10 @@ signed boot chain:
   `grub-efi-<arch>-bin`.
 - **fwupd's capsule helper** is Debian's signed one (`fwupd-<arch>-signed`), so capsule
   updates (lane 3) also start under Secure Boot.
+  fwupd starts it through shim and looks for shim next to it, in `EFI/debian`, so
+  `flockos-fwupd-shim.service` copies the shim the device boots there on every boot. RAUC
+  does not write this partition, and it must be that same shim: a newer one could revoke
+  the GRUB beside it through SBAT.
 
 The same chain boots with Secure Boot off, without the checks.
 

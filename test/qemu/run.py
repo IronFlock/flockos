@@ -460,6 +460,9 @@ class Runner:
         self.vm.run(f"cmp {boot}/mm{efi_arch}.efi /usr/lib/shim/mm{efi_arch}.efi.signed")
         self.vm.run(f"cmp {boot}/grub{efi_arch}.efi /usr/lib/grub/{grub_format}-signed/grub{efi_arch}.efi.signed")
         self.vm.run(f"test ! -e {boot}/fb{efi_arch}.efi && grep -q '^source ' /boot/efi/EFI/debian/grub.cfg")
+        # fwupd's capsule helper starts through the shim in the OS's folder.
+        self.vm.run("systemctl start flockos-fwupd-shim.service")
+        self.vm.run(f"cmp {boot}/{self.conf['EFI_LOADER']} /boot/efi/EFI/debian/shim{efi_arch}.efi")
         # shim hands its MOK state to the kernel in a configuration table,
         # which the kernel lists at boot (its sysfs view needs EFI runtime
         # services): shim started GRUB, with Secure Boot on or off.

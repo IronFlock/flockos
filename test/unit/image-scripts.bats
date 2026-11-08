@@ -110,6 +110,45 @@ enroll_env() {
   [ ! -e "$tmp/state/enrolled" ]
 }
 
+@test "fwupd-shim puts the booted shim where fwupd looks for it" {
+  mkdir -p "$tmp/EFI/BOOT" "$tmp/EFI/debian"
+  echo shim >"$tmp/EFI/BOOT/BOOTX64.EFI"
+  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  [ "$status" -eq 0 ]
+  cmp "$tmp/EFI/BOOT/BOOTX64.EFI" "$tmp/EFI/debian/shimx64.efi"
+  [ ! -e "$tmp/EFI/debian/shimaa64.efi" ]
+  [ ! -e "$tmp/EFI/debian/shimx64.efi.new" ]
+}
+
+@test "fwupd-shim covers arm64" {
+  mkdir -p "$tmp/EFI/BOOT" "$tmp/EFI/debian"
+  echo shim >"$tmp/EFI/BOOT/BOOTAA64.EFI"
+  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  [ "$status" -eq 0 ]
+  cmp "$tmp/EFI/BOOT/BOOTAA64.EFI" "$tmp/EFI/debian/shimaa64.efi"
+}
+
+@test "fwupd-shim replaces a stale copy and leaves a current one alone" {
+  mkdir -p "$tmp/EFI/BOOT" "$tmp/EFI/debian"
+  echo new >"$tmp/EFI/BOOT/BOOTX64.EFI"
+  echo old >"$tmp/EFI/debian/shimx64.efi"
+  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  [ "$status" -eq 0 ]
+  cmp "$tmp/EFI/BOOT/BOOTX64.EFI" "$tmp/EFI/debian/shimx64.efi"
+  touch -d @1000 "$tmp/EFI/debian/shimx64.efi"
+  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %Y "$tmp/EFI/debian/shimx64.efi")" = 1000 ]
+}
+
+@test "fwupd-shim does nothing on a partition without the OS's folder" {
+  mkdir -p "$tmp/EFI/BOOT"
+  echo nvidia >"$tmp/EFI/BOOT/BOOTAA64.EFI"
+  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  [ "$status" -eq 0 ]
+  [ ! -e "$tmp/EFI/debian" ]
+}
+
 @test "rauc-post-install ignores slots that are not root filesystems" {
   RAUC_TARGET_SLOTS="1" RAUC_SLOT_CLASS_1=efi RAUC_SLOT_DEVICE_1=/dev/null RAUC_MOUNT_PREFIX=$tmp \
     run sh "$lib/rauc-post-install"

@@ -170,7 +170,7 @@ else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
-    flockos-enroll.service flockos-gce-flock.service ssh.service docker.service \
+    flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
     NetworkManager.service systemd-timesyncd.service
   # The device's own enroll settings live on /data, so they outlive updates.
   mkdir -p "$ROOT/etc/flockos"
@@ -199,7 +199,7 @@ ln -sfn /dev/null "$ROOT/etc/systemd/system-generators/systemd-ssh-generator"
 if [ "$VARIANT" = installer ]; then
   systemctl --root="$ROOT" is-enabled flockos-installer.service >/dev/null || die "flockos-installer.service is not enabled"
 else
-  for unit in flockos-ssh-hostkeys.service flockos-enroll.service flockos-gce-flock.service; do
+  for unit in flockos-ssh-hostkeys.service flockos-enroll.service flockos-gce-flock.service flockos-fwupd-shim.service; do
     systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
   done
   [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||

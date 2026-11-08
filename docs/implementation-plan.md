@@ -409,9 +409,10 @@ Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmwar
 ### WP-2.5 Firmware RPCs in the device-agent (3 days, `device-agent`)
 
 - Scope: `get_firmware_inventory` over fwupd's D-Bus API; inventory and boot-firmware
-  versions in device info. Read-only first (ADR-0009): `get_firmware_updates`,
-  `install_firmware_update` (offline where the plugin needs a reboot) and
-  `get_firmware_history` follow in a later work package.
+  versions in device info. Updates (ADR-0009, amended): the report carries the version
+  fwupd offers per device and the history, `refresh_firmware_updates` fetches the
+  metadata and `install_firmware_update` installs one offered version; the next restart
+  applies what needs one.
 - Acceptance: unit tests against a fake fwupd D-Bus service; on the image in QEMU the
   inventory RPC returns the virtual devices fwupd sees.
 
@@ -450,11 +451,11 @@ Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmwar
 
 ### WP-2.9 Platform: firmware inventory and update actions (3 days, platform)
 
-- Scope: firmware inventory per device from device info. Available updates, the install
-  action inside a maintenance window with staged roll-out, and history follow with the
-  update RPCs (ADR-0009).
+- Scope: firmware inventory per device from device info, available updates, the install
+  action per device and the history. Maintenance windows and staged roll-out across a
+  fleet follow (#200).
 - Acceptance: the inventory of the QEMU e2e device and of the Phase 1 IPC appears; an
-  install is refused outside a maintenance window.
+  update of a test device installs and is reported.
 
 ### WP-2.10 Phase 2 acceptance: `v1.0.0` end to end (2 days, all)
 
