@@ -50,6 +50,8 @@ lint:
     else
         echo "==> go not installed, tools/rauc-pki and tools/catalog skipped"
     fi
+    echo "==> release notes"
+    {{ just_executable() }} check-release-notes
     echo "==> python syntax"
     git ls-files '*.py' | xargs -r python3 -I -c 'import ast, sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]'
     if command -v yamllint >/dev/null; then
@@ -131,3 +133,54 @@ release-minor:
 # Open a release pull request with the major version bumped
 release-major:
     just _pr release major {{ RELEASE_NAME }} {{ VERSION_FILE }} release.yml {{ VERSION_FILES }}
+
+# Release notes: release-notes/<version>.md, English Markdown for the people
+# who run devices, with the sections `## Security`, `## New`, `## Fixed` and
+# `## Changed`, in that order, each once, the empty ones left out (no heading
+# of its own: the emails name the version). Optional: the cloud emails a
+# release when production moves to it, with its notes, to the members of
+# every project with a FlockOS device (the System emails of the profile), and
+# only a release that has notes; the next email carries the notes since the
+# last one. Commit the file before `just release-patch`: the release
+# publishes the notes (build/publish.sh notes), moving production does not.
+
+# Check the release notes' format (every file, or the ones given)
+[positional-arguments]
+check-release-notes *FILES:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    files=("$@")
+    [ ${#files[@]} -gt 0 ] || files=(release-notes/*.md)
+    # None yet (bash 3.2 calls an empty array unbound).
+    [ ${#files[@]} -gt 0 ] || exit 0
+    rc=0
+    for f in "${files[@]}"; do
+        if ! [[ "$(basename "$f")" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.md$ ]]; then
+            echo "$f: the name must be <x.y.z>.md" >&2
+            rc=1
+            continue
+        fi
+        awk -v f="$f" '
+            BEGIN { order["Security"] = 1; order["New"] = 2; order["Fixed"] = 3; order["Changed"] = 4 }
+            function close_section() {
+                if (section != "" && !content) { print f ": section \"" section "\" is empty: leave it out"; bad = 1 }
+            }
+            /^#( |$)/ { print f ":" NR ": no level-1 heading (the emails name the version)"; bad = 1; next }
+            /^## / {
+                close_section()
+                h = $0; sub(/^##[ \t]+/, "", h); sub(/[ \t]+$/, "", h)
+                if (!(h in order)) { print f ":" NR ": unknown section \"" h "\" (Security, New, Fixed, Changed)"; bad = 1 }
+                else if (order[h] <= last) { print f ":" NR ": \"" h "\" twice or out of order (Security, New, Fixed, Changed)"; bad = 1 }
+                else last = order[h]
+                section = h; content = 0; next
+            }
+            /^[ \t]*$/ { next }
+            { if (section == "") { print f ":" NR ": text before the first section"; bad = 1 } else content = 1 }
+            END {
+                close_section()
+                if (last == 0 && !bad) { print f ": no section (Security, New, Fixed, Changed)"; bad = 1 }
+                exit bad
+            }' "$f" >&2 || rc=1
+    done
+    exit $rc

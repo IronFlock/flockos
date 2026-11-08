@@ -58,6 +58,41 @@ teardown() { rm -rf "$tmp"; }
   [[ "$output" == *"gs://ironflock-downloads/flockos/manifest.json"* ]]
 }
 
+@test "notes publishes release-notes/<x.y.z>.md as flockos/release-notes.json, uncached" {
+  mkdir "$tmp/notes"
+  printf '## New\n\n- A feature.\n' >"$tmp/notes/0.11.0.md"
+  printf '## Fixed\n\n- A bug.\n' >"$tmp/notes/0.12.0.md"
+  DRY_RUN=1 run bash "$publish" notes "$tmp/notes"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"+ gcloud storage cp --quiet --cache-control=public, max-age=0 "*" gs://ironflock-downloads/flockos/release-notes.json"* ]]
+  [[ "$output" == *"would have published the release notes of 2 version(s)"* ]]
+}
+
+@test "notes publishes {} without release notes, also when the directory is missing" {
+  DRY_RUN=1 run bash "$publish" notes "$tmp/missing"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gs://ironflock-downloads/flockos/release-notes.json"* ]]
+  [[ "$output" == *"the release notes of 0 version(s)"* ]]
+}
+
+@test "notes refuses a file that is not <x.y.z>.md" {
+  mkdir "$tmp/notes"
+  printf '## New\n\n- A.\n' >"$tmp/notes/next.md"
+  DRY_RUN=1 run bash "$publish" notes "$tmp/notes"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"next.md: the name must be <x.y.z>.md"* ]]
+  [[ "$output" != *"gcloud storage cp"* ]]
+}
+
+@test "release.yml: the release notes before the catalog" {
+  wf="$repo/.github/workflows/release.yml"
+  notes=$(grep -n 'build/publish.sh notes release-notes' "$wf" | cut -d: -f1)
+  # The release's catalog (the production job publishes one too, later).
+  catalog=$(grep -n 'build/publish.sh catalog manifest.json' "$wf" | head -n 1 | cut -d: -f1)
+  [ -n "$notes" ] && [ -n "$catalog" ]
+  [ "$notes" -lt "$catalog" ]
+}
+
 @test "usage errors" {
   run bash "$publish"
   [ "$status" -ne 0 ]

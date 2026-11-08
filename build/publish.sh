@@ -10,6 +10,10 @@
 #                                    build/sources.sh): the files the pool
 #                                    LIVE/sources/ lacks to it, the index
 #                                    SOURCES to STAGING/<version>/
+#   publish.sh notes   DIR           the release notes DIR/<x.y.z>.md as
+#                                    LIVE/release-notes.json ({version:
+#                                    markdown}, {} without any), before the
+#                                    catalog
 #   publish.sh catalog FILE          the signed catalog to LIVE/manifest.json, last
 #   publish.sh check   VERSION FILE  every file of the release and the catalog
 #                                    answer through the download proxy
@@ -140,6 +144,24 @@ case "$cmd" in
     put "$tmp/SOURCES" "$STAGING/$version/SOURCES"
     done_ "uploaded $(wc -l <"$tmp/new" | tr -d ' ') of the release's $(wc -l <"$tmp/files" | tr -d ' ') source files to $LIVE/sources/, staged $STAGING/$version/SOURCES"
     ;;
+  notes)
+    # The cloud emails a new production release with its notes (the System
+    # emails of the profile), and only a release that has notes. Published
+    # with every release, {} included, before the catalog names the release.
+    dir=${2:?usage: publish.sh notes DIR}
+    require jq
+    json=$(mktemp)
+    trap 'rm -f "$json"' EXIT
+    shopt -s nullglob
+    for f in "$dir"/*.md; do
+      [[ "$(basename "$f")" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.md$ ]] || die "$f: the name must be <x.y.z>.md"
+    done
+    for f in "$dir"/*.md; do
+      jq -n --arg v "$(basename "$f" .md)" --rawfile n "$f" '{($v): $n}'
+    done | jq -s 'add // {}' >"$json"
+    put "$json" "$LIVE/release-notes.json"
+    done_ "published the release notes of $(jq length "$json") version(s) as $LIVE/release-notes.json"
+    ;;
   catalog)
     file=${2:?usage: publish.sh catalog FILE}
     put "$file" "$LIVE/manifest.json"
@@ -173,5 +195,5 @@ case "$cmd" in
     cmp -s "$tmp/manifest.json" "$file" || die "the catalog the proxy serves is not the one published"
     log "every file of $version, its SOURCES and the catalog answer through $DL_BASE/flockos/"
     ;;
-  *) die "usage: publish.sh stage|promote|sources|catalog|check ..." ;;
+  *) die "usage: publish.sh stage|promote|sources|notes|catalog|check ..." ;;
 esac

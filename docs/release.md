@@ -18,7 +18,7 @@ or published from a laptop.
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
 | `stage` | The signed files and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
 | `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |
-| `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
+| `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `flockos/release-notes.json`. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
 | `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates FlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
@@ -89,6 +89,23 @@ keeps an image made from the same file.
 - `vm-images` makes each VM image's tarball and prints the cloud calls.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
+
+## Release notes
+
+`release-notes/<version>.md`, English Markdown for the people who run
+devices, with the sections `## Security`, `## New`, `## Fixed` and
+`## Changed`, in that order, the empty ones left out, and no heading of its
+own (`just check-release-notes`, part of `just lint`). They are optional.
+Commit the file before `just release-patch`: `promote` publishes every
+file of the release's commit as `flockos/release-notes.json`
+(`{version: markdown}`, `{}` without any; `build/publish.sh notes`) before
+the catalog names the release. Moving production does not publish them.
+
+When production moves to a release that has notes, the cloud emails it, with
+its notes, to the members of every project with a device that runs FlockOS,
+unless they switched off the System emails in their profile. A release
+without notes sends no email; the next one with notes carries the notes
+since the last email.
 
 ## Source code
 
