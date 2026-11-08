@@ -134,6 +134,42 @@ release-minor:
 release-major:
     just _pr release major {{ RELEASE_NAME }} {{ VERSION_FILE }} release.yml {{ VERSION_FILES }}
 
+# Move production to a release, by default the one on test (docs/release.md)
+[positional-arguments]
+promote CHANNEL RELEASE="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$1" != production ]; then
+        echo "only production can be promoted: a release goes to test by itself" >&2
+        exit 1
+    fi
+    # Read for the question below; the workflow verifies the catalog itself.
+    catalog=$(curl -fsS --proto '=https' --retry 3 https://instance-registry.ironflock.com/dl/flockos/manifest.json | jq -r .payload | base64 -d)
+    current=$(jq -r '.channels.production // "none"' <<<"$catalog")
+    version=${2:-$(jq -r '.channels.test // empty' <<<"$catalog")}
+    version=${version#v}
+    if [ -z "$version" ]; then
+        echo "the catalog has no test channel: name the release, just promote production <version>" >&2
+        exit 1
+    fi
+    if ! jq -e --arg v "$version" '.releases[$v]' <<<"$catalog" >/dev/null; then
+        echo "$version is not in the catalog" >&2
+        exit 1
+    fi
+    if [ "$version" = "$current" ]; then
+        echo "production is already on $version"
+        exit 0
+    fi
+    echo "production: $current -> $version"
+    echo "Production devices will be offered it, and its release notes, if it has any, are emailed to the members of every project with an IronFlockOS device."
+    read -r -p "Move production? [y/N] " answer || true
+    if [ "$answer" != y ]; then
+        echo "Nothing changed." >&2
+        exit 1
+    fi
+    gh workflow run release.yml --repo IronFlock/ironflockos --ref "v$version" -f promote-production=true
+    echo "Started. Production moves when the run ends: https://github.com/IronFlock/ironflockos/actions/workflows/release.yml"
+
 # Release notes: release-notes/<version>.md, English Markdown for the people
 # who run devices, with the sections `## Security`, `## New`, `## Fixed` and
 # `## Changed`, in that order, each once, the empty ones left out (no heading
