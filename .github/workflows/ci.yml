@@ -263,10 +263,11 @@ jobs:
   # review (ADR-0008).
   #
   # Switched off to save CI time until the Jetson work continues (jetson-flash
-  # is skipped with it). To switch it on: remove the `if`, and put both jobs
-  # back into ci-ok's `needs` and REQUIRED.
+  # is skipped with it). To switch it on: set the repository variable
+  # JETSON_CI to true, and put both jobs back into ci-ok's `needs` and
+  # REQUIRED.
   jetson-rootfs:
-    if: false
+    if: vars.JETSON_CI == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     permissions:
