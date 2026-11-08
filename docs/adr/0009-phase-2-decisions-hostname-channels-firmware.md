@@ -40,6 +40,21 @@ read-only: the device-agent reports fwupd's devices and their firmware versions,
 platform shows them (WP-2.5, WP-2.9). Updates through fwupd and LVFS follow once the
 inventory has shown what the fleet carries.
 
+*Amended 2026-11-08:* the updates were brought forward, per device and on an operator's
+request. The agent reports what fwupd offers and its history with the inventory, fetches
+LVFS metadata itself (daily, as the image masks `fwupd-refresh.timer`), and installs one
+offered version on `install_firmware_update`, which needs `MAINTAIN`, shares the OS
+update's lock and takes only a device id and a version: the address and checksum come
+from fwupd's signed metadata. The restart stays the operator's. Maintenance windows and
+staged roll-out across a fleet are not built yet (#200), and no IronFlock-signed remote
+exists: LVFS only.
+
+The agent reads LVFS through its update base first (`<update base>/lvfs/`), which is the
+cloud's download proxy or an appliance's mirror, and LVFS itself if that fails, so that
+edge devices without internet access can update through their appliance. The path needs
+no trust: fwupd checks the signature of the metadata, and the agent the checksum that
+metadata names for the firmware. No image change comes with it.
+
 ### 4. The catalog: `docs/manifest.schema.json`
 
 One document serves both readers ([schema](../manifest.schema.json),
@@ -72,8 +87,8 @@ isolates nothing.
 
 - WP-2.4 and WP-2.7 read the catalog by this schema; a change that breaks a reader
   raises `schema`.
-- WP-2.5 provides the fwupd inventory RPCs only; the update RPCs move to a later work
-  package. WP-2.9 shows the inventory.
+- WP-2.5 provided the fwupd inventory RPCs first; the update RPCs followed (see the
+  amendment in section 3). WP-2.9 shows the inventory and offers the installs.
 - WP-2.6 creates the manifest signing key and publishes the document with the release.
 - Every enrolled FlockOS device has the hostname of its `.flock`; the QEMU test checks
   it.
