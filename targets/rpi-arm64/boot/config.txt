@@ -1,4 +1,4 @@
-# FlockOS boot configuration of boot slot @SLOT@ (targets/rpi-arm64, WP-5.1).
+# IronFlockOS boot configuration of boot slot @SLOT@ (targets/rpi-arm64, WP-5.1).
 # The firmware reads this file from the boot partition autoboot.txt names.
 [all]
 arm_64bit=1

@@ -6,6 +6,6 @@
 disable nvidia-persistenced.service
 # Dynamic Boost is for notebooks.
 disable nvidia-powerd.service
-# NVLink fabric and IMEX are data-centre services FlockOS does not carry.
+# NVLink fabric and IMEX are data-centre services IronFlockOS does not carry.
 disable nvidia-fabricmanager.service
 disable nvidia-imex.service

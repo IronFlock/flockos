@@ -313,7 +313,7 @@ jobs:
           retention-days: 3
 
   # The flash dry run of jetson-orin (WP-6.2): NVIDIA's
-  # l4t_initrd_flash.sh --no-flash with FlockOS's partition layout and the
+  # l4t_initrd_flash.sh --no-flash with IronFlockOS's partition layout and the
   # slot image just built, offline for an Orin Nano 8GB developer kit, on an
   # x86_64 runner (NVIDIA's flashing host). The BSP tarball is cached by its
   # pin (targets/jetson-orin/bsp.conf).

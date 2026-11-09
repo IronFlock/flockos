@@ -1,4 +1,4 @@
-// catalog builds, signs and checks dl/flockos/manifest.json, the FlockOS
+// catalog builds, signs and checks dl/flockos/manifest.json, the IronFlockOS
 // release catalog the device-agent and FlockFlasher read (ADR-0009,
 // docs/manifest.schema.json, docs/release.md).
 //
@@ -43,7 +43,7 @@ func run(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	dir := fs.String("dir", "", "release artifacts, one directory per image (build)")
 	repo := fs.String("repo", ".", "the flockos checkout, for targets/*/target.conf (build)")
-	version := fs.String("version", "", "the FlockOS version (build)")
+	version := fs.String("version", "", "the IronFlockOS version (build)")
 	channel := fs.String("channel", "test", "the channel that gets the release: test or production (build)")
 	url := fs.String("url", "", "the download base of the release's files (build)")
 	minAgent := fs.String("min-agent", "", "the oldest device-agent that may install the release (build)")

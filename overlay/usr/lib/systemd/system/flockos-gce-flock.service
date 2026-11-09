@@ -3,7 +3,7 @@
 # the firmware condition skips it at once, and as it is ordered after nothing
 # that waits for the network, an offline device still enrolls without delay.
 [Unit]
-Description=FlockOS: the .flock of a Compute Engine VM from its metadata
+Description=IronFlockOS: the .flock of a Compute Engine VM from its metadata
 Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0010-flockos-images-for-virtual-devices.md
 After=NetworkManager.service boot-efi.mount local-fs.target
 Before=flockos-enroll.service

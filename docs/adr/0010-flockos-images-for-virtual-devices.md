@@ -1,4 +1,4 @@
-# ADR-0010: FlockOS images for virtual devices on Compute Engine
+# ADR-0010: IronFlockOS images for virtual devices on Compute Engine
 
 Status: accepted, 2026-11-06.
 
@@ -12,8 +12,8 @@ and G2 machines, arm64 on C4A. Until now it boots images made by hand
 as an account Google's guest agent creates from a key in the instance metadata, and
 runs device-init's `install.sh` and `ironflock-init` with the device's `.flock`.
 
-FlockOS should run there too, for field tests first: a VM is the quickest device to get.
-But FlockOS has no default user and no Google guest environment, and it enrolls from a
+IronFlockOS should run there too, for field tests first: a VM is the quickest device to get.
+But IronFlockOS has no default user and no Google guest environment, and it enrolls from a
 `.flock` on its FLOCKOS partition (master plan, sections 3.4 and 3.9). A VM has no
 partition anyone could put a file on.
 
@@ -55,12 +55,12 @@ The release images boot on Compute Engine as they are:
 - NetworkManager takes the VM's DHCP lease.
 - systemd-repart grows the layout into the larger disk, as on hardware.
 
-FlockOS carries no Google guest environment. The guest agent would create sudo accounts
+IronFlockOS carries no Google guest environment. The guest agent would create sudo accounts
 from metadata keys: a second way in beside the one account from the `.flock`.
 
 ### 3. The `.flock` through the instance metadata, removed once the VM has it
 
-- The manager creates a FlockOS VM with its `.flock` as the instance attribute
+- The manager creates a IronFlockOS VM with its `.flock` as the instance attribute
   `flockos-flock`, and with `enable-guest-attributes=TRUE`.
 - On the first boot of a slot, `flockos-gce-flock.service` runs before
   `flockos-enroll.service`. It runs only where the firmware says
@@ -74,10 +74,10 @@ from metadata keys: a second way in beside the one account from the `.flock`.
 - On other machines the unit is skipped at once. It waits for no network target, so an
   offline device still enrolls without delay.
 
-### 4. Every Linux VM runs FlockOS; the image follows the hardware
+### 4. Every Linux VM runs IronFlockOS; the image follows the hardware
 
 The manager's Ubuntu and Debian images are deprecated (2026-11-06) and no longer
-offered. Every virtual device that is not Windows runs FlockOS.
+offered. Every virtual device that is not Windows runs IronFlockOS.
 
 - **The image.** The product's hardware decides it: `flockos-arm64-efi-base` on arm64,
   `flockos-amd64-efi-nvidia` with a GPU, `flockos-amd64-efi-base` otherwise. No arm64
@@ -86,11 +86,11 @@ offered. Every virtual device that is not Windows runs FlockOS.
 - **No OS in products.** A product is the VM's hardware, which billing charges. Only
   Windows is a product of its own, as its licence is in the price.
 - **The device row.** The manager records the image as the device's `os_image_id`, the
-  field the platform keeps for every device's FlockOS image. Studio's dialog for
+  field the platform keeps for every device's IronFlockOS image. Studio's dialog for
   virtual devices needs no OS choice.
-- **Rebuilds.** A device whose VM is gone comes back on FlockOS, the image derived from
+- **Rebuilds.** A device whose VM is gone comes back on IronFlockOS, the image derived from
   its product again. This holds for devices made on the old images too.
-- **Disks.** The products' minimum disks (10 GB, 40 GB with a GPU) fit FlockOS (10 GiB,
+- **Disks.** The products' minimum disks (10 GB, 40 GB with a GPU) fit IronFlockOS (10 GiB,
   18 GiB for nvidia).
 
 ## Consequences
@@ -114,7 +114,7 @@ offered. Every virtual device that is not Windows runs FlockOS.
 
 ## Alternatives
 
-- **SSH as on the Ubuntu images**, with Google's guest agent in FlockOS. This adds a
+- **SSH as on the Ubuntu images**, with Google's guest agent in IronFlockOS. This adds a
   daemon that creates sudo accounts from metadata, contrary to section 3.9 of the master
   plan, and an SSH dependency to provisioning.
 - **cloud-init.** A large Python dependency for one file.

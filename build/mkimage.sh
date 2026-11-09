@@ -43,7 +43,7 @@ install -m 0644 "$grub" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi"
 # /EFI/BOOT, where RAUC's system.conf, rt-tuning and the devices flashed
 # before ADR-0011 have them.
 cat >"$esp_dir/EFI/debian/grub.cfg" <<'CFG'
-# FlockOS: the A/B script is in /EFI/BOOT, next to the boot loader. Debian's
+# IronFlockOS: the A/B script is in /EFI/BOOT, next to the boot loader. Debian's
 # GRUB reads it there first; this file is for a GRUB that reads only its
 # prefix, /EFI/debian.
 source ($root)/EFI/BOOT/grub.cfg
@@ -52,10 +52,10 @@ render "$target_dir/grub/grub.cfg" >"$esp_dir/EFI/BOOT/grub.cfg"
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" create
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" set "ORDER=A B" A_OK=1 A_TRY=0 B_OK=0 B_TRY=0 FLOCKOS_CMDLINE=
 cat >"$esp_dir/README.txt" <<'TXT'
-FlockOS
-=======
+IronFlockOS
+===========
 
-This is the FLOCKOS partition of a FlockOS disk. FlockFlasher puts the
+This is the FLOCKOS partition of a IronFlockOS disk. FlockFlasher puts the
 device's .flock file here; on its first boot the device enrolls with it and
 removes it from this partition.
 

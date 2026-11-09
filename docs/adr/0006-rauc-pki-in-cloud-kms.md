@@ -13,7 +13,7 @@ repos already sign releases with Cloud KMS through Workload Identity Federation.
 
 ## Decision
 
-- A FlockOS **root CA** (RSA 4096 or EC P-384, 20-year validity) is created once; its
+- A IronFlockOS **root CA** (RSA 4096 or EC P-384, 20-year validity) is created once; its
   key lives in Cloud KMS (`ironflock-release/flockos-rauc-ca`) and is used only to
   issue signer certificates.
 - A **bundle signer** certificate (3-year validity, rotated before expiry) is issued
@@ -35,7 +35,7 @@ repos already sign releases with Cloud KMS through Workload Identity Federation.
 ## Consequences
 
 - No key material on runners or in repositories; signing is auditable in Cloud KMS logs.
-- Legacy ReswarmOS devices cannot verify FlockOS bundles (different keyring); they are
+- Legacy ReswarmOS devices cannot verify IronFlockOS bundles (different keyring); they are
   reflashed, which the different partition layout requires anyway.
 - Certificate expiry becomes an operational calendar item (signer rotation every 3
   years) rather than a yearly surprise.

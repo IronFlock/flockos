@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared helpers of the FlockOS build scripts. Sourced, never executed.
+# Shared helpers of the IronFlockOS build scripts. Sourced, never executed.
 #
 # Conventions: every script runs with `set -euo pipefail`, logs with `log`,
 # fails with `die`, and reads its configuration from plain KEY=value files

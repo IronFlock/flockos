@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build one FlockOS image inside the build container (master plan, section
+# Build one IronFlockOS image inside the build container (master plan, section
 # 3.3): rootfs (mmdebstrap), customisation, disk image (genimage), RAUC bundle.
 #   build.sh TARGET VARIANT KERNEL
 #

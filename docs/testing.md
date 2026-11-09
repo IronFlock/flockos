@@ -1,4 +1,4 @@
-# Testing FlockOS
+# Testing IronFlockOS
 
 Three layers, from fast to slow. The first two run on every pull request and
 are required by `ci-ok`; the third is a written checklist per target, because
@@ -132,7 +132,7 @@ the hardware checklist below (WP-5.4).
 
 ## Jetson root tree checks
 
-`jetson-orin` has no disk image of FlockOS's own: NVIDIA's flash tools write
+`jetson-orin` has no disk image of IronFlockOS's own: NVIDIA's flash tools write
 its disk (WP-6.2). CI builds slot A's filesystem image and the bundle with
 `just build jetson-orin base` on the arm64 runner and runs
 `sudo test/image/jetson-rootfs-check.sh <tree>`. The script checks the L4T

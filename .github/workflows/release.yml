@@ -1,4 +1,4 @@
-# Release of FlockOS: the merge of a release pull request (`just
+# Release of IronFlockOS: the merge of a release pull request (`just
 # release-patch`: version bump, title `release flockos v<version>`) builds
 # every image, signs the RAUC bundles in Cloud KMS, publishes images, bundles
 # and the signed catalog, makes the Compute Engine images of the virtual
@@ -84,7 +84,7 @@ jobs:
           mv .harness "$RUNNER_TEMP/harness"
           "$RUNNER_TEMP/harness/scripts/release.sh" mode
 
-  # Every image as a release build (build.yml): the images trust the FlockOS
+  # Every image as a release build (build.yml): the images trust the IronFlockOS
   # root CA, and each bundle is sealed with a throwaway key of its build. No
   # job of the build holds the release identity.
   build:
@@ -101,7 +101,7 @@ jobs:
   # workload identity flockos-release: the pool grants it to a push of
   # release.yml on main (a release merge) and to runs on v* tags. This job
   # re-signs every bundle with the bundle signer in Cloud KMS through PKCS#11
-  # and checks it against the FlockOS root CA (build/sign-bundles.sh). A dry
+  # and checks it against the IronFlockOS root CA (build/sign-bundles.sh). A dry
   # run does the same with a throwaway stand-in for the signer.
   sign:
     needs: [verify, build]
@@ -167,7 +167,7 @@ jobs:
   # base under KVM, with Secure Boot on and Microsoft's keys as PCs ship,
   # ADR-0011): first boot, enrollment from the test .flock, reboot. A
   # release also updates into slot B with its own bundle, whose Cloud KMS
-  # signature the image's keyring (the FlockOS root CA) must accept, and
+  # signature the image's keyring (the IronFlockOS root CA) must accept, and
   # falls back. A dry run's bundles carry the stand-in's signature, which no
   # release image accepts: it boots and reboots only.
   e2e:
@@ -222,7 +222,7 @@ jobs:
           retention-days: 7
 
   # The signed release to the staging tree, as the publisher identity
-  # (flockos-publisher: the FlockOS trees of the download bucket only).
+  # (flockos-publisher: the IronFlockOS trees of the download bucket only).
   stage:
     needs: [verify, sign, attest]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
@@ -415,7 +415,7 @@ jobs:
           fi
 
   # The Compute Engine images of the release (ADR-0010): the boot images of
-  # the virtual-device-manager's FlockOS VMs, amd64-efi base and nvidia and
+  # the virtual-device-manager's IronFlockOS VMs, amd64-efi base and nvidia and
   # arm64-efi base (GCE_IMAGES in build/release.conf; no real-time kernel for
   # VMs). Each is made from the published image, which it must match by
   # SHA256SUMS, into its image family flockos-<target>-<variant>, from which

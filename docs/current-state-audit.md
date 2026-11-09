@@ -14,7 +14,7 @@ otherwise. "Likely" marks an inference that was not confirmed by running a build
   same units and scripts still exist under `buildroot/rootfs/` and
   `cubic/project/rootfs-overlay/`.
 - Branding: "reswarm" has about 300 occurrences in 62 files, "IronFlock" 48 in 15,
-  "FlockOS" none (apart from docs for a dev VM).
+  "IronFlockOS" none (apart from docs for a dev VM).
 - No firmware update mechanism of any kind exists (no fwupd, no `rpi-eeprom` handling, no
   Jetson capsule flow; only runtime blobs inside the rootfs). No real-time kernel option
   exists in either tree.
@@ -153,7 +153,7 @@ Base `config` for Pi 3/4 selects firmware variants that do not match `genimage.c
 - In-tree fork of Buildroot `2024.08-rc1`, branch `newb`, last real work 2025-03-29.
 - `flockOS/raspberrypi/{raspberrypi3-64 (0.5.15 "working"), raspberrypizero2w-64 (wip),
   raspberrypi4-64 (stale)}`; `BR2_INIT_SYSTEMD`, Docker, NetworkManager, RAUC, U-Boot;
-  FAT label `FlockOS`; 4 partitions boot/rootfsA/rootfsB/appfs; paths hard-coded to
+  FAT label `IronFlockOS`; 4 partitions boot/rootfsA/rootfsB/appfs; paths hard-coded to
   `/home/ironflock/git/buildroot`; built on GCE VM `flockos-builder-standard`; no CI.
 - RAUC bundler broken: copies the overlay directory instead of `rootfs.ext4`, mangles
   the manifest, `compatible=ReswarmOS` vs system `ReswarmOS-image-<model>`; `release.sh`

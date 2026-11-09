@@ -1,9 +1,9 @@
-FlockOS, the operating system of IronFlock edge devices
+IronFlockOS, the operating system of IronFlock edge devices
 https://github.com/IronFlock/ironflockos
 
 Copyright 2026 IronFlock GmbH
 
-The files FlockOS adds to this system (its configuration, systemd units,
+The files IronFlockOS adds to this system (its configuration, systemd units,
 scripts and /usr/lib/os-release) are licensed under the Apache License,
 Version 2.0. Its full text is in /usr/share/common-licenses/Apache-2.0.
 

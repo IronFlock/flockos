@@ -1,5 +1,5 @@
 #!/bin/bash
-# flockos-installer: writes the embedded FlockOS image to an internal disk
+# flockos-installer: writes the embedded IronFlockOS image to an internal disk
 # (master plan, section 3.6; WP-3.1). Runs as flockos-installer.service on the
 # console of the installer USB stick.
 #
@@ -41,7 +41,7 @@ run() {
 }
 
 : >"$log" 2>/dev/null || log=/dev/null
-say "FlockOS installer $(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null | tr -d '"')"
+say "IronFlockOS installer $(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null | tr -d '"')"
 
 installer_conf "$esp/installer.conf" || fail "installer.conf is not valid (see above)"
 payload=$(installer_payload "$payload_dir" "$CONF_PAYLOAD") || fail "no image to install"
@@ -102,13 +102,13 @@ fi
 
 say "registering $target as the first UEFI boot entry"
 if loader=$(installer_loader); then
-  run efibootmgr --quiet --create --disk "$target" --part 1 --label FlockOS --loader "$loader" ||
+  run efibootmgr --quiet --create --disk "$target" --part 1 --label IronFlockOS --loader "$loader" ||
     say "warning: no UEFI boot entry (the disk still boots from its removable-media path)"
 else
   say "warning: no UEFI loader known for $(uname -m): no boot entry (the disk boots from its removable-media path)"
 fi
 
-say "FlockOS is installed on $target. Remove the stick; the device starts from $target."
+say "IronFlockOS is installed on $target. Remove the stick; the device starts from $target."
 sync
 case "$CONF_AFTER" in
   reboot) run systemctl reboot ;;

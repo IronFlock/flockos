@@ -26,7 +26,7 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-// The algorithm of every FlockOS RAUC key (docs/signing.md): RAUC signs
+// The algorithm of every IronFlockOS RAUC key (docs/signing.md): RAUC signs
 // SHA-256 digests, and a KMS key accepts only its own digest.
 const keyAlgorithm = "RSA_SIGN_PKCS1_4096_SHA256"
 

@@ -22,7 +22,7 @@ env_of() { sed -n "s/^$1=//p" "$tmp/pki/signing.env"; }
   ! cmp -s "$(env_of KEYRING)" "$repo/pki/flockos-root-ca.pem"
 }
 
-@test "a release build trusts the FlockOS root CA and seals with a throwaway key" {
+@test "a release build trusts the IronFlockOS root CA and seals with a throwaway key" {
   FLOCKOS_SIGNING=release run bash "$repo/build/signing.sh" "$tmp/pki"
   [ "$status" -eq 0 ]
   cmp "$(env_of KEYRING)" "$repo/pki/flockos-root-ca.pem"

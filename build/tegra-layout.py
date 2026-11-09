@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""FlockOS's partition layout of a jetson-orin NVMe (WP-6.2), from the BSP's.
+"""IronFlockOS's partition layout of a jetson-orin NVMe (WP-6.2), from the BSP's.
 
     tegra-layout.py BSP_LAYOUT OUT
 
 BSP_LAYOUT is the BSP's tools/kernel_flash/flash_l4t_t234_nvme_rootfs_ab.xml,
 NVIDIA's layout of an NVMe with rootfs A/B. It is under NVIDIA's licence, so
 it is read from the BSP (build/fetch-bsp.sh) and never copied into this
-repository. OUT gets the same layout plus FlockOS's `data` partition after
+repository. OUT gets the same layout plus IronFlockOS's `data` partition after
 APP_b, grown to the end of the disk (/data, PARTLABEL=data in /etc/fstab).
 
 Everything else stays NVIDIA's: the A/B kernel and device tree partitions,
-recovery, `esp` (FlockOS's /boot/efi; flash.sh builds its image only under
+recovery, `esp` (IronFlockOS's /boot/efi; flash.sh builds its image only under
 that name), APP and APP_b with their placeholders (APPSIZE, APPFILE,
 APPUUID...), which l4t_initrd_flash.sh fills in. The script refuses a layout
-that is not shaped as FlockOS expects, so a BSP update that changes it fails
+that is not shaped as IronFlockOS expects, so a BSP update that changes it fails
 the build instead of flashing something else.
 """
 import sys
@@ -109,7 +109,7 @@ def main(argv):
         ("align_boundary", "16384"),
         ("percent_reserved", "0"),
         ("partition_type_guid", LINUX_DATA_TYPE),
-        ("description", "FlockOS: /data, the device's state across A/B updates; grows to the end of the disk."),
+        ("description", "IronFlockOS: /data, the device's state across A/B updates; grows to the end of the disk."),
     ]
     child_tail = app_b[0].tail if len(app_b) else "\n"
     for i, (tag, value) in enumerate(fields):
@@ -117,7 +117,7 @@ def main(argv):
         node.text = f" {value} "
         node.tail = child_tail if i < len(fields) - 1 else app_b[-1].tail
     data.tail = app_b.tail
-    comment = ET.Comment(" FlockOS (build/tegra-layout.py): /data after the root slots ")
+    comment = ET.Comment(" IronFlockOS (build/tegra-layout.py): /data after the root slots ")
     comment.tail = app_b.tail
     index = list(device).index(parts[-1])
     device.insert(index, comment)

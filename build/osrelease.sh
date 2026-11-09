@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print /usr/lib/os-release of a FlockOS image (master plan, section 3.1).
+# Print /usr/lib/os-release of a IronFlockOS image (master plan, section 3.1).
 #   osrelease.sh VERSION TARGET VARIANT KERNEL COMMIT EPOCH
 # COMMIT is the git commit the image is built from, EPOCH its time
 # (SOURCE_DATE_EPOCH). VERSION keeps the legacy v<ver>-g<sha>-<buildtime>
@@ -31,10 +31,10 @@ detail="$target, $variant"
 [ "$kernel" = rt ] && detail="$detail, rt"
 
 cat <<OSR
-NAME="FlockOS"
+NAME="IronFlockOS"
 ID=flockos
 ID_LIKE=$id_like
-PRETTY_NAME="FlockOS $version ($detail)"
+PRETTY_NAME="IronFlockOS $version ($detail)"
 VERSION_ID="$version"
 VERSION="v$version-g$short-$stamp"
 IMAGE_ID=$id

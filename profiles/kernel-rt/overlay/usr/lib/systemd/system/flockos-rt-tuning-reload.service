@@ -1,5 +1,5 @@
 [Unit]
-Description=FlockOS: apply a changed /etc/flockos/rt.conf
+Description=IronFlockOS: apply a changed /etc/flockos/rt.conf
 
 [Service]
 Type=oneshot

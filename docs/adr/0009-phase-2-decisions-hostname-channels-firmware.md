@@ -5,7 +5,7 @@ and 4; question 5 was settled by WP-4b.1.
 
 ## Context
 
-Phase 2 connects FlockOS to the IronFlock platform: enrollment from the `.flock`
+Phase 2 connects IronFlockOS to the IronFlock platform: enrollment from the `.flock`
 (WP-2.1 to WP-2.3), OS updates through the device-agent (WP-2.4, WP-2.8), firmware
 (WP-2.5, WP-2.9) and the signed catalog that the release pipeline publishes and
 FlockFlasher reads (WP-2.6, WP-2.7). The master plan left four questions for the start
@@ -15,7 +15,7 @@ of Phase 2 (section 7). Three teams read the catalog, so its shape is agreed her
 
 ### 1. Hostname from the `.flock` by default
 
-On FlockOS, `flockos-enroll` runs `ironflock-init enroll --hostname-from-flock`: every
+On IronFlockOS, `flockos-enroll` runs `ironflock-init enroll --hostname-from-flock`: every
 device is named after its device name in the platform, as ReswarmOS devices were.
 `ironflock-init` makes the name a valid hostname (an RFC 1123 label) and keeps the
 current hostname when nothing valid is left. A device keeps its hostname with
@@ -68,12 +68,12 @@ One document serves both readers ([schema](../manifest.schema.json),
   of its channel.
 - `boards`: FlockFlasher's `SupportedBoard` and `ImageInfo` shape for the production
   release, plus `image_id`, `variant` and `kernel` for the variant choice of WP-2.7.
-  `osvariant` is always `image`: every FlockOS artefact is a raw image (ADR-0004).
+  `osvariant` is always `image`: every IronFlockOS artefact is a raw image (ADR-0004).
 
 The document is published in the device-agent's envelope (`{"payload": "<base64>",
 "signature": "<Ed25519 .sig>"}`, at most 64 KiB), signed over
 `flockos-manifest:v1`, `flockos/manifest.json` and the payload's SHA-256, with an
-Ed25519 key in Cloud KMS that only FlockOS release runs may use (WP-2.6). The
+Ed25519 key in Cloud KMS that only IronFlockOS release runs may use (WP-2.6). The
 device-agent and FlockFlasher compile its public key in. `issued_at` lets a reader
 refuse a document older than the last one it accepted.
 
@@ -90,7 +90,7 @@ isolates nothing.
 - WP-2.5 provided the fwupd inventory RPCs first; the update RPCs followed (see the
   amendment in section 3). WP-2.9 shows the inventory and offers the installs.
 - WP-2.6 creates the manifest signing key and publishes the document with the release.
-- Every enrolled FlockOS device has the hostname of its `.flock`; the QEMU test checks
+- Every enrolled IronFlockOS device has the hostname of its `.flock`; the QEMU test checks
   it.
 
 Open: who owns the GPU and Orin hardware for the acceptance tests of Phases 4 and 6

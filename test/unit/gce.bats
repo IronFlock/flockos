@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# FlockOS on Compute Engine (ADR-0010): the .flock of a VM from its instance
+# IronFlockOS on Compute Engine (ADR-0010): the .flock of a VM from its instance
 # metadata (gce-flock against a stand-in metadata server), its unit, and the
 # release's VM images (build/gce-image.sh against a stand-in gcloud).
 
@@ -206,7 +206,7 @@ disk_size() {
   gcs=gs://ironflock-downloads/staging/flockos/1.2.3/gce/flockos-amd64-efi-base-v1-2-3.tar.gz
   grep -qx "storage cp --quiet .*/flockos-amd64-efi-base-v1-2-3.tar.gz $gcs" "$tmp/gcloud.log"
   grep -q "^compute images create flockos-amd64-efi-base-v1-2-3 --project record-1283 --source-uri $gcs --family flockos-amd64-efi-base --architecture X86_64 --guest-os-features UEFI_COMPATIBLE,GVNIC,VIRTIO_SCSI_MULTIQUEUE --storage-location eu " "$tmp/gcloud.log"
-  grep -q "^compute images create .* --description FlockOS 1.2.3 amd64-efi base for virtual devices: https://instance-registry.ironflock.com/dl/flockos/1.2.3/flockos-amd64-efi-base-1.2.3.img.gz sha256 $sha " "$tmp/gcloud.log"
+  grep -q "^compute images create .* --description IronFlockOS 1.2.3 amd64-efi base for virtual devices: https://instance-registry.ironflock.com/dl/flockos/1.2.3/flockos-amd64-efi-base-1.2.3.img.gz sha256 $sha " "$tmp/gcloud.log"
   grep -q "^compute images create .* --labels flockos-version=1-2-3,flockos-target=amd64-efi,flockos-variant=base$" "$tmp/gcloud.log"
   # the tarball leaves the bucket again, and the scratch space
   [ "$(tail -n 1 "$tmp/gcloud.log")" = "storage rm --quiet $gcs" ]
@@ -256,12 +256,12 @@ disk_size() {
 @test "gce-image: a re-run keeps the image made from the same file, refuses one from another" {
   gce_env
   sha=$(sha256sum "$dir/flockos-amd64-efi-base-1.2.3.img.gz" | cut -d' ' -f1)
-  FAKE_EXISTING="FlockOS 1.2.3 amd64-efi base for virtual devices: … sha256 $sha" \
+  FAKE_EXISTING="IronFlockOS 1.2.3 amd64-efi base for virtual devices: … sha256 $sha" \
     run bash "$gce_image" "$dir" 1.2.3 "$tmp/meta/SHA256SUMS"
   [ "$status" -eq 0 ]
   [[ "$output" == *"exists, made from flockos-amd64-efi-base-1.2.3.img.gz: kept"* ]]
   ! grep -q 'images create\|storage cp' "$tmp/gcloud.log"
-  FAKE_EXISTING="FlockOS 1.2.3 amd64-efi base for virtual devices: … sha256 0123" \
+  FAKE_EXISTING="IronFlockOS 1.2.3 amd64-efi base for virtual devices: … sha256 0123" \
     run bash "$gce_image" "$dir" 1.2.3 "$tmp/meta/SHA256SUMS"
   [ "$status" -ne 0 ]
   [[ "$output" == *"made from another file"* ]]

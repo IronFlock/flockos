@@ -1,4 +1,4 @@
-// rauc-pki issues the certificates of the FlockOS RAUC PKI (ADR-0006,
+// rauc-pki issues the certificates of the IronFlockOS RAUC PKI (ADR-0006,
 // docs/signing.md) with keys that never leave Cloud KMS.
 //
 //	rauc-pki ca    -ca-key VERSION -cn NAME -years 20 -out CA.pem

@@ -1,6 +1,6 @@
-# Building FlockOS images
+# Building IronFlockOS images
 
-Every FlockOS image is built by `just build TARGET VARIANT [KERNEL]` inside a
+Every IronFlockOS image is built by `just build TARGET VARIANT [KERNEL]` inside a
 pinned Debian 13 container (`build/builder.conf`). CI runs exactly that, and CI
 is the build of record: release images are built, signed and published only by
 `.github/workflows/release.yml`. A local build with Docker exists for debugging
@@ -17,7 +17,7 @@ stage:
 
 | Stage | Script | Result |
 |-------|--------|--------|
-| signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key. Throwaway by default; a release build (`FLOCKOS_SIGNING=release`) puts the FlockOS root CA into the image and seals the bundle with a throwaway key for `release.yml`'s sign job (ADR-0006, `docs/signing.md`) |
+| signing material | `build/signing.sh` | `keyring.pem` the image trusts, the signer certificate and key. Throwaway by default; a release build (`FLOCKOS_SIGNING=release`) puts the IronFlockOS root CA into the image and seals the bundle with a throwaway key for `release.yml`'s sign job (ADR-0006, `docs/signing.md`) |
 | rootfs | `build/mkrootfs.sh` | minbase tree of the target's distribution (see below) from `mmdebstrap` with `profiles/base/packages`, its per-distribution and per-architecture lists, the target's `targets/<target>/packages` and the variant's `profiles/<variant>/packages` (no Recommends), Docker CE from download.docker.com at the versions in `distros/<distro>/versions`; for `nvidia` also NVIDIA's driver, its open kernel modules and the container toolkit (see below) |
 | customisation | `build/customize.sh` | `overlay/` copied in, RAUC `system.conf` and keyring, `repart.d`, os-release, no accounts but a locked root, kernel at `/vmlinuz`, units enabled and masked, IronFlock baked in (`build/bake.sh`; not into the installer), package manifest, timestamps clamped to the commit time |
 | disk image | `build/mkimage.sh` (EFI targets), `build/mkimage-rpi.sh` (Raspberry Pi: FLOCKOS with `autoboot.txt`, boot-a from `/boot/firmware`, an empty boot-b, slot A) | FLOCKOS partition (ESP: shim, Debian's signed GRUB, `grub.cfg`, `grubenv`), slot A as ext4 of the full slot size, assembled by `genimage` from `targets/<target>/genimage.cfg`, compressed |
@@ -121,7 +121,7 @@ FLOCKOS_CMDLINE=...`) and for the QEMU tests.
 
 Known limit of 1.x: slots are found by GPT partition name (`rootfs-a`,
 `rootfs-b`, `data`) and every image of a target has the same partition UUIDs.
-A second FlockOS disk attached to a running device is therefore ambiguous; the
+A second IronFlockOS disk attached to a running device is therefore ambiguous; the
 installer USB uses its own names.
 
 ## IronFlock in the image
@@ -180,7 +180,7 @@ display controller, then says on the console that the GPU needs Secure Boot off.
 
 ## The installer variant
 
-`just build amd64-efi installer` (or `arm64-efi installer`) builds the FlockOS
+`just build amd64-efi installer` (or `arm64-efi installer`) builds the IronFlockOS
 installer stick of that target (master plan, section 3.6). One stick per target
 carries every image of it: the variants in `INSTALLER_PAYLOADS` of
 `target.conf` (amd64-efi `base base-rt nvidia`, arm64-efi `base base-rt`),

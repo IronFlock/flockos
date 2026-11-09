@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks of jetson-orin's root tree without a Jetson (WP-6.2): Ubuntu 24.04
-# with NVIDIA's L4T packages at the pinned versions, FlockOS on top, and the
+# with NVIDIA's L4T packages at the pinned versions, IronFlockOS on top, and the
 # tree's own binaries run in a chroot (native on an arm64 host). The tree is
 # what `just rootfs jetson-orin base` leaves in FLOCKOS_WORK; the boot is a
 # hardware check once the layout and flash package exist (WP-6.4, WP-6.6).
@@ -92,7 +92,7 @@ check "Ubuntu's sources are signed by ubuntu-archive-keyring" \
 check "the keyring is in the tree" test -s "$root/usr/share/keyrings/ubuntu-archive-keyring.gpg"
 check "the L4T pins are kept" grep -q "Pin: version $L4T_PACKAGE_VERSION" "$root/etc/apt/preferences.d/flockos-l4t.pref"
 
-# --- FlockOS ---------------------------------------------------------------
+# --- IronFlockOS ---------------------------------------------------------------
 check "RAUC: compatible, the custom backend, APP and APP_b" \
   bash -c "c='$root/etc/rauc/system.conf'; grep -qx compatible=flockos-jetson-orin-base \$c && grep -qx bootloader=custom \$c && grep -qx device=/dev/disk/by-partlabel/APP \$c && grep -qx device=/dev/disk/by-partlabel/APP_b \$c"
 check "no repart.d (NVIDIA's flash writes the layout)" test ! -e "$root/usr/lib/repart.d"

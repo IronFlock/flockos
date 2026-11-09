@@ -1,5 +1,5 @@
 #!/bin/bash
-# The .flock of a FlockOS VM on Compute Engine (ADR-0010). A VM has no
+# The .flock of a IronFlockOS VM on Compute Engine (ADR-0010). A VM has no
 # FLOCKOS partition anyone could put a .flock on: the virtual-device-manager
 # puts it into the instance metadata (attribute flockos-flock) when it creates
 # the VM. On the first boot of a slot, before flockos-enroll, this writes it to

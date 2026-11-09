@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage 2: turn the Debian tree in $ROOT into FlockOS (master plan, sections
+# Stage 2: turn the Debian tree in $ROOT into IronFlockOS (master plan, sections
 # 3.1, 3.2, 3.5, 3.9). Works on the tree from outside, without a chroot.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -216,8 +216,8 @@ if [ "$VARIANT" = nvidia ]; then
 fi
 if [ "$BOOTLOADER" = tegra ]; then
   # NVIDIA's boot-time services stay off: nv-l4t-bootloader-config updates
-  # the QSPI firmware on its own (FlockOS's lane 2 does, WP-6.5), and
-  # nv-rootfs-validation-config marks the root slot good (FlockOS's health
+  # the QSPI firmware on its own (IronFlockOS's lane 2 does, WP-6.5), and
+  # nv-rootfs-validation-config marks the root slot good (IronFlockOS's health
   # gate does, WP-6.3). NVIDIA puts the units into /etc/systemd/system, where
   # the mask goes: the files make way (/opt/nvidia keeps NVIDIA's copies).
   for u in nv-l4t-bootloader-config.service nv-rootfs-validation-config.service; do

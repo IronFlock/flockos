@@ -13,11 +13,11 @@
 # release  the bundle signer in Cloud KMS through Google's PKCS#11 library
 #          (pinned in build/release.conf), as the workload identity that
 #          release.yml's sign job authenticated (GOOGLE_APPLICATION_CREDENTIALS).
-#          The bundles verify against the FlockOS root CA only.
+#          The bundles verify against the IronFlockOS root CA only.
 # dry-run  a throwaway stand-in for the bundle signer: the same steps without
 #          the release identity, for dry runs of release.yml and local checks.
 #          The bundles verify against the stand-in only, never against the
-#          FlockOS root CA.
+#          IronFlockOS root CA.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
@@ -65,7 +65,7 @@ case "$mode" in
     keyring=$root_ca
     ;;
   dry-run)
-    throwaway_signer "$work/standin" "FlockOS release dry run"
+    throwaway_signer "$work/standin" "IronFlockOS release dry run"
     key=$work/standin/signer.key
     cert=$work/standin/signer.pem
     keyring=$work/standin/keyring.pem
@@ -115,7 +115,7 @@ for bundle in "$dir"/*/*.raucb; do
     die "$name.raucb still verifies against its sealing CA"
   fi
   if [ "$mode" = dry-run ] && check reject-root "$root_ca" "$id" "$signed"; then
-    die "$name.raucb, signed by the dry-run stand-in, verifies against the FlockOS root CA"
+    die "$name.raucb, signed by the dry-run stand-in, verifies against the IronFlockOS root CA"
   fi
   cp "$signed" "$bundle"
   rm -f "$seal" "$signed" "$sealed"

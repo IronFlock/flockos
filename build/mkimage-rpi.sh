@@ -46,10 +46,10 @@ flockos_dir=$img/flockos
 mkdir -p "$flockos_dir"
 cp "$target_dir/boot/autoboot.txt" "$flockos_dir/autoboot.txt"
 cat >"$flockos_dir/README.txt" <<'TXT'
-FlockOS
-=======
+IronFlockOS
+===========
 
-This is the FLOCKOS partition of a FlockOS disk. FlockFlasher puts the
+This is the FLOCKOS partition of a IronFlockOS disk. FlockFlasher puts the
 device's .flock file here; on its first boot the device enrolls with it and
 removes it from this partition.
 

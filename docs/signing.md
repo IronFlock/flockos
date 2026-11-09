@@ -1,4 +1,4 @@
-# Signing FlockOS update bundles
+# Signing IronFlockOS update bundles
 
 How RAUC bundles are signed and verified (ADR-0006). No private key exists on
 a runner, a laptop or in this repository.
@@ -132,4 +132,4 @@ Devices need nothing: the CA in their keyring verifies the new signer.
 
 The 2021 and 2025 ReswarmOS certificates and the key committed to the archived
 `IronFlock/flockos-buildroot-legacy` are never used again; `gs://reswarmos-certs`
-is empty. FlockOS devices do not trust them.
+is empty. IronFlockOS devices do not trust them.

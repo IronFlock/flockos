@@ -1,10 +1,10 @@
-# The FlockOS images, each built in the build container
+# The IronFlockOS images, each built in the build container
 # (build/run-in-builder.sh): every target, variant and kernel, and the
 # installer sticks of amd64-efi and arm64-efi, each carrying every image of
 # its target.
 # Called by ci.yml with signing dev (throwaway keys, images and bundles trust
 # only each other) and by release.yml with signing release (the images trust
-# the FlockOS root CA; each bundle is sealed with a key of its build and gets
+# the IronFlockOS root CA; each bundle is sealed with a key of its build and gets
 # its release signature in release.yml's sign job). Each image is the
 # artifact <prefix>-<target>-<variant>[-rt]: image-* from ci.yml,
 # release-image-* from release.yml, which a release pull request's ci runs in
