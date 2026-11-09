@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup of the FlockOS RAUC PKI in Cloud KMS (ADR-0006,
-# docs/signing.md). Run by a project owner from a checkout of IronFlock/flockos
+# docs/signing.md). Run by a project owner from a checkout of IronFlock/ironflockos
 # on a branch; it writes the two certificates into pki/ for a pull request.
 #
 #   tools/rauc-pki/ceremony.sh            show what would be done
@@ -10,7 +10,7 @@
 #   key ring flockos-rauc-ca, key root           HSM, RSA_SIGN_PKCS1_4096_SHA256
 #   key ring flockos-rauc,    key bundle-signer  HSM, RSA_SIGN_PKCS1_4096_SHA256
 #   service account flockos-release, allowed to sign with bundle-signer only,
-#     usable only by IronFlock/flockos release runs (workload identity
+#     usable only by IronFlock/ironflockos release runs (workload identity
 #     attribute release=<repo id>:release, as device-init's signer)
 # then issues the root CA certificate (20 years) and the signer certificate
 # (3 years) with rauc-pki, and disables the CA key version: it is enabled
@@ -27,7 +27,7 @@ CA_KEY=root
 SIGNER_RING=flockos-rauc
 SIGNER_KEY=bundle-signer
 SA=flockos-release
-REPO=IronFlock/flockos
+REPO=IronFlock/ironflockos
 POOL_PROVIDER_PROJECT_NUMBER=${POOL_PROVIDER_PROJECT_NUMBER:-615643915869}
 POOL=github-pool
 YEAR=$(date -u +%Y)
@@ -84,7 +84,7 @@ exists kms keys describe "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" ||
 echo "== the release identity"
 exists iam service-accounts describe "$sa_email" --project "$PROJECT" ||
   do_ "$gcloud" iam service-accounts create "$SA" --project "$PROJECT" \
-    --display-name "FlockOS release" --description "Signs FlockOS RAUC bundles from IronFlock/flockos release runs"
+    --display-name "FlockOS release" --description "Signs FlockOS RAUC bundles from IronFlock/ironflockos release runs"
 # Sign and read the public key of bundle-signer; list the keys of its ring
 # (the PKCS#11 library enumerates the ring). Nothing on the CA ring.
 bind_ "$gcloud" kms keys add-iam-policy-binding "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" \

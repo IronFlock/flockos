@@ -7,17 +7,17 @@
   </a>
 </p>
 
-# FlockOS
+# IronFlockOS
 
-FlockOS is the operating system for industrial edge devices managed with IronFlock. Its
+IronFlockOS is the operating system for industrial edge devices managed with IronFlock. Its
 aim is a trusted, hardened OS that updates over the air reliably and without a site
 visit, wherever a device runs: an industrial PC in a machine cabinet, a Raspberry Pi on
 the shop floor, a GPU host, a plant network without internet access, or a virtual
 machine.
 
-FlockOS is a Debian-based appliance OS. It runs the
+IronFlockOS is a Debian-based appliance OS. It runs the
 [IronFlock device-agent](https://github.com/IronFlock/device-agent) and Docker, and
-nothing else. Applications run as containers that IronFlock deploys. FlockOS is the
+nothing else. Applications run as containers that IronFlock deploys. IronFlockOS is the
 small, signed base underneath them, and each update replaces its whole root filesystem,
 kernel included.
 
@@ -29,7 +29,7 @@ kernel included.
   device boots it once and keeps it only if the agent reaches IronFlock from it;
   otherwise the device falls back to the previous slot by itself. Data, Docker's images
   and containers, and the device's enrollment stay across updates.
-- **Trusted.** A device installs only update bundles signed with the FlockOS key, which
+- **Trusted.** A device installs only update bundles signed with the IronFlockOS key, which
   never leaves a Cloud KMS HSM, and finds them through a signed catalog. Every release is
   built and signed in GitHub Actions and has SLSA provenance
   ([Supply chain and security](#supply-chain-and-security)).
@@ -48,7 +48,7 @@ kernel included.
 
 ## Status
 
-FlockOS is not at 1.0 yet. The [latest release](https://github.com/IronFlock/flockos/releases/latest)
+IronFlockOS is not at 1.0 yet. The [latest release](https://github.com/IronFlock/ironflockos/releases/latest)
 has images for three targets. On every pull request, CI boots each EFI image in QEMU and
 tests the first boot, enrollment, an A/B update and the fallback. No target has passed
 its hardware acceptance yet; `v1.0.0` follows the first one, on an x86 industrial PC.
@@ -80,7 +80,7 @@ supported: their firmware cannot boot from GPT or read `autoboot.txt`. Jetson us
 
 ## Installing
 
-Install FlockOS with [FlockFlasher](https://github.com/IronFlock/flasher). It lists the
+Install IronFlockOS with [FlockFlasher](https://github.com/IronFlock/flasher). It lists the
 images of the production channel, writes the chosen one to an SD card, USB stick or
 disk, and puts the device's `.flock` file on it. You get the `.flock` file from IronFlock
 when you add the device there. On the first boot the device enrolls with it: it gets its
@@ -99,12 +99,12 @@ Every file of a release is at `https://instance-registry.ironflock.com/dl/flocko
 for example `.../dl/flockos/0.11.0/flockos-amd64-efi-base-0.11.0.img.gz`. For each image there is the disk image (`.img.gz`), the update bundle (`.raucb`, none for
 the installer), the package list (`.packages.tsv`) and `.os-release`. `SHA256SUMS`,
 the SBOMs and the signed catalog are attached to each
-[GitHub Release](https://github.com/IronFlock/flockos/releases).
+[GitHub Release](https://github.com/IronFlock/ironflockos/releases).
 
 ## Supply chain and security
 
 - **Signed update bundles.** The bundle signing key is in a Cloud KMS HSM. Release
-  images trust only the FlockOS root CA ([pki/](pki/README.md), with fingerprints) and
+  images trust only the IronFlockOS root CA ([pki/](pki/README.md), with fingerprints) and
   refuse any other bundle. Pull-request and local builds sign with throwaway keys
   that no release image accepts ([docs/signing.md](docs/signing.md)).
 - **Signed catalog.** The device-agent and FlockFlasher read image and bundle URLs,
@@ -127,10 +127,12 @@ the SBOMs and the signed catalog are attached to each
   signs the provenance. To check a file with the GitHub CLI:
 
   ```sh
-  gh attestation verify flockos-amd64-efi-base-<version>.img.gz --repo IronFlock/flockos \
+  gh attestation verify flockos-amd64-efi-base-<version>.img.gz --repo IronFlock/ironflockos \
     --signer-workflow IronFlock/workflows/.github/workflows/attest-provenance.yml --source-ref refs/heads/main
   ```
 
+  Releases up to 0.12.0 were built when this repository was named `IronFlock/flockos`,
+  and their provenance records that name. Check them with `--repo IronFlock/flockos`.
   Releases up to 0.11.0 meet Build Level 2: the job that attested them also ran this
   repository's bundle-signing script. Check them with
   `--signer-workflow IronFlock/flockos/.github/workflows/release.yml`.

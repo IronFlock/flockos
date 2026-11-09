@@ -1,4 +1,4 @@
-module github.com/ironflock/flockos/tools/rauc-pki
+module github.com/ironflock/ironflockos/tools/rauc-pki
 
 go 1.27.3
 

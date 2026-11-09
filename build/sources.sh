@@ -204,7 +204,7 @@ index() {
 # with all its files. A source package with "-" as its URL has no source
 # here, for the reason after it: none of them is under a copyleft licence.
 #
-# FlockOS's own files are https://github.com/IronFlock/flockos at the tag
+# FlockOS's own files are https://github.com/IronFlock/ironflockos at the tag
 # v$version, under the Apache License 2.0.
 #
 # source	version	URL or -	reason

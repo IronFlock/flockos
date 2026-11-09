@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time setup of FlockOS release publishing (WP-2.6, docs/release.md).
-# Run by a project owner from a checkout of IronFlock/flockos on a branch,
+# Run by a project owner from a checkout of IronFlock/ironflockos on a branch,
 # after the RAUC ceremony (tools/rauc-pki/ceremony.sh); it writes the catalog
 # key's public key into pki/ for a pull request.
 #
@@ -12,7 +12,7 @@
 #     agent's agent-update key): signs dl/flockos/manifest.json (ADR-0009);
 #     flockos-release (the ceremony's release identity) may sign with it and
 #     with nothing else of that ring
-#   service account flockos-publisher, usable only by IronFlock/flockos
+#   service account flockos-publisher, usable only by IronFlock/ironflockos
 #     release runs (workload identity attribute release=<repo id>:release):
 #     object admin on gs://ironflock-downloads/staging/flockos/ and
 #     gs://ironflock-downloads/flockos/ only (an IAM condition), object
@@ -34,7 +34,7 @@ SIGNER=flockos-release
 PUBLISHER=flockos-publisher
 IMAGE_ROLE=flockosVmImagePublisher
 BUCKET=ironflock-downloads
-REPO=IronFlock/flockos
+REPO=IronFlock/ironflockos
 POOL_PROVIDER_PROJECT_NUMBER=${POOL_PROVIDER_PROJECT_NUMBER:-615643915869}
 POOL=github-pool
 PUB=pki/flockos-catalog.pub
@@ -87,7 +87,7 @@ bind_ "$gcloud" kms keys add-iam-policy-binding "$KEY" --keyring "$RING" "${kms[
 echo "== the publisher"
 exists iam service-accounts describe "$publisher_email" --project "$PROJECT" ||
   do_ "$gcloud" iam service-accounts create "$PUBLISHER" --project "$PROJECT" \
-    --display-name "FlockOS publisher" --description "Publishes FlockOS releases from IronFlock/flockos release runs"
+    --display-name "FlockOS publisher" --description "Publishes FlockOS releases from IronFlock/ironflockos release runs"
 condition=$(mktemp)
 images_condition=$(mktemp)
 trap 'rm -f "$condition" "$images_condition"' EXIT

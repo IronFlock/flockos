@@ -1,4 +1,4 @@
-module github.com/ironflock/flockos/tools/catalog
+module github.com/ironflock/ironflockos/tools/catalog
 
 go 1.27.3
 

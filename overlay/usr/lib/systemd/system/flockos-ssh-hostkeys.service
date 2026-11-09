@@ -1,6 +1,6 @@
 [Unit]
 Description=FlockOS: SSH host keys on /data
-Documentation=https://github.com/IronFlock/flockos/blob/main/docs/master-plan.md
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
 After=local-fs.target flockos-data-layout.service
 Before=ssh.service
 ConditionPathExists=|!/data/etc/ssh/ssh_host_ed25519_key

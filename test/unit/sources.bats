@@ -83,7 +83,7 @@ plan() {
   run bash "$sources" index "$tmp/plan" 1.2.3
   [ "$status" -eq 0 ]
   [[ "$output" == "# FlockOS 1.2.3: the source code"* ]]
-  [[ "$output" == *"https://github.com/IronFlock/flockos at the tag"*"v1.2.3"* ]]
+  [[ "$output" == *"https://github.com/IronFlock/ironflockos at the tag"*"v1.2.3"* ]]
   [[ "$output" == *$'\nacl\t2.3.2-2\thttps://instance-registry.ironflock.com/dl/flockos/sources/debian/acl/acl_2.3.2-2.dsc\n'* ]]
   [[ "$output" == *$'linux\t1:6.18.60-1+rpt1\thttps://instance-registry.ironflock.com/dl/flockos/sources/raspberrypi/linux/linux_6.18.60-1+rpt1.dsc'* ]]
   [[ "$output" == *$'docker-ce\t5:29.9.3-1~debian.13~trixie\t-\tApache-2.0'* ]]

@@ -11,7 +11,7 @@ a runner, a laptop or in this repository.
 | Root CA certificate | [`pki/flockos-root-ca.pem`](../pki/), 20 years | every release image as `/etc/rauc/keyring.pem` |
 | Bundle signer key | Cloud KMS `record-1283/europe-west1/flockos-rauc/bundle-signer`, HSM, RSA 4096 PKCS#1 SHA-256 | release runs of `release.yml`, through PKCS#11 |
 | Bundle signer certificate | `pki/flockos-bundle-signer-<year>.pem`, 3 years, code signing only | embedded in every release bundle |
-| Release identity | service account `flockos-release@record-1283` | only `release.yml` on a push to `main` or a `v*` tag of IronFlock/flockos (workload identity attribute `release=<repo id>:release`, the mapping device-init's signer uses) |
+| Release identity | service account `flockos-release@record-1283` | only `release.yml` on a push to `main` or a `v*` tag of IronFlock/ironflockos (workload identity attribute `release=<repo id>:release`, the mapping device-init's signer uses) |
 
 RSA 4096 with SHA-256 rather than EC P-384: RAUC signs SHA-256 digests, and a
 Cloud KMS key accepts only the digest of its own algorithm. HSM protection:
