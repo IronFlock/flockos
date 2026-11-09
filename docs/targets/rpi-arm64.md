@@ -24,7 +24,7 @@ firmware has neither (master plan, section 3.2).
 
 `boot-a` holds what `raspi-firmware`'s hooks put into `/boot/firmware` while
 the image is built (firmware, both kernels, both initramfs images, the device
-trees and overlays), plus FlockOS's `config.txt` and `cmdline.txt`
+trees and overlays), plus IronFlockOS's `config.txt` and `cmdline.txt`
 (`targets/rpi-arm64/boot`). `cmdline.txt` mounts slot A by PARTUUID and names
 it for RAUC (`rauc.slot=A`). In the root filesystem `/boot/firmware` is an
 empty directory.
@@ -75,7 +75,7 @@ Bootlin's "Safe updates using RAUC on Raspberry Pi 5". The differences:
 - Only the running slot can be marked good. `set-state` of the primary to bad
   hands the next boot to the other slot only when that slot runs or is known
   good.
-- Boot partition numbers are FlockOS's fixed layout (2 is A, 3 is B), not looked
+- Boot partition numbers are IronFlockOS's fixed layout (2 is A, 3 is B), not looked
   up in `system.conf`.
 - `cmdline.txt` is rewritten by the post-install handler. Bootlin prefers
   `[boot_partition=N]` filters in `config.txt`, which need an EEPROM from

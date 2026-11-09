@@ -7,7 +7,7 @@
 # to the console and the journal; the unit does not fail, so the system
 # state and the device-agent's health gate stay as they are.
 [Unit]
-Description=FlockOS: the NVIDIA driver cannot load under Secure Boot
+Description=IronFlockOS: the NVIDIA driver cannot load under Secure Boot
 Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md
 ConditionSecurity=uefi-secureboot
 ConditionPathExists=!/sys/module/nvidia
@@ -16,4 +16,4 @@ ConditionPathExists=!/sys/module/nvidia
 Type=oneshot
 StandardOutput=journal+console
 SyslogLevel=warning
-ExecStart=/usr/bin/echo "FlockOS: Secure Boot is on, and this machine does not trust the NVIDIA driver's kernel modules: the GPU cannot be used. Turn Secure Boot off in the firmware setup to use it."
+ExecStart=/usr/bin/echo "IronFlockOS: Secure Boot is on, and this machine does not trust the NVIDIA driver's kernel modules: the GPU cannot be used. Turn Secure Boot off in the firmware setup to use it."

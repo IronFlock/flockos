@@ -22,7 +22,7 @@ Alternatives considered:
 
 ## Decision
 
-All FlockOS images are built from Debian stable (Ubuntu 22.04 where Jetson Linux
+All IronFlockOS images are built from Debian stable (Ubuntu 22.04 where Jetson Linux
 requires it) with one headless pipeline. The image reuses `ironflock-init` for host
 setup at build time (`bake`) and first boot (`enroll`). Buildroot and Cubic are removed.
 
@@ -34,7 +34,7 @@ in [ADR-0004](0004-raw-image-plus-installer-usb.md).
 
 - Image size grows from about 400 MB (Buildroot) to roughly 1.5 to 2 GB per slot;
   acceptable for 16 GB media and above.
-- Security updates for the base come from Debian; they reach devices as new FlockOS
+- Security updates for the base come from Debian; they reach devices as new IronFlockOS
   releases, never as in-place apt upgrades.
 - 32-bit ARM boards are dropped.
 - Build time per image falls to 10 to 20 minutes, which makes PR-time boot tests

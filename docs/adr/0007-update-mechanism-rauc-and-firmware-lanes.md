@@ -5,8 +5,8 @@ Status: accepted, 2026-11-04.
 ## Context
 
 Before Phase 1 fixes the update stack, the question was raised whether RAUC is the
-right mechanism for FlockOS, whether SWUpdate would be a better fit, and how firmware
-for hardware components is handled. What matters for FlockOS:
+right mechanism for IronFlockOS, whether SWUpdate would be a better fit, and how firmware
+for hardware components is handled. What matters for IronFlockOS:
 
 - IronFlock already owns the fleet-management channel (the device-agent). The device
   side needs an installer with a clean local API, not an updater that brings a server.

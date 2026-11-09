@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publishing a FlockOS release (docs/release.md; WP-2.6), from release.yml.
+# Publishing an IronFlockOS release (docs/release.md; WP-2.6), from release.yml.
 #   publish.sh sums    DIR           the release's SHA256SUMS, to stdout
 #   publish.sh stage   DIR VERSION   DIR's images, bundles, SBOMs and checksums
 #                                    to the staging tree STAGING/<version>/

@@ -34,7 +34,7 @@ func release(t *testing.T, version, buildID string, ids ...string) string {
 			base := strings.TrimSuffix(id, "-installer") + "-base"
 			must(t, os.WriteFile(filepath.Join(d, name+".payloads"), []byte(base+"\n"), 0o644))
 		}
-		osr := "NAME=\"FlockOS\"\nID=flockos\nIMAGE_ID=" + id + "\nIMAGE_VERSION=" + version + "\nBUILD_ID=" + buildID + "\n"
+		osr := "NAME=\"IronFlockOS\"\nID=flockos\nIMAGE_ID=" + id + "\nIMAGE_VERSION=" + version + "\nBUILD_ID=" + buildID + "\n"
 		must(t, os.WriteFile(filepath.Join(d, name+".os-release"), []byte(osr), 0o644))
 	}
 	return dir

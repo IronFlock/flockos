@@ -1,4 +1,4 @@
-# FlockOS mounts (master plan, section 3.2). The root slot is mounted by the
+# IronFlockOS mounts (master plan, section 3.2). The root slot is mounted by the
 # kernel (root=PARTUUID=… from GRUB). Partition names are GPT names.
 PARTLABEL=FLOCKOS  /boot/efi  vfat  umask=0077,shortname=winnt  0  2
 # /data is created by systemd-repart on the first boot.

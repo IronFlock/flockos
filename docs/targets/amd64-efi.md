@@ -13,7 +13,7 @@ UEFI x86 edge PCs and industrial PCs (master plan, sections 3.2 and 3.7).
 | Disk | GPT: `FLOCKOS` (ESP, 256 MiB), `rootfs-a`; `rootfs-b` and `data` made on the first boot |
 | Watchdog | systemd uses a hardware watchdog when the board has one (60 s) |
 | Firmware updates | fwupd (lane 3); board UEFI only where the vendor publishes capsules (section 3.10) |
-| GPU (`nvidia`) | NVIDIA driver from the CUDA repository with the open kernel modules: Turing (RTX 20, T4) and newer; older GPUs need the proprietary modules, which FlockOS does not ship. Containers get the GPU through the `nvidia` runtime (`docker run --gpus all`) or CDI. Needs Secure Boot off (see below) |
+| GPU (`nvidia`) | NVIDIA driver from the CUDA repository with the open kernel modules: Turing (RTX 20, T4) and newer; older GPUs need the proprietary modules, which IronFlockOS does not ship. Containers get the GPU through the `nvidia` runtime (`docker run --gpus all`) or CDI. Needs Secure Boot off (see below) |
 
 ## Tested hardware
 
@@ -27,7 +27,7 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 
 - Boot from USB: the image boots from the removable-media path, so no boot entry
   is needed; on boards that hide USB boot, enable it in the firmware setup.
-- Secure Boot (ADR-0011): leave it as the machine came. FlockOS boots with
+- Secure Boot (ADR-0011): leave it as the machine came. IronFlockOS boots with
   Microsoft's keys, as Windows and Debian do; `mokutil --sb-state` shows the
   state (on `-rt` images, whose kernel turns EFI runtime services off,
   `cat /sys/kernel/security/lockdown`: `[integrity]` with Secure Boot on).
@@ -41,7 +41,7 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
     use the GPU.
 - Disks flashed with a release before ADR-0011 have an unsigned boot loader and
   keep it through updates: they need Secure Boot off, or a new flash.
-- Some IPC firmware enables a hardware watchdog in setup; FlockOS feeds it from
+- Some IPC firmware enables a hardware watchdog in setup; IronFlockOS feeds it from
   systemd once booted.
 - `nvidia` on a GPU host (WP-4.2): `nvidia-smi` on the host and
   `docker run --rm --gpus all nvidia/cuda:<version>-base-ubuntu24.04 nvidia-smi`
@@ -51,7 +51,7 @@ Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 
 For sealed IPCs that cannot boot a USB-flashed system disk. The stick carries
 every amd64-efi image: `base`, `base-rt` and `nvidia`. In FlockFlasher choose
-the hardware, the FlockOS variant, and "Installer stick" as the way to
+the hardware, the IronFlockOS variant, and "Installer stick" as the way to
 install: it writes the stick, the `.flock` and an `installer.conf` that names
 the variant (`payload=<image id>`) to its FLOCKOS partition. Boot the IPC from
 the stick (8 GB or larger: the image is 5.3 GiB). Example for an NVIDIA box
@@ -85,7 +85,7 @@ tuning.
 ## Compute Engine
 
 Every release makes Compute Engine images of `base` and `nvidia` for the
-virtual-device-manager's FlockOS VMs, in the image families
+virtual-device-manager's IronFlockOS VMs, in the image families
 `flockos-amd64-efi-base` and `flockos-amd64-efi-nvidia` of `record-1283`
 ([ADR-0010](../adr/0010-flockos-images-for-virtual-devices.md)). They are the
 release images as published: GCE's serial port 1 is `ttyS0`, the disk is

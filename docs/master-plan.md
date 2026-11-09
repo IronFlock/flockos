@@ -1,11 +1,11 @@
-# FlockOS master plan
+# IronFlockOS master plan
 
 Status: draft v1.1, 2026-11-04 (v1.1 adds firmware updates and the real-time kernel option). Owner: Marko Petzold. Scope: this repository and the
 cross-repo changes it needs in device-init, device-agent, flasher, workflows and
 the GCP project.
 ****
 This document is the plan of record for turning the ReswarmOS repository into the
-FlockOS image pipeline. The evidence behind every "today" statement is in
+IronFlockOS image pipeline. The evidence behind every "today" statement is in
 [current-state-audit.md](current-state-audit.md). The decisions that shape the plan
 are recorded as ADRs in [adr/](adr/).
 
@@ -19,7 +19,7 @@ are recorded as ADRs in [adr/](adr/).
 | G2 | Support **Raspberry Pi** (64-bit models), **generic AMD/ARM edge PCs**, **NVIDIA GPU in containers** on x86, and **Jetson Orin** | Each target boots, enrolls into IronFlock, runs a GPU container where applicable |
 | G3 | **RAUC A/B updates** triggered by the device-agent, including kernel updates and automatic rollback | A device updates from release N to N+1 over the platform and falls back to N when N+1 fails to boot |
 | G4 | **Reuse device-init** instead of duplicating host setup; ship in the image what device-init would install anyway | The image contains no setup logic of its own beyond calling `ironflock-init`; first boot works offline |
-| G5 | Images are **installable by FlockFlasher** | FlockFlasher lists FlockOS images from the signed catalog, flashes them, and injects the `.flock` file; PCs get an installer USB that writes the image to any internal disk |
+| G5 | Images are **installable by FlockFlasher** | FlockFlasher lists IronFlockOS images from the signed catalog, flashes them, and injects the `.flock` file; PCs get an installer USB that writes the image to any internal disk |
 | G6 | **CI and security harness** like every other IronFlock repo; all building happens in GitHub Actions | `ci.yml`, `security.yml`, `release.yml` call `IronFlock/workflows@v1`; `main` is protected by `ci-ok` and `security / report`; release artefacts are signed and carry SBOM and provenance |
 | G7 | **Firmware updates** for the hardware the OS runs on are delivered and tracked through the same system | Boot firmware an OS release depends on ships inside the RAUC bundle; component firmware is inventoried and updatable from the platform through fwupd (section 3.10) |
 | G8 | **Real-time kernel option** (PREEMPT_RT) per target | Every target offers a `-rt` image with a documented latency figure and tuning profile; `-rt` images update through the same RAUC path (section 3.11) |
@@ -28,7 +28,7 @@ are recorded as ADRs in [adr/](adr/).
 
 - 32-bit ARM boards (Raspberry Pi 1, 2, Zero W, 3 in 32-bit mode). device-init stages
   the agent for amd64 and arm64 only; the Pi 3 and Zero 2 W are served in 64-bit mode.
-- In-place migration of existing ReswarmOS 0.5.x or 0.0.7 devices to FlockOS. They have a
+- In-place migration of existing ReswarmOS 0.5.x or 0.0.7 devices to IronFlockOS. They have a
   different partition layout and architecture; they are reflashed.
 - Jetson Nano, TX2, Xavier (JetPack 4/5, EOL kernels). Orin and newer only.
 - A desktop or GUI session on the device.
@@ -51,7 +51,7 @@ that disables fallback, and the OS-side update poller the device-agent depends o
 deleted from this repo in October 2026. The device setup tool (`reswarmify`) was
 extracted to `IronFlock/device-init` and is current; the image does not use it. A
 private `IronFlock/flockos` repo contains a second, abandoned Buildroot attempt with a
-committed RAUC private key. There is no CI, no branch protection, and "FlockOS" appears
+committed RAUC private key. There is no CI, no branch protection, and "IronFlockOS" appears
 nowhere in the code.
 
 The surrounding repos are in good shape and define the contracts the new image must meet:
@@ -72,7 +72,7 @@ The surrounding repos are in good shape and define the contracts the new image m
 
 ### 3.1 Product definition
 
-FlockOS is a Debian-based, image-based, A/B-updated appliance OS whose only job is to
+IronFlockOS is a Debian-based, image-based, A/B-updated appliance OS whose only job is to
 run the IronFlock device-agent and Docker. One version number covers all images of a
 release. See [ADR-0001](adr/0001-debian-based-image-for-all-targets.md).
 
@@ -111,10 +111,10 @@ target×variant image built from the same commit.
 **`/etc/os-release` contract** (what the agent, device-init and the platform read):
 
 ```
-NAME="FlockOS"
+NAME="IronFlockOS"
 ID=flockos
 ID_LIKE=debian
-PRETTY_NAME="FlockOS 1.0.0 (amd64-efi, base)"
+PRETTY_NAME="IronFlockOS 1.0.0 (amd64-efi, base)"
 VERSION_ID="1.0.0"
 IMAGE_ID=flockos-amd64-efi-base
 IMAGE_VERSION=1.0.0
@@ -271,7 +271,7 @@ password.
 |--------|-----|
 | `bake` subcommand, chroot-safe (`--yes`, no `systemctl start`, no `/dev/tty`) | build-time preinstall |
 | `enroll` subcommand, idempotent, `--hostname-from-flock`, `--shred-source` | first boot and re-enroll after slot switch |
-| detect distro via `/etc/os-release` `ID`/`ID_LIKE` instead of the first word of `/etc/issue`; `flockos` maps to apt | `/etc/issue` detection is fragile and FlockOS is not "Debian" by name |
+| detect distro via `/etc/os-release` `ID`/`ID_LIKE` instead of the first word of `/etc/issue`; `flockos` maps to apt | `/etc/issue` detection is fragile and IronFlockOS is not "Debian" by name |
 | skip the agent download when the baked binary already matches the manifest; tolerate being offline at enroll time | first boot offline |
 | record `docker: preinstalled` in `installed.json` so `remove` leaves image Docker alone | correctness of `ironflock-init remove` |
 | e2e target `flockos-amd64` next to `vdm-amd64`, `ubuntu-24.04`, `debian-13` | device-init keeps proving it works on the image |
@@ -316,7 +316,7 @@ two files), persistent download location with sha256 check, honest error returns
 `flockos` layout in `layout.go` (`/data`-based paths). The `updatesig` package and KMS
 signing recipes are reused for the manifest.
 
-**PKI.** See [ADR-0006](adr/0006-rauc-pki-in-cloud-kms.md). A FlockOS root CA
+**PKI.** See [ADR-0006](adr/0006-rauc-pki-in-cloud-kms.md). An IronFlockOS root CA
 (20 years) signs a bundle-signing certificate (3 years, rotated) whose private key lives
 only in Cloud KMS (`ironflock-release/flockos-rauc-signer`). CI signs through RAUC's
 PKCS#11 support (`RAUC_PKCS11_MODULE=libkmsp11.so`, `--key 'pkcs11:...'`) with
@@ -330,7 +330,7 @@ bundles and vice versa. The two expired 2021/2025 certificates and the key commi
 ### 3.6 Delivery: FlockFlasher and the installer USB
 
 Decision: every artefact FlockFlasher handles is a raw `.img.gz`; PCs are installed from a
-FlockOS installer USB that is itself a raw image. See
+IronFlockOS installer USB that is itself a raw image. See
 [ADR-0004](adr/0004-raw-image-plus-installer-usb.md). This removes the ISO repack path
 and its isolinux assumption from the flasher.
 
@@ -341,7 +341,7 @@ sha256, size, update, version`, plus `image_id`, `variant` and `kernel`), inside
 envelope ([`manifest.schema.json`](manifest.schema.json), ADR-0009). The legacy file
 `dl/reswarmos/supportedBoardsImages.json` is left frozen for old flasher versions.
 
-**Installer USB** (`installer` variant). Boots the same FlockOS base, starts
+**Installer USB** (`installer` variant). Boots the same IronFlockOS base, starts
 `flockos-installer` instead of the agent, and:
 
 1. reads `installer.conf` and `*.flock` from the `FLOCKOS` partition of the USB stick
@@ -368,7 +368,7 @@ grows `data`, `flockos-enroll` enrolls. The installer supports choosing `base` o
 | write the `.flock` file to the partition labelled `FLOCKOS` (fallback: first FAT mount) and make the Windows mount path work | robust config injection |
 | drop the ISO repack path or keep it behind a legacy flag | installer is a raw image now |
 | accept `.img.xz` in addition to `.gz` via etcher-sdk | smaller downloads |
-| rename ReswarmOS strings to FlockOS; keep `.reswarm` association | branding |
+| rename ReswarmOS strings to IronFlockOS; keep `.reswarm` association | branding |
 
 ### 3.7 Hardware enablement
 
@@ -690,7 +690,7 @@ the RT kernel is verified on the chosen JetPack release.
 Licence: Jetson Linux is under the NVIDIA Driver License Agreement. It allows
 redistributing NVIDIA's binaries unchanged for use with an open source kernel, with
 the Agreement given to every recipient. The
-[licence review](jetson-licence-review.md) sets how FlockOS ships Jetson images:
+[licence review](jetson-licence-review.md) sets how IronFlockOS ships Jetson images:
 
 - NVIDIA's packages stay unchanged in the image, and the Agreement goes next to every
   Jetson file.
@@ -726,12 +726,12 @@ Acceptance: an arm64 VM boots the image and enrolls; all docs reviewed.
 | **device-init** | `bake`, `enroll`, os-release detection, offline tolerance, `docker: preinstalled`, e2e target on the image | 2 |
 | **device-agent** | manifest-based OS updates, persistent download + sha256, honest errors, `perform_os_update`, post-connect `mark-good`, slot status in device info, `flockos` layout, tolerant os-release parsing | 2 |
 | **device-agent** | firmware inventory, available updates, install and history over fwupd's D-Bus API; boot-firmware versions (EEPROM, UEFI, QSPI) in device info | 2 |
-| **flasher** | signed `dl/flockos/manifest.json`, variant choice, `FLOCKOS` label targeting, Windows mount path, drop ISO repack, `.img.xz`, FlockOS branding | 2 (installer: 3) |
+| **flasher** | signed `dl/flockos/manifest.json`, variant choice, `FLOCKOS` label targeting, Windows mount path, drop ISO repack, `.img.xz`, IronFlockOS branding | 2 (installer: 3) |
 | **GCP** | KMS keys `flockos-rauc-ca` (one-shot) and `flockos-rauc-signer`, WIF SA `flockos-release@record-1283`, bucket prefixes `flockos/` and `staging/flockos/`, `gs://reswarmos` read-only, `gs://reswarmos-certs` emptied | 0 to 2 |
 | **platform (studio/backend)** | show OS image id/version and slot status, "reflash required" for legacy images, OS update action wired to `perform_os_update` | 2 |
 | **platform (studio/backend)** | firmware inventory and update actions with maintenance windows and staged roll-outs; real-time CPU set as a device setting; `-rt` image choice in FlockFlasher and the platform | 2, 4b |
 | **ironflock-templates** | a "real-time" app profile (`SYS_NICE`, `rtprio` ulimit, cpuset) | 4b |
-| **website/docs** | FlockOS install guides per target, replacing the Reswarm docs linked from the old catalog | 2, 5, 6 |
+| **website/docs** | IronFlockOS install guides per target, replacing the Reswarm docs linked from the old catalog | 2, 5, 6 |
 
 ## 6. First two weeks (concrete next steps)
 
@@ -744,7 +744,7 @@ Acceptance: an arm64 VM boots the image and enrolls; all docs reviewed.
    in the same PR that adds the `just` skeleton and the three workflow callers (they
    cannot lint the old trees anyway).
 4. Open the `shell-gate.yml` PR in `IronFlock/workflows`.
-5. Create the KMS keys and the FlockOS root CA certificate; document the PKCS#11 signing
+5. Create the KMS keys and the IronFlockOS root CA certificate; document the PKCS#11 signing
    recipe in `docs/signing.md`; prove `rauc bundle --key 'pkcs11:...'` from a workflow.
 6. Start Phase 1 with `targets/amd64-efi` and the QEMU test harness; the first PR that
    boots in QEMU is the milestone.
@@ -770,7 +770,7 @@ Acceptance: an arm64 VM boots the image and enrolls; all docs reviewed.
 Open questions to settle before Phase 2 (1, 2, 4 and 5 settled 2026-11-05 in
 [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmware.md)):
 
-1. Should `enroll` set the hostname from the `.flock` `name` by default on FlockOS (the
+1. Should `enroll` set the hostname from the `.flock` `name` by default on IronFlockOS (the
    legacy image did) while device-init on third-party OSes leaves it alone?
    **Settled:** yes, by default; `hostname-from-flock=no` in `enroll.conf` keeps it.
 2. Is there a platform-side notion of OS release channels (production/test) that the

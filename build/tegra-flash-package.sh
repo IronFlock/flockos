@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The flash package of a jetson-orin image for an Orin on NVMe (WP-6.2 dry
-# run, WP-6.4): NVIDIA's l4t_initrd_flash.sh --no-flash with FlockOS's
+# run, WP-6.4): NVIDIA's l4t_initrd_flash.sh --no-flash with IronFlockOS's
 # partition layout and slot images, on the flashing host (x86_64 Ubuntu with
 # the BSP's prerequisites, tools/l4t_flash_prerequisites.sh). No Jetson is
 # needed: the board is named by its IDs (offline mode).
@@ -144,7 +144,7 @@ slot_bytes=$(size_bytes "$SLOT_SIZE_BASE")
     --external-device nvme0n1 -c "$layout" -S "$slot_bytes" \
     --external-only "$board" external
 )
-# --- what the package holds: FlockOS's layout -------------------------------
+# --- what the package holds: IronFlockOS's layout -------------------------------
 # flash.idx lists each partition: "<n>, <dev>:<name>, <start>, <size>, <file>,
 # <file size>, <fixed|expand>-<reserved>-<gpt entry>, <sha1>".
 idx=$kf/images/external/flash.idx

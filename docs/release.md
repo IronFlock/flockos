@@ -1,6 +1,6 @@
-# Releasing FlockOS
+# Releasing IronFlockOS
 
-A FlockOS release is the merge of a release pull request (`just release-patch`,
+An IronFlockOS release is the merge of a release pull request (`just release-patch`,
 `just release-minor`, `just release-major`: a `VERSION` bump with the title
 `release flockos v<version>`). Its push to `main` runs `release.yml`, which
 builds every image, signs the bundles, tests the release image, publishes the
@@ -12,27 +12,27 @@ or published from a laptop.
 | Job | What it does | Identity |
 |-----|--------------|----------|
 | `verify` | Decides what the run is: a release, a re-run after the tag, or a dry run (harness `release.sh mode`) | none |
-| `build` | Every image as a release build (`build.yml`, `signing: release`): the images trust the FlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM | none |
+| `build` | Every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM | none |
 | `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)) | `flockos-release` |
 | `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code; `stage` waits for it | the harness workflow (Sigstore) |
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
 | `stage` | The signed files and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
 | `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |
 | `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `flockos/release-notes.json`. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
-| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates FlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
+| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates IronFlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
 | `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `flockos-release`, `flockos-publisher` |
 
-The workload identity pool gives the two FlockOS identities only to a push of
+The workload identity pool gives the two IronFlockOS identities only to a push of
 `release.yml` on `main` and to runs on `v*` tags. `flockos-publisher` can write
-the two FlockOS trees of the download bucket and make Compute Engine images named
+the two IronFlockOS trees of the download bucket and make Compute Engine images named
 `flockos-*`, and nothing else.
 
 **The VM images.** An image is `flockos-<target>-<variant>-v<x-y-z>` in
 `record-1283`, stored in `eu`, in the family `flockos-<target>-<variant>`. The
 family serves the newest release, the test channel's. Its disk is the smallest
-the FlockOS layout fits (10 GiB for base, 18 GiB for nvidia), so a product's
+the IronFlockOS layout fits (10 GiB for base, 18 GiB for nvidia), so a product's
 `minDiskSize_GB` must be at least that. The tarball Compute Engine reads goes to
 `staging/flockos/<version>/gce/` and is removed once the image exists. A re-run
 keeps an image made from the same file.
@@ -102,7 +102,7 @@ file of the release's commit as `flockos/release-notes.json`
 the catalog names the release. Moving production does not publish them.
 
 When production moves to a release that has notes, the cloud emails it, with
-its notes, to the members of every project with a device that runs FlockOS,
+its notes, to the members of every project with a device that runs IronFlockOS,
 unless they switched off the System emails in their profile. A release
 without notes sends no email; the next one with notes carries the notes
 since the last email.

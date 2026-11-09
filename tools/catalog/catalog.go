@@ -341,7 +341,7 @@ func merge(prev *Catalog, version, channel string, rel Release, boards []BoardDe
 				update = img.Bundle.URL
 			}
 			board.LatestImages = append(board.LatestImages, ImageInfo{
-				BuildTime: prod.BuildTime, Download: img.Image.URL, File: lastSegment(img.Image.URL), OSName: "FlockOS",
+				BuildTime: prod.BuildTime, Download: img.Image.URL, File: lastSegment(img.Image.URL), OSName: "IronFlockOS",
 				OSVariant: "image", SHA256: img.Image.SHA256, Size: img.Image.Size, Update: update,
 				Version: prodVersion, ImageID: id, Variant: img.Variant, Kernel: img.Kernel, Payloads: img.Payloads,
 			})

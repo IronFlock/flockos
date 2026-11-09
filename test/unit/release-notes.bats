@@ -37,7 +37,7 @@ check() {
 }
 
 @test "a level-1 heading, text before the first section, no section" {
-  [ "$(check 0.14.0.md '# FlockOS 0.14.0\n\n## New\n\n- A.\n')" = '0.14.0.md:1: no level-1 heading (the emails name the version)' ]
+  [ "$(check 0.14.0.md '# IronFlockOS 0.14.0\n\n## New\n\n- A.\n')" = '0.14.0.md:1: no level-1 heading (the emails name the version)' ]
   [ "$(check 0.14.1.md 'Intro.\n\n## New\n\n- A.\n')" = '0.14.1.md:1: text before the first section' ]
   [ "$(check 0.14.2.md '\n')" = '0.14.2.md: no section (Security, New, Fixed, Changed)' ]
 }

@@ -1,6 +1,6 @@
 package main
 
-// The two certificate profiles of the FlockOS RAUC PKI (ADR-0006,
+// The two certificate profiles of the IronFlockOS RAUC PKI (ADR-0006,
 // docs/signing.md): a root CA that only issues signer certificates, and a
 // bundle signer that RAUC accepts with `check-purpose=codesign`.
 

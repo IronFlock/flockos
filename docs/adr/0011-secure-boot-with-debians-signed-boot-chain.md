@@ -5,12 +5,12 @@ Status: accepted, 2026-11-06.
 ## Context
 
 Most x86 PCs and industrial PCs ship with UEFI Secure Boot on and Microsoft's keys
-enrolled. FlockOS 1.x booted a GRUB it built itself (`grub-mkimage`), which nobody
+enrolled. IronFlockOS 1.x booted a GRUB it built itself (`grub-mkimage`), which nobody
 signed, so such a machine refused the disk until someone turned Secure Boot off in
 the firmware setup. That is the first thing a user meets, and on a sealed IPC or in a
 remote site it is the hardest.
 
-The goal here is convenience: a FlockOS disk or installer stick boots on a machine as
+The goal here is convenience: an IronFlockOS disk or installer stick boots on a machine as
 it comes from the factory. It is not tamper resistance; that needs IronFlock's own
 keys, signed unified kernel images, a verified root and TPM-sealed data (master plan,
 section 8), and stays later hardening.
@@ -26,7 +26,7 @@ signed boot chain:
   successor, so it boots on firmware that has either.
 - **shim → GRUB.** Debian's `grub-efi-<arch>-signed` as `EFI/BOOT/grub<arch>.efi`,
   which shim checks against Debian's certificate. Its modules are built in. It reads
-  `grub.cfg` next to itself first (`$fw_path`, a patch Debian carries), so FlockOS's A/B
+  `grub.cfg` next to itself first (`$fw_path`, a patch Debian carries), so IronFlockOS's A/B
   script in `/EFI/BOOT` runs as before; a GRUB without that patch reads its prefix,
   `/EFI/debian/grub.cfg`, which sources the same script. `${prefix}` stays
   `/EFI/debian` either way, so the script sets it to `/EFI/BOOT` before it loads
@@ -72,7 +72,7 @@ The same chain boots with Secure Boot off, without the checks.
 - **The boot chain is the one of the installation.** Nothing updates the FLOCKOS
   partition in the field yet. If a machine's firmware later revokes that shim or GRUB
   (a `dbx` update, or a newer shim's SBAT level, for example from another system booted
-  on it), FlockOS stops booting with Secure Boot on until it is turned off or the disk
+  on it), IronFlockOS stops booting with Secure Boot on until it is turned off or the disk
   is installed again. An update path for the FLOCKOS partition is follow-up work.
 - **shim writes its variables.** Like on every Debian system, shim keeps its MOK and
   SBAT state in UEFI variables (`MokListRT`, `SbatLevel`).

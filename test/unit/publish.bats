@@ -132,7 +132,7 @@ needs() {
   [[ "$(needs assets)" == *tag* ]]
 }
 
-@test "release.yml: only release runs authenticate, and only as the two FlockOS identities" {
+@test "release.yml: only release runs authenticate, and only as the two IronFlockOS identities" {
   run grep -E 'service_account:' "$repo/.github/workflows/release.yml"
   [ "$status" -eq 0 ]
   ! echo "$output" | grep -v -E 'flockos-(release|publisher)@record-1283\.iam\.gserviceaccount\.com'

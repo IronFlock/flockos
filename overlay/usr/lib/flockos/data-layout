@@ -1,5 +1,5 @@
 #!/bin/sh
-# Create the directories of /data that FlockOS bind-mounts or uses
+# Create the directories of /data that IronFlockOS bind-mounts or uses
 # (master plan, section 3.2). Idempotent; runs on every boot before the bind
 # mounts of /etc/fstab.
 set -eu

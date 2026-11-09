@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The Compute Engine image of one FlockOS image of a release (ADR-0010,
+# The Compute Engine image of one IronFlockOS image of a release (ADR-0010,
 # docs/release.md), from release.yml: a boot image of the
-# virtual-device-manager's FlockOS VMs.
+# virtual-device-manager's IronFlockOS VMs.
 #
 #   gce-image.sh DIR VERSION [SUMS]
 #
@@ -9,7 +9,7 @@
 # <image> one of GCE_IMAGES in build/release.conf); SUMS is the release's
 # SHA256SUMS, which the image must match, so the VM image is made from the
 # published file. It writes the image as the disk.raw of a Compute Engine
-# tarball, sparse and grown to the smallest disk the FlockOS layout fits,
+# tarball, sparse and grown to the smallest disk the IronFlockOS layout fits,
 # puts the tarball into the staging tree (STAGING/<version>/gce/), makes the
 # image flockos-<image>-v<version> in the family flockos-<image> from it, and
 # removes the tarball. An image of that name that exists already is kept when
@@ -69,7 +69,7 @@ tag=${version//./-}
 name=flockos-$image-v$tag
 family=flockos-$image
 gcs=$BUCKET/staging/flockos/$version/gce/$name.tar.gz
-description="FlockOS $version $target $variant for virtual devices: $DL_BASE/flockos/$version/$file sha256 $sha"
+description="IronFlockOS $version $target $variant for virtual devices: $DL_BASE/flockos/$version/$file sha256 $sha"
 labels=flockos-version=$tag,flockos-target=$target,flockos-variant=$variant
 
 cloud() {

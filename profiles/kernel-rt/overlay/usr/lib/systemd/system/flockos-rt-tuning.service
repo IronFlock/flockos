@@ -1,5 +1,5 @@
 [Unit]
-Description=FlockOS: real-time tuning from /etc/flockos/rt.conf
+Description=IronFlockOS: real-time tuning from /etc/flockos/rt.conf
 Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
 After=local-fs.target boot-efi.mount flockos-data-layout.service
 Before=docker.service

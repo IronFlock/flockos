@@ -1,6 +1,6 @@
 # Security screening from the shared IronFlock CI harness: secrets (gitleaks),
 # semgrep, configuration, licences, the Go module of tools/rauc-pki
-# (govulncheck, SBOM), and the packages of every FlockOS image (the
+# (govulncheck, SBOM), and the packages of every IronFlockOS image (the
 # harness's rootfs-recipe input below; master plan, section 3.8; WP-1.8).
 #
 # Blocking since WP-0.6 (2026-11-06, after the report-only start the harness

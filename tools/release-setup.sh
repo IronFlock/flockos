@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup of FlockOS release publishing (WP-2.6, docs/release.md).
+# One-time setup of IronFlockOS release publishing (WP-2.6, docs/release.md).
 # Run by a project owner from a checkout of IronFlock/ironflockos on a branch,
 # after the RAUC ceremony (tools/rauc-pki/ceremony.sh); it writes the catalog
 # key's public key into pki/ for a pull request.
@@ -87,13 +87,13 @@ bind_ "$gcloud" kms keys add-iam-policy-binding "$KEY" --keyring "$RING" "${kms[
 echo "== the publisher"
 exists iam service-accounts describe "$publisher_email" --project "$PROJECT" ||
   do_ "$gcloud" iam service-accounts create "$PUBLISHER" --project "$PROJECT" \
-    --display-name "FlockOS publisher" --description "Publishes FlockOS releases from IronFlock/ironflockos release runs"
+    --display-name "IronFlockOS publisher" --description "Publishes IronFlockOS releases from IronFlock/ironflockos release runs"
 condition=$(mktemp)
 images_condition=$(mktemp)
 trap 'rm -f "$condition" "$images_condition"' EXIT
 cat >"$condition" <<CONDITION
 title: flockos trees
-description: the FlockOS staging and live trees only
+description: the IronFlockOS staging and live trees only
 expression: >-
   resource.name.startsWith("projects/_/buckets/$BUCKET/objects/staging/flockos/") ||
   resource.name.startsWith("projects/_/buckets/$BUCKET/objects/flockos/")
@@ -108,8 +108,8 @@ bind_ "$gcloud" iam service-accounts add-iam-policy-binding "$publisher_email" -
 echo "== the Compute Engine images of the releases (ADR-0010)"
 exists iam roles describe "$IMAGE_ROLE" --project "$PROJECT" ||
   do_ "$gcloud" iam roles create "$IMAGE_ROLE" --project "$PROJECT" --stage GA \
-    --title "FlockOS VM image publisher" \
-    --description "Makes the Compute Engine images of FlockOS releases; bound for flockos-* images only" \
+    --title "IronFlockOS VM image publisher" \
+    --description "Makes the Compute Engine images of IronFlockOS releases; bound for flockos-* images only" \
     --permissions compute.images.create,compute.images.get,compute.images.setLabels,compute.globalOperations.get
 cat >"$images_condition" <<CONDITION
 title: flockos images
@@ -137,7 +137,7 @@ if [ "$yes" = 1 ]; then
   echo "The device-agent trusts the catalog with this line in FLOCKOS_CATALOG_PUBLIC_KEYS"
   echo "(src/osupdate/catalog.go):"
   echo
-  echo "$raw # Cloud KMS $RING/$KEY version 1, FlockOS release catalog"
+  echo "$raw # Cloud KMS $RING/$KEY version 1, IronFlockOS release catalog"
 else
   echo "+ $gcloud kms keys versions get-public-key 1 --key $KEY --keyring $RING ${kms[*]} --output-file $PUB"
   echo

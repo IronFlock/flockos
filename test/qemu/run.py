@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Boot a built FlockOS image in QEMU and test it (docs/testing.md).
+"""Boot a built IronFlockOS image in QEMU and test it (docs/testing.md).
 
   run.py --target amd64-efi --variant base [--out out] [--work DIR]
          [--docker-image-tar FILE] [--secure-boot] [--keep]
@@ -730,7 +730,7 @@ def install_test(args, conf, arch, version, accel, boot_timeout, port):
         subprocess.run(["mcopy", "-n", "-o", "-i", f"{stick}@@{offset}", "::/flockos-installer.log", logfile], check=True)
         text = open(logfile, encoding="utf-8", errors="replace").read()
         print(text)
-        if "FlockOS is installed on /dev/nvme0n1" not in text:
+        if "IronFlockOS is installed on /dev/nvme0n1" not in text:
             raise TestFailure("the installer did not report an installation on /dev/nvme0n1")
         if f"image: {base_id}-{version}.img.zst" not in text:
             raise TestFailure(f"the installer did not write the payload installer.conf names ({base_id})")

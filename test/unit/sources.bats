@@ -82,7 +82,7 @@ plan() {
   plan >"$tmp/plan"
   run bash "$sources" index "$tmp/plan" 1.2.3
   [ "$status" -eq 0 ]
-  [[ "$output" == "# FlockOS 1.2.3: the source code"* ]]
+  [[ "$output" == "# IronFlockOS 1.2.3: the source code"* ]]
   [[ "$output" == *"https://github.com/IronFlock/ironflockos at the tag"*"v1.2.3"* ]]
   [[ "$output" == *$'\nacl\t2.3.2-2\thttps://instance-registry.ironflock.com/dl/flockos/sources/debian/acl/acl_2.3.2-2.dsc\n'* ]]
   [[ "$output" == *$'linux\t1:6.18.60-1+rpt1\thttps://instance-registry.ironflock.com/dl/flockos/sources/raspberrypi/linux/linux_6.18.60-1+rpt1.dsc'* ]]
@@ -175,7 +175,7 @@ fileplan() {
   grep -q 'cp /usr/share/doc/nvidia-kernel-open-dkms/copyright "$doc/copyright"' "$repo/build/nvidia-modules.sh"
 }
 
-@test "the image's copyright file: FlockOS's own files under Apache-2.0, and where SOURCES is" {
+@test "the image's copyright file: IronFlockOS's own files under Apache-2.0, and where SOURCES is" {
   # shellcheck source=build/lib.sh
   . "$repo/build/lib.sh"
   load_conf "$repo/build/release.conf"

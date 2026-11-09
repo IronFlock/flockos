@@ -1,14 +1,14 @@
 # ADR-0008: Jetson Orin on Jetson Linux r39.2.1 (JetPack 7.2.1), Ubuntu 24.04
 
 Status: accepted, 2026-11-05 (WP-6.1), on one condition: the licence review below passes
-before FlockOS publishes a Jetson image. The review was done on 2026-11-07; the legal
+before IronFlockOS publishes a Jetson image. The review was done on 2026-11-07; the legal
 sign-off is open (WP-6.8).
 
 ## Context
 
 The master plan (sections 3.7 and Phase 6) put `jetson-orin` on Jetson Linux r36.x
 (JetPack 6, Ubuntu 22.04). It asked to check at the start of Phase 6 whether JetPack 7
-had gained Orin support, and to prefer it if so: FlockOS's other targets run a Debian 13
+had gained Orin support, and to prefer it if so: IronFlockOS's other targets run a Debian 13
 userspace of the same generation as Ubuntu 24.04.
 
 What NVIDIA ships today (checked 2026-11-05):
@@ -24,7 +24,7 @@ What NVIDIA ships today (checked 2026-11-05):
 | Packages | apt: `repo.download.nvidia.com/jetson/{common,t234}` r36.x | apt: `repo.download.nvidia.com/jetson/{common,som}` r39.2, `nvidia-l4t-*` 39.2.1 |
 
 JetPack 7.0 and 7.1 (r38) were Thor-only; r39.2 is the first release for both Orin and
-Thor. Ubuntu 22.04's standard support ends in April 2027, during FlockOS 1.x.
+Thor. Ubuntu 22.04's standard support ends in April 2027, during IronFlockOS 1.x.
 
 Sources: NVIDIA's [Jetson Linux](https://developer.nvidia.com/embedded/jetson-linux) and
 [JetPack](https://developer.nvidia.com/embedded/jetpack) pages, the r39.2.1 download
@@ -34,8 +34,8 @@ index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
 ## Decision
 
 1. `jetson-orin` is built on **Jetson Linux r39.2.1** with an **Ubuntu 24.04** (noble)
-   userspace, pinned per FlockOS release (`L4T_VERSION` in the target).
-2. The root filesystem is built like every other FlockOS rootfs: mmdebstrap from the
+   userspace, pinned per IronFlockOS release (`L4T_VERSION` in the target).
+2. The root filesystem is built like every other IronFlockOS rootfs: mmdebstrap from the
    Ubuntu noble archive plus NVIDIA's apt repositories (`common` and `som`, suite
    `r39.2`), with the `nvidia-l4t-*` packages at the pinned version. Not the 2 GB sample
    root filesystem with `apply_binaries.sh`: the image then has a package manifest, the
@@ -53,7 +53,7 @@ index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
 - Devices on r36 QSPI firmware need their bootloader updated to r39 once: QSPI and
   rootfs L4T versions stay in lock-step (master plan, section 3.10). For the Orin Nano
   developer kit that is NVIDIA's documented QSPI update path; for NX and AGX modules it
-  is part of the initrd flash (WP-6.4). FlockOS never mixes generations.
+  is part of the initrd flash (WP-6.4). IronFlockOS never mixes generations.
 - The Jetson image's userspace is Ubuntu, not Debian. device-init supports Ubuntu
   (`ID_LIKE=debian`). Docker CE, RAUC and fwupd come from Ubuntu noble and Docker's
   noble repository. Ubuntu 24.04 has RAUC 1.11.3 against Debian 13's 1.13: it has
@@ -70,7 +70,7 @@ index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
 ## Condition and open points
 
 - Condition: a licence review of what the image redistributes, and a legal check of it,
-  before FlockOS publishes a Jetson image (the release of WP-6.6). Building and testing
+  before IronFlockOS publishes a Jetson image (the release of WP-6.6). Building and testing
   in CI do not wait for it. The review is done
   ([jetson-licence-review.md](../jetson-licence-review.md), 2026-11-07). The legal
   check is WP-6.8. What the review found:
@@ -84,9 +84,9 @@ index and `release_sha_hashes.txt`, the apt repository index, and OE4T's
   - As a result, the image and the bundle carry NVIDIA's packages unchanged, with their
     notices. The Agreement goes next to every Jetson file. NVIDIA's
     `public_sources.tbz2` is mirrored with each release. The QSPI capsule is NVIDIA's
-    own from `nvidia-l4t-bootloader` where NVIDIA ships one. FlockOS does not publish
+    own from `nvidia-l4t-bootloader` where NVIDIA ships one. IronFlockOS does not publish
     the flash package: a flash kit fetches the BSP from NVIDIA on the user's host.
-    FlockOS publishes images that NVIDIA's tools make from the BSP (the flash package,
+    IronFlockOS publishes images that NVIDIA's tools make from the BSP (the flash package,
     the SD image, generated capsules) only if legal accepts them as unmodified
     binaries. This changes decision 3: the BSP still provides the flash tools in CI and
     in the flash kit. Capsule generation is needed only for carrier boards that

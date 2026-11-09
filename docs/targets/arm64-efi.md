@@ -39,7 +39,7 @@ Raspberry Pi and Jetson Orin have their own targets.
 ## Compute Engine
 
 Every release makes a Compute Engine image of `base` for the
-virtual-device-manager's FlockOS VMs on C4A (Axion), in the image family
+virtual-device-manager's IronFlockOS VMs on C4A (Axion), in the image family
 `flockos-arm64-efi-base` of `record-1283`
 ([ADR-0010](../adr/0010-flockos-images-for-virtual-devices.md)). It is the
 release image as published: GCE's serial port 1 is `ttyAMA0`, the disk NVMe, the

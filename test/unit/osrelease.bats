@@ -26,7 +26,7 @@ osr="$BATS_TEST_DIRNAME/../../build/osrelease.sh"
   run bash "$osr" 1.0.0 rpi-arm64 base rt abcdef1 1793000000
   [ "$status" -eq 0 ]
   [[ "$output" == *"IMAGE_ID=flockos-rpi-arm64-base-rt"* ]]
-  [[ "$output" == *'PRETTY_NAME="FlockOS 1.0.0 (rpi-arm64, base, rt)"'* ]]
+  [[ "$output" == *'PRETTY_NAME="IronFlockOS 1.0.0 (rpi-arm64, base, rt)"'* ]]
 }
 
 @test "rejects malformed input" {

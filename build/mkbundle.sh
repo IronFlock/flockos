@@ -35,7 +35,7 @@ cat >"$content/manifest.raucm" <<MANIFEST
 compatible=$IMAGE_ID
 version=$FLOCKOS_VERSION
 build=$build_id
-description=FlockOS $FLOCKOS_VERSION ($TARGET, $VARIANT)
+description=IronFlockOS $FLOCKOS_VERSION ($TARGET, $VARIANT)
 
 [bundle]
 format=verity

@@ -1,6 +1,6 @@
-# FlockOS public keys
+# IronFlockOS public keys
 
-Public certificates of the FlockOS RAUC PKI (ADR-0006, [docs/signing.md](../docs/signing.md))
+Public certificates of the IronFlockOS RAUC PKI (ADR-0006, [docs/signing.md](../docs/signing.md))
 and the public key of the release catalog (ADR-0009, [docs/release.md](../docs/release.md)).
 The private keys never leave Cloud KMS.
 

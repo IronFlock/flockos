@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time setup of the FlockOS RAUC PKI in Cloud KMS (ADR-0006,
+# One-time setup of the IronFlockOS RAUC PKI in Cloud KMS (ADR-0006,
 # docs/signing.md). Run by a project owner from a checkout of IronFlock/ironflockos
 # on a branch; it writes the two certificates into pki/ for a pull request.
 #
@@ -84,7 +84,7 @@ exists kms keys describe "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" ||
 echo "== the release identity"
 exists iam service-accounts describe "$sa_email" --project "$PROJECT" ||
   do_ "$gcloud" iam service-accounts create "$SA" --project "$PROJECT" \
-    --display-name "FlockOS release" --description "Signs FlockOS RAUC bundles from IronFlock/ironflockos release runs"
+    --display-name "IronFlockOS release" --description "Signs IronFlockOS RAUC bundles from IronFlock/ironflockos release runs"
 # Sign and read the public key of bundle-signer; list the keys of its ring
 # (the PKCS#11 library enumerates the ring). Nothing on the CA ring.
 bind_ "$gcloud" kms keys add-iam-policy-binding "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" \

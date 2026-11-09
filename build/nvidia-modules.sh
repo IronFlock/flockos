@@ -71,7 +71,7 @@ Provides: nvidia-kernel-$modver
 Section: non-free/kernel
 Priority: optional
 Description: NVIDIA open GPU kernel modules $modver for Linux $kver
- Built by the FlockOS image build from nvidia-kernel-open-dkms $driver,
+ Built by the IronFlockOS image build from nvidia-kernel-open-dkms $driver,
  which it purges afterwards with DKMS, the kernel headers and the compiler.
 CONTROL
 cat >"$pkg/DEBIAN/postinst" <<POSTINST

@@ -1,6 +1,6 @@
-# FlockOS: instructions for coding assistants
+# IronFlockOS: instructions for coding assistants
 
-FlockOS is the IronFlock device operating system: Debian-based disk images with RAUC A/B
+IronFlockOS is the IronFlock device operating system: Debian-based disk images with RAUC A/B
 updates, built only in GitHub Actions. Read `docs/master-plan.md` before changing anything;
 the architecture decisions are in `docs/adr/`.
 

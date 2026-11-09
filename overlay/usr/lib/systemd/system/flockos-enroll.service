@@ -2,7 +2,7 @@
 # slot) and whenever a .flock lies on the FLOCKOS partition. No network
 # needed; NetworkManager must run for the WiFi profile.
 [Unit]
-Description=FlockOS: enroll the device from its .flock
+Description=IronFlockOS: enroll the device from its .flock
 Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
 After=docker.service NetworkManager.service boot-efi.mount local-fs.target
 Wants=NetworkManager.service

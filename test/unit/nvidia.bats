@@ -61,7 +61,7 @@ setup() {
   grep -qx 'ConditionSecurity=uefi-secureboot' "$unit"
   grep -qx 'ConditionPathExists=!/sys/module/nvidia' "$unit"
   grep -qx 'StandardOutput=journal+console' "$unit"
-  grep -q '^ExecStart=/usr/bin/echo "FlockOS: Secure Boot is on, .*Turn Secure Boot off in the firmware setup' "$unit"
+  grep -q '^ExecStart=/usr/bin/echo "IronFlockOS: Secure Boot is on, .*Turn Secure Boot off in the firmware setup' "$unit"
   # udev starts it; it is never enabled, and it never fails the boot.
   ! grep -q '^\[Install\]' "$unit"
   ! grep -q '^ExecStart=.*exit 1' "$unit"

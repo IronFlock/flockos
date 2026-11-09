@@ -53,10 +53,10 @@ afterwards, as NVIDIA's own image build does.
 
 ## Services
 
-FlockOS masks two of NVIDIA's boot-time services:
+IronFlockOS masks two of NVIDIA's boot-time services:
 
-- `nv-l4t-bootloader-config` updates the QSPI firmware by itself. FlockOS's lane 2 does that (WP-6.5).
-- `nv-rootfs-validation-config` marks the root slot good. FlockOS's health gate does that (WP-6.3).
+- `nv-l4t-bootloader-config` updates the QSPI firmware by itself. IronFlockOS's lane 2 does that (WP-6.5).
+- `nv-rootfs-validation-config` marks the root slot good. IronFlockOS's health gate does that (WP-6.3).
 
 The rest of `nvidia-l4t-init` stays enabled as NVIDIA presets it: GPU libraries,
 display modules, power model, fan control.
@@ -71,7 +71,7 @@ from `targets/jetson-orin/boot/extlinux.conf`. NVIDIA's initrd mounts the
 last `root=` on the command line (`/dev/…`, `PARTUUID=` or `UUID=`). Under
 rootfs A/B, NVIDIA's `flash.sh` gives each slot its own command line, with
 `root=PARTUUID=` of `APP` or `APP_b`, and L4TLauncher does not rewrite it.
-FlockOS does the same:
+IronFlockOS does the same:
 
 - The image's file names slot A: `root=PARTUUID=` of `APP`, derived from the
   image id (`uuid_for rootfs-a`, which the flash package gives `APP`), and
@@ -87,9 +87,9 @@ in `target.conf`, from `CMDLINE_ADD` of `p3701.conf.common` and
 
 ## Partition layout
 
-NVIDIA's flash tools partition and write a Jetson's disk; FlockOS does not
+NVIDIA's flash tools partition and write a Jetson's disk; IronFlockOS does not
 make a disk image for it. `build/tegra-layout.py` takes the BSP's
-`tools/kernel_flash/flash_l4t_t234_nvme_rootfs_ab.xml` and adds FlockOS's
+`tools/kernel_flash/flash_l4t_t234_nvme_rootfs_ab.xml` and adds IronFlockOS's
 `data` partition after `APP_b`. That partition grows to the end of the disk
 (allocation attribute `0x808`, as NVIDIA's single-slot layout grows `APP`) and
 is mounted at `/data` (`PARTLABEL=data`). NVIDIA's layout files are under

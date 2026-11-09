@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The source code of a FlockOS release (docs/release.md, "Source code").
+# The source code of an IronFlockOS release (docs/release.md, "Source code").
 #   sources.sh image               the source packages of an image, from the
 #                                  dpkg-query lines "<source:Package> TAB
 #                                  <source:Version> TAB <Built-Using>" on
@@ -194,7 +194,7 @@ index() {
   [ -s "$plan" ] || die "$plan is an empty plan"
   load_conf "$here/release.conf"
   cat <<HEADER
-# FlockOS $version: the source code of the software in its images.
+# IronFlockOS $version: the source code of the software in its images.
 #
 # An image is a collection of separate programs, each under its own licence,
 # which /usr/share/doc/<package>/copyright in the image names; the
@@ -204,7 +204,7 @@ index() {
 # with all its files. A source package with "-" as its URL has no source
 # here, for the reason after it: none of them is under a copyleft licence.
 #
-# FlockOS's own files are https://github.com/IronFlock/ironflockos at the tag
+# IronFlockOS's own files are https://github.com/IronFlock/ironflockos at the tag
 # v$version, under the Apache License 2.0.
 #
 # source	version	URL or -	reason

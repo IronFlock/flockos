@@ -1,5 +1,5 @@
 [Unit]
-Description=FlockOS: directories on /data
+Description=IronFlockOS: directories on /data
 Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
 DefaultDependencies=no
 Requires=data.mount

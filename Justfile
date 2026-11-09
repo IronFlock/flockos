@@ -1,4 +1,4 @@
-# FlockOS: the IronFlock device OS, built as disk images and RAUC bundles in
+# IronFlockOS: the IronFlock device OS, built as disk images and RAUC bundles in
 # CI (docs/master-plan.md, docs/build.md). The build runs in a Debian 13
 # container (build/builder.conf), so a local build with Docker produces the
 # same image as CI; CI stays the build of record.
@@ -139,7 +139,7 @@ release-major:
 # `## Changed`, in that order, each once, the empty ones left out (no heading
 # of its own: the emails name the version). Optional: the cloud emails a
 # release when production moves to it, with its notes, to the members of
-# every project with a FlockOS device (the System emails of the profile), and
+# every project with an IronFlockOS device (the System emails of the profile), and
 # only a release that has notes; the next email carries the notes since the
 # last one. Commit the file before `just release-patch`: the release
 # publishes the notes (build/publish.sh notes), moving production does not.

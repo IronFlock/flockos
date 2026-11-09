@@ -8,7 +8,7 @@
 #   rpi-tryboot set-state A|B good|bad
 #   rpi-tryboot get-current
 #
-# The FlockOS Pi disk has boot-a as partition 2 (slot A) and boot-b as
+# The IronFlockOS Pi disk has boot-a as partition 2 (slot A) and boot-b as
 # partition 3 (slot B). autoboot.txt on the FLOCKOS partition (/boot/efi)
 # chooses between them:
 #
@@ -58,14 +58,14 @@ slot_of() {
   case "$1" in
     2) echo A ;;
     3) echo B ;;
-    *) die "partition '$1' is not a FlockOS boot partition (2 or 3)" ;;
+    *) die "partition '$1' is not an IronFlockOS boot partition (2 or 3)" ;;
   esac
 }
 other_part() {
   case "$1" in
     2) echo 3 ;;
     3) echo 2 ;;
-    *) die "partition '$1' is not a FlockOS boot partition (2 or 3)" ;;
+    *) die "partition '$1' is not an IronFlockOS boot partition (2 or 3)" ;;
   esac
 }
 
