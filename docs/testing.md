@@ -93,6 +93,13 @@ Sequence:
 4. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
    and nobody marks it good (as when the agent cannot reach the platform after
    an update); the next boot falls back to B.
+5. **Crash without a connection.** With a proven system in slot B and a good one
+   in slot A, slot B stays up until it has marked itself good, and the kernel
+   is crashed on purpose (`/proc/sysrq-trigger`). The device restarts by itself
+   on slot B and the kernel's record of the crash is under `/data/pstore`,
+   except on an `-rt` image, which has no EFI runtime services to record it in.
+   A second crash right after that boot, before the slot has stayed up for two
+   minutes, counts as a failed try: the device comes up on slot A.
 
 **Install test** (`--variant installer`, the `install-test` job, for amd64-efi
 under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to

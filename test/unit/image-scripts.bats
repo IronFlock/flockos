@@ -10,7 +10,7 @@ teardown() { rm -rf "$tmp"; }
 @test "data-layout creates the /data tree with private network profiles" {
   FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
-  for d in ironflock home cache fwupd flockos rauc etc/ssh network/connections log/journal; do
+  for d in ironflock home cache fwupd pstore flockos rauc etc/ssh network/connections log/journal; do
     [ -d "$tmp/$d" ]
   done
   [ "$(stat -c %a "$tmp/network/connections")" = 700 ]
@@ -40,6 +40,58 @@ teardown() { rm -rf "$tmp"; }
 @test "fstab puts all of /var/log on /data" {
   grep -qE '^/data/log +/var/log +none +bind,x-systemd.requires=flockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
   ! grep -q '/var/log/journal' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+}
+
+# slot_proven BOOTED ENV...: slot-proven on a booted slot and a grubenv.
+slot_proven() {
+  mkdir -p "$tmp/bin"
+  printf '#!/bin/sh\nprintf "%%s\\n" %s\n' "$(printf "'%s' " "${@:2}")" >"$tmp/bin/grub-editenv"
+  chmod +x "$tmp/bin/grub-editenv"
+  printf 'root=PARTUUID=x rauc.slot=%s rw\n' "$1" >"$tmp/cmdline"
+  PATH="$tmp/bin:$PATH" FLOCKOS_GRUBENV=$tmp/grubenv FLOCKOS_PROC_CMDLINE=$tmp/cmdline \
+    FLOCKOS_SLOT_PROVEN=$tmp/flockos/slot-proven run sh "$lib/slot-proven"
+}
+
+@test "slot-proven: a booted slot marked good has proven itself" {
+  slot_proven B A_OK=1 A_TRY=1 B_OK=1 B_TRY=0
+  [ "$status" -eq 0 ]
+  [ -e "$tmp/flockos/slot-proven" ]
+}
+
+@test "slot-proven: a slot on trial has not, whatever the other slot's state" {
+  slot_proven B A_OK=1 A_TRY=0 B_OK=1 B_TRY=1
+  [ "$status" -eq 0 ]
+  [ ! -e "$tmp/flockos/slot-proven" ]
+}
+
+@test "slot-proven: a slot that is not good has not" {
+  slot_proven A A_OK=0 A_TRY=0 B_OK=1 B_TRY=0
+  [ "$status" -eq 0 ]
+  [ ! -e "$tmp/flockos/slot-proven" ]
+}
+
+@test "slot-proven: nothing without a booted slot on the command line" {
+  mkdir -p "$tmp/bin"
+  printf 'root=PARTUUID=x rw\n' >"$tmp/cmdline"
+  FLOCKOS_GRUBENV=$tmp/grubenv FLOCKOS_PROC_CMDLINE=$tmp/cmdline \
+    FLOCKOS_SLOT_PROVEN=$tmp/flockos/slot-proven run sh "$lib/slot-proven"
+  [ "$status" -eq 0 ]
+  [ ! -e "$tmp/flockos/slot-proven" ]
+}
+
+@test "fstab keeps kernel crash records on /data, so an update does not lose them" {
+  grep -qE '^/data/pstore +/var/lib/systemd/pstore +none +bind,x-systemd.requires=flockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+}
+
+@test "a failed kernel restarts by itself: an oops and a lockup count, on every target" {
+  repo="$BATS_TEST_DIRNAME/../.."
+  conf="$repo/overlay/etc/sysctl.d/60-flockos-crash-recovery.conf"
+  for key in kernel.panic_on_oops kernel.softlockup_panic kernel.hardlockup_panic; do
+    grep -qx "$key = 1" "$conf"
+  done
+  for boot in targets/amd64-efi/grub/grub.cfg targets/rpi-arm64/boot/cmdline.txt targets/jetson-orin/boot/extlinux.conf; do
+    grep -qE '(^|[[:space:]])panic=10([[:space:]]|$)' "$repo/$boot"
+  done
 }
 
 @test "data-layout is idempotent and keeps what is there" {

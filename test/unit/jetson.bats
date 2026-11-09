@@ -84,6 +84,7 @@ setup() {
   [[ "$append" == '${cbootargs} root=PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e rw rootwait rootfstype=ext4 '* ]]
   [[ " $append " == *" console=ttyTCU0,115200 "* ]] && [[ " $append " == *" rauc.slot=A "* ]]
   [[ " $append " == *" firmware_class.path=/etc/firmware "* ]]
+  [[ " $append " == *" panic=10 "* ]]
 }
 
 extlinux_tool="$repo/targets/jetson-orin/overlay/usr/lib/flockos/tegra-extlinux"

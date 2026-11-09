@@ -74,6 +74,7 @@ persistent paths from it (master plan, section 3.2):
 | `/var/log` | `/data/log` (the journal and every other log: logs never fill the fixed-size root slot) |
 | `/var/cache/flockos` | `/data/cache` (downloaded bundles) |
 | `/var/lib/fwupd` | `/data/fwupd` |
+| `/var/lib/systemd/pstore` | `/data/pstore` (what the kernel recorded about a crash, kept across updates) |
 
 SSH host keys are made on the first boot in `/data/etc/ssh` and `sshd` is
 pointed there. The machine-id is generated on the first boot in the slot; RAUC's
@@ -111,7 +112,13 @@ first slot in `ORDER` that is good and not yet tried, sets its `_TRY` flag in
 `grubenv`, and boots that slot's `/vmlinuz` with `root=PARTUUID=…` and
 `rauc.slot=A|B`. A slot that is never marked good is skipped on the next boot.
 The device-agent marks the booted slot good once it has reached the platform
-(device-agent 1.6.0); nothing in the image does it at boot. A device that never
+(device-agent 1.6.0); nothing in the image does it at boot for a new system.
+That first mark proves the slot: `flockos-slot-proven` leaves a file in the
+slot's own root filesystem, which an update replaces. A slot with that file is
+marked good again once it has stayed up for two minutes after reaching
+`multi-user.target` (`flockos-slot-keep.timer`), so a restart without a
+connection does not move the device to its other slot, and a slot that fails
+within those two minutes still falls back. A device that never
 reaches the platform keeps booting its good slot: when every slot has been
 tried, GRUB starts over with the first good one.
 

@@ -6,7 +6,7 @@ set -eu
 # FLOCKOS_DATA, FLOCKOS_VAR_LOG: for the unit tests only.
 d=${FLOCKOS_DATA:-/data}
 var_log=${FLOCKOS_VAR_LOG:-/var/log}
-mkdir -p "$d/ironflock" "$d/home" "$d/cache" "$d/fwupd" "$d/flockos" "$d/rauc" "$d/etc/ssh"
+mkdir -p "$d/ironflock" "$d/home" "$d/cache" "$d/fwupd" "$d/pstore" "$d/flockos" "$d/rauc" "$d/etc/ssh"
 mkdir -p "$d/network/connections"
 chmod 0700 "$d/network/connections"
 # journald writes here once the journal is flushed; same ownership and mode

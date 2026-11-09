@@ -1,0 +1,9 @@
+# RAUC writes grubenv when the device-agent marks the booted slot good.
+[Unit]
+Description=IronFlockOS: watch for the booted slot being marked good
+
+[Path]
+PathChanged=/boot/efi/EFI/BOOT/grubenv
+
+[Install]
+WantedBy=paths.target
