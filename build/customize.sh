@@ -153,7 +153,8 @@ esac
 
 # --- mount points of /etc/fstab --------------------------------------------
 mkdir -p "$ROOT/boot/efi" "$ROOT/data" "$ROOT/opt/ironflock" "$ROOT/var/cache/flockos" \
-  "$ROOT/var/lib/fwupd" "$ROOT/var/log/journal" "$ROOT/etc/NetworkManager/system-connections"
+  "$ROOT/var/lib/fwupd" "$ROOT/var/lib/systemd/pstore" "$ROOT/var/log/journal" \
+  "$ROOT/etc/NetworkManager/system-connections"
 chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
 
 # --- units -----------------------------------------------------------------
@@ -172,6 +173,11 @@ else
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
     flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
     NetworkManager.service systemd-timesyncd.service
+  # GRUB counts every boot as a try; the Pi's tryboot counts only the first
+  # boot of an update, and Jetson has a backend of its own.
+  if [ "$BOOTLOADER" = grub-efi ]; then
+    systemctl --root="$ROOT" enable flockos-slot-proven.path flockos-slot-keep.timer
+  fi
   # The device's own enroll settings live on /data, so they outlive updates.
   mkdir -p "$ROOT/etc/flockos"
   ln -sfn /data/flockos/enroll.conf "$ROOT/etc/flockos/enroll.conf"

@@ -1,0 +1,13 @@
+# GRUB counts every boot nobody marked good as a failed try. A slot that has
+# proven itself is marked good again once it has stayed up for two minutes, so
+# a restart without a connection does not move the device to its other slot. A
+# slot that fails within those two minutes still falls back.
+[Unit]
+Description=IronFlockOS: keep a proven slot once it has stayed up
+After=multi-user.target
+
+[Timer]
+OnActiveSec=2min
+
+[Install]
+WantedBy=timers.target

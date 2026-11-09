@@ -20,7 +20,9 @@ state, partitions grown, /data layout, identity, SSH policy, RAUC slot A good,
 Docker, fwupd); for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
 (state persists); update into slot B with the bundle of the same build;
-fallback: an update into slot A that is never marked good falls back to B.
+fallback: an update into slot A that is never marked good falls back to B;
+a kernel crash without a connection: the device restarts by itself on a slot
+that has proven itself, and the crash is on record on /data.
 
 Needs: qemu-system-<arch>, OVMF/AAVMF firmware (for --secure-boot the
 builds with Microsoft's keys: Debian's and Ubuntu's ovmf, qemu-efi-aarch64),
@@ -498,6 +500,7 @@ class Runner:
             raise TestFailure(f"/data was not grown to the disk: {sizes['data']} bytes")
         for path, source in (("/data", None), ("/opt/ironflock", "/data/ironflock"), ("/home", "/data/home"),
                              ("/var/log", "/data/log"), ("/var/lib/fwupd", "/data/fwupd"),
+                             ("/var/lib/systemd/pstore", "/data/pstore"),
                              ("/etc/NetworkManager/system-connections", "/data/network/connections"),
                              ("/boot/efi", None)):
             out = self.vm.run(f"findmnt -no SOURCE,FSROOT {path}", check=False).strip()
@@ -652,6 +655,7 @@ class Runner:
         if self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip() != self.host_key:
             raise TestFailure("the SSH host key changed with the update")
         self.mark_good("B", "rootfs.1")
+        self.wait_for("test -e /var/lib/flockos/slot-proven", 60, "slot B to remember it was marked good")
 
     def _slots(self):
         out = {}
@@ -674,11 +678,57 @@ class Runner:
         env = self.vm.run("grub-editenv /boot/efi/EFI/BOOT/grubenv list")
         if "A_TRY=1" not in env:
             raise TestFailure(f"slot A is not marked as tried:\n{env}")
+        # Slot A was proven before; the update replaced that system.
+        self.vm.run("test ! -e /var/lib/flockos/slot-proven")
         self.vm.reboot(self.boot_timeout)
         self.wait_running()
         if self.booted() != "B":
             raise TestFailure(f"booted {self.booted()}: an untested slot A must fall back to B")
         self.vm.run("rauc status mark-good")
+
+    def wait_for(self, command, timeout, what):
+        deadline = time.time() + timeout
+        while self.vm.run(f"{command}; echo rc=$?").strip().splitlines()[-1] != "rc=0":
+            if time.time() > deadline:
+                raise TestFailure(f"timed out after {timeout}s waiting for {what}")
+            time.sleep(3)
+
+    def crash(self):
+        self.vm.run("sync")
+        starts = self.vm.kernel_starts()
+        self.vm._send("echo c > /proc/sysrq-trigger\r")
+        self.vm.wait_shell(self.boot_timeout, starts)
+        self.wait_running()
+
+    def crash_offline(self):
+        """A kernel crash on a device without a connection, with a proven
+        system in slot B and a good one in slot A. Nothing but the image marks
+        a slot good here: the test .flock's agent never reaches a platform.
+
+        A slot that has stayed up keeps running after the crash; a crash
+        sooner than that counts as a failed try."""
+        self.vm.run("rauc status mark-active booted && rauc status mark-good other")
+        self.vm.reboot(self.boot_timeout)
+        self.wait_running()
+        if self.booted() != "B":
+            raise TestFailure(f"booted {self.booted()} before the crash, expected B")
+        for key, want in (("kernel.panic", "10"), ("kernel.panic_on_oops", "1"), ("kernel.softlockup_panic", "1")):
+            got = self.vm.run(f"sysctl -n {key}").strip()
+            if got != want:
+                raise TestFailure(f"{key} is {got!r}, expected {want}")
+        tried = "grub-editenv /boot/efi/EFI/BOOT/grubenv list | grep -qx B_TRY=1"
+        self.vm.run(tried)
+        self.wait_for(f"! {{ {tried}; }}", 300, "the proven slot B to be marked good again")
+        self.crash()
+        if self.booted() != "B":
+            raise TestFailure(f"booted {self.booted()} after a crash on a proven slot, expected B")
+        # PREEMPT_RT kernels turn EFI runtime services off: nowhere to record.
+        if "PREEMPT_RT" not in self.vm.run("uname -v"):
+            self.vm.run("find /data/pstore -type f -name 'dmesg*' | grep -q .")
+        self.vm.run(tried)
+        self.crash()
+        if self.booted() != "A":
+            raise TestFailure(f"booted {self.booted()} after a crash soon after boot, expected the fallback to A")
 
 
 def installer_conf(payload_id):
@@ -844,6 +894,7 @@ def main():
             runner.step("update into slot B", runner.update_to_b)
             if args.only != "update":
                 runner.step("fallback: an untested slot A falls back to B", runner.fallback)
+                runner.step("crash: restarts by itself on a proven slot, on record on /data", runner.crash_offline)
         ok = True
     except TestFailure:
         ok = False
