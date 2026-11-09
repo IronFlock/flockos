@@ -43,7 +43,7 @@ WP-6.5). What remains elsewhere is acceptance on real devices, starting with the
 | M2 | QEMU A/B update and fallback pass on every pull request; KMS-signed bundle from a workflow | 1 | 2026-11-06 (`v0.10.0`, the first bundles signed in Cloud KMS) |
 | M3 | `v1.0.0`: flashed from FlockFlasher, online in IronFlock, updated from the platform with rollback verified | 2 | |
 | M4 | Sealed IPC installed unattended from the installer USB | 3 | |
-| M5 | `nvidia-smi` in a container on a IronFlockOS GPU host | 4 | |
+| M5 | `nvidia-smi` in a container on an IronFlockOS GPU host | 4 | |
 | M6 | `-rt` image passes the one-hour latency acceptance on an IPC | 4b | |
 | M7 | Pi 4 and Pi 5 enroll and update with rollback from a FlockFlasher image | 5 | |
 | M8 | Orin Nano enrolls and runs a CUDA container; Orin NX updates with rollback | 6 | |
@@ -73,7 +73,7 @@ decision), in progress.
 | 1.9 | Hardware acceptance on an x86 IPC; target and testing docs | flockos, hardware | 2 | 1.5 | open: needs an x86 IPC |
 | 2.0 | Decisions before Phase 2 (hostname, channels, first firmware lane) | all | 0.5 | | done (ADR-0009) |
 | 2.1 | `ironflock-init bake` | device-init | 2 | 2.0 | done (device-init 1.4.9) |
-| 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e, for which a IronFlockOS VM (X.2) can be the test machine |
+| 2.2 | `ironflock-init enroll`, os-release detection, offline tolerance | device-init | 3 | 2.1 | done in device-init 1.4.9; open: the `flockos-amd64` target in device-init's e2e, for which an IronFlockOS VM (X.2) can be the test machine |
 | 2.3 | Image provisioning: bake at build, enroll at first boot, agent preinstalled | flockos | 2 | 1.5, 2.1, 2.2 | done (#159) |
 | 2.4 | OS update client in the device-agent | device-agent | 5 | 2.0 | done (device-agent #202 in 1.6.0, the catalog key in 1.6.1); the images' only health gate since flockos-mark-good went; open: the acceptance, an update N to N+1 by RPC on an image with one rollback, possible once a second release is published |
 | 2.5 | Firmware RPCs in the device-agent (fwupd D-Bus) | device-agent | 3 | 1.7 | done in device-agent #201 (read-only, ADR-0009); open: the acceptance, the inventory RPC on an image |
@@ -81,7 +81,7 @@ decision), in progress.
 | 2.7 | FlockFlasher: signed catalog, variants, `FLOCKOS` targeting | flasher | 4 | 2.6 (manifest shape agreed in 2.0) | done in FlockFlasher v3.0.0 (flasher #25, 2026-11-06); open: the acceptance, a flash from Windows, macOS and Linux that enrolls |
 | 2.8 | Platform: OS version, slot status, OS update action | platform | 3 | 2.4 | done in Studio v4.0.48 (OS release, slots, "reflash required", the update with its progress) and backend v1.4.51 (`perform_os_update` at MAINTAIN); open: the acceptance, an update from the UI |
 | 2.9 | Platform: firmware inventory and update actions | platform | 3 | 2.5 | open: not started (the backend does not pass `get_firmware_inventory` yet) |
-| 2.10 | Phase 2 acceptance: `v1.0.0` end to end | all | 2 | 1.9, 2.6, 2.7, 2.8 | open: needs the x86 IPC of 1.9; a IronFlockOS VM (X.2) can rehearse everything but the flash |
+| 2.10 | Phase 2 acceptance: `v1.0.0` end to end | all | 2 | 1.9, 2.6, 2.7, 2.8 | open: needs the x86 IPC of 1.9; an IronFlockOS VM (X.2) can rehearse everything but the flash |
 | 3.1 | `flockos-installer` program | flockos | 4 | 1.5 | done (#156) |
 | 3.2 | `installer` variant image with embedded payload; QEMU install test | flockos | 3 | 3.1 | done (#156; one stick per target carrying every image of it, #186) |
 | 3.3 | Installer in FlockFlasher; hardware acceptance on a sealed IPC | flasher, hardware | 2 | 3.2, 2.7 | open: needs a sealed IPC (FlockFlasher v3.0.0 writes the stick with the chosen payload) |
@@ -462,7 +462,7 @@ Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmwar
 The master plan's Phase 2 acceptance, executed and recorded: flash from FlockFlasher,
 boot the IPC, online within two minutes, run an app, bump `VERSION`, merge, update from
 the platform, rollback verified once by sabotaging the new slot. Milestone M3. It needs
-the IPC of WP-1.9. A IronFlockOS VM (WP-X.2) can rehearse every step except the flash
+the IPC of WP-1.9. An IronFlockOS VM (WP-X.2) can rehearse every step except the flash
 before that.
 
 ## Phase 3: Installer USB

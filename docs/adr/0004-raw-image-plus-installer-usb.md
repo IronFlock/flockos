@@ -1,4 +1,4 @@
-# ADR-0004: Raw disk images everywhere, plus a IronFlockOS installer USB for PCs
+# ADR-0004: Raw disk images everywhere, plus an IronFlockOS installer USB for PCs
 
 Status: accepted, 2026-11-04.
 
@@ -21,7 +21,7 @@ Alternatives considered:
 
 ## Decision
 
-Every artefact is a raw disk image. For PCs there is an `installer` variant: a IronFlockOS
+Every artefact is a raw disk image. For PCs there is an `installer` variant: an IronFlockOS
 image whose boot runs `flockos-installer` instead of the agent. It carries the target
 image as a payload, picks the internal disk by rule or on the console, writes the
 payload, transfers the `.flock` file and `installer.conf`, registers the EFI boot entry

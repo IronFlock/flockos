@@ -60,7 +60,7 @@ from metadata keys: a second way in beside the one account from the `.flock`.
 
 ### 3. The `.flock` through the instance metadata, removed once the VM has it
 
-- The manager creates a IronFlockOS VM with its `.flock` as the instance attribute
+- The manager creates an IronFlockOS VM with its `.flock` as the instance attribute
   `flockos-flock`, and with `enable-guest-attributes=TRUE`.
 - On the first boot of a slot, `flockos-gce-flock.service` runs before
   `flockos-enroll.service`. It runs only where the firmware says

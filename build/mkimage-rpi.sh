@@ -49,7 +49,7 @@ cat >"$flockos_dir/README.txt" <<'TXT'
 IronFlockOS
 ===========
 
-This is the FLOCKOS partition of a IronFlockOS disk. FlockFlasher puts the
+This is the FLOCKOS partition of an IronFlockOS disk. FlockFlasher puts the
 device's .flock file here; on its first boot the device enrolls with it and
 removes it from this partition.
 

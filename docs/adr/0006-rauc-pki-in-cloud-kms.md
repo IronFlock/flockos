@@ -13,7 +13,7 @@ repos already sign releases with Cloud KMS through Workload Identity Federation.
 
 ## Decision
 
-- A IronFlockOS **root CA** (RSA 4096 or EC P-384, 20-year validity) is created once; its
+- An IronFlockOS **root CA** (RSA 4096 or EC P-384, 20-year validity) is created once; its
   key lives in Cloud KMS (`ironflock-release/flockos-rauc-ca`) and is used only to
   issue signer certificates.
 - A **bundle signer** certificate (3-year validity, rotated before expiry) is issued

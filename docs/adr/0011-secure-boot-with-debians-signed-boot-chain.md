@@ -10,7 +10,7 @@ signed, so such a machine refused the disk until someone turned Secure Boot off 
 the firmware setup. That is the first thing a user meets, and on a sealed IPC or in a
 remote site it is the hardest.
 
-The goal here is convenience: a IronFlockOS disk or installer stick boots on a machine as
+The goal here is convenience: an IronFlockOS disk or installer stick boots on a machine as
 it comes from the factory. It is not tamper resistance; that needs IronFlock's own
 keys, signed unified kernel images, a verified root and TPM-sealed data (master plan,
 section 8), and stays later hardening.

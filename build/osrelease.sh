@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Print /usr/lib/os-release of a IronFlockOS image (master plan, section 3.1).
+# Print /usr/lib/os-release of an IronFlockOS image (master plan, section 3.1).
 #   osrelease.sh VERSION TARGET VARIANT KERNEL COMMIT EPOCH
 # COMMIT is the git commit the image is built from, EPOCH its time
 # (SOURCE_DATE_EPOCH). VERSION keeps the legacy v<ver>-g<sha>-<buildtime>

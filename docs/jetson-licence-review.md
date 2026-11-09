@@ -154,7 +154,7 @@ written permission.
 | 4 | Does IronFlock accept the indemnity (2.11)? Do its customer terms pass the exclusion of Critical Applications (2.10) on for Jetson devices? | Customer terms change before the first Jetson release |
 | 5 | How are the Jetson images classified for export control (15)? NVIDIA's proprietary parts are not publicly available open source. Does the download server need restrictions for embargoed destinations? | Jetson files go behind the restriction the answer names |
 | 6 | Is the source mirror (point 3) enough for NVIDIA's GPL and LGPL parts? The same question applies to the Ubuntu and Debian packages of every IronFlockOS image | As legal sets |
-| 7 | Is a IronFlockOS-branded image built from Canonical's Ubuntu binaries fine under Canonical's IP policy? | A licence from Canonical, or a userspace IronFlockOS builds itself |
+| 7 | Is an IronFlockOS-branded image built from Canonical's Ubuntu binaries fine under Canonical's IP policy? | A licence from Canonical, or a userspace IronFlockOS builds itself |
 | 8 | The licence is revocable, and every Jetson device in the field depends on it. Does IronFlock accept that, or does it seek a written distribution agreement with NVIDIA, for example through NVIDIA's partner programme? | |
 
 ## Sources

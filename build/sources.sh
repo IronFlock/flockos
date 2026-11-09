@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The source code of a IronFlockOS release (docs/release.md, "Source code").
+# The source code of an IronFlockOS release (docs/release.md, "Source code").
 #   sources.sh image               the source packages of an image, from the
 #                                  dpkg-query lines "<source:Package> TAB
 #                                  <source:Version> TAB <Built-Using>" on

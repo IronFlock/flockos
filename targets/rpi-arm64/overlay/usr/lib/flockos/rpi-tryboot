@@ -58,14 +58,14 @@ slot_of() {
   case "$1" in
     2) echo A ;;
     3) echo B ;;
-    *) die "partition '$1' is not a IronFlockOS boot partition (2 or 3)" ;;
+    *) die "partition '$1' is not an IronFlockOS boot partition (2 or 3)" ;;
   esac
 }
 other_part() {
   case "$1" in
     2) echo 3 ;;
     3) echo 2 ;;
-    *) die "partition '$1' is not a IronFlockOS boot partition (2 or 3)" ;;
+    *) die "partition '$1' is not an IronFlockOS boot partition (2 or 3)" ;;
   esac
 }
 

@@ -139,7 +139,7 @@ release-major:
 # `## Changed`, in that order, each once, the empty ones left out (no heading
 # of its own: the emails name the version). Optional: the cloud emails a
 # release when production moves to it, with its notes, to the members of
-# every project with a IronFlockOS device (the System emails of the profile), and
+# every project with an IronFlockOS device (the System emails of the profile), and
 # only a release that has notes; the next email carries the notes since the
 # last one. Commit the file before `just release-patch`: the release
 # publishes the notes (build/publish.sh notes), moving production does not.

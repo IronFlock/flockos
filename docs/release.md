@@ -1,6 +1,6 @@
 # Releasing IronFlockOS
 
-A IronFlockOS release is the merge of a release pull request (`just release-patch`,
+An IronFlockOS release is the merge of a release pull request (`just release-patch`,
 `just release-minor`, `just release-major`: a `VERSION` bump with the title
 `release flockos v<version>`). Its push to `main` runs `release.yml`, which
 builds every image, signs the bundles, tests the release image, publishes the

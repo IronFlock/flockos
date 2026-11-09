@@ -316,7 +316,7 @@ two files), persistent download location with sha256 check, honest error returns
 `flockos` layout in `layout.go` (`/data`-based paths). The `updatesig` package and KMS
 signing recipes are reused for the manifest.
 
-**PKI.** See [ADR-0006](adr/0006-rauc-pki-in-cloud-kms.md). A IronFlockOS root CA
+**PKI.** See [ADR-0006](adr/0006-rauc-pki-in-cloud-kms.md). An IronFlockOS root CA
 (20 years) signs a bundle-signing certificate (3 years, rotated) whose private key lives
 only in Cloud KMS (`ironflock-release/flockos-rauc-signer`). CI signs through RAUC's
 PKCS#11 support (`RAUC_PKCS11_MODULE=libkmsp11.so`, `--key 'pkcs11:...'`) with
