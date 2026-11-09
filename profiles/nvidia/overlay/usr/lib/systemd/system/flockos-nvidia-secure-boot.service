@@ -8,7 +8,7 @@
 # state and the device-agent's health gate stay as they are.
 [Unit]
 Description=FlockOS: the NVIDIA driver cannot load under Secure Boot
-Documentation=https://github.com/IronFlock/flockos/blob/main/docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md
 ConditionSecurity=uefi-secureboot
 ConditionPathExists=!/sys/module/nvidia
 

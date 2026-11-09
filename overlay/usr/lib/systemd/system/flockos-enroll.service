@@ -3,7 +3,7 @@
 # needed; NetworkManager must run for the WiFi profile.
 [Unit]
 Description=FlockOS: enroll the device from its .flock
-Documentation=https://github.com/IronFlock/flockos/blob/main/docs/master-plan.md
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
 After=docker.service NetworkManager.service boot-efi.mount local-fs.target
 Wants=NetworkManager.service
 ConditionPathExists=|!/var/lib/flockos/enrolled

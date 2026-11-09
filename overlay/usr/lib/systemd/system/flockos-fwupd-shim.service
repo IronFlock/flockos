@@ -1,6 +1,6 @@
 [Unit]
 Description=FlockOS: shim where fwupd looks for it
-Documentation=https://github.com/IronFlock/flockos/blob/main/docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0011-secure-boot-with-debians-signed-boot-chain.md
 RequiresMountsFor=/boot/efi
 ConditionPathIsDirectory=/boot/efi/EFI/debian
 

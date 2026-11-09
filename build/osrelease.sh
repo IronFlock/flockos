@@ -43,6 +43,6 @@ VARIANT="$variant"
 VARIANT_ID=$variant
 BUILD_ID=${stamp}Z-g$short
 HOME_URL="https://www.ironflock.com"
-SUPPORT_URL="https://github.com/IronFlock/flockos"
-BUG_REPORT_URL="https://github.com/IronFlock/flockos/issues"
+SUPPORT_URL="https://github.com/IronFlock/ironflockos"
+BUG_REPORT_URL="https://github.com/IronFlock/ironflockos/issues"
 OSR
