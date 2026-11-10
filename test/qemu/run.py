@@ -666,7 +666,7 @@ class Runner:
         gateway, nic = route[2], route[4]
         mac = self.vm.run(f"cat /sys/class/net/{nic}/address").strip()
         address = self.vm.run(f"ip -o -4 addr show dev {nic} | awk '{{print $4; exit}}'").strip()
-        dns = self.vm.run(f"nmcli -g IP4.DNS device show {nic} | head -n 1").strip()
+        dns = self.vm.run(f"nmcli -g IP4.DNS device show {nic}").split("|")[0].strip()
         if not re.fullmatch(r"[0-9.]+/[0-9]+", address) or not dns:
             raise TestFailure(f"{nic} has no IPv4 address or DNS server to copy: {address!r}, {dns!r}")
         profile = (f"[connection]\nid={STATIC_PROFILE}\nuuid={uuid.uuid4()}\ntype=ethernet\n\n"

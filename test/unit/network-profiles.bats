@@ -18,7 +18,10 @@ setup() {
   src=$tmp/esp/network dest=$tmp/data/network/connections
 }
 
-teardown() { rm -rf "$tmp"; }
+teardown() {
+  chmod -R u+w "$tmp" 2>/dev/null || true
+  rm -rf "$tmp"
+}
 
 mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
@@ -226,6 +229,21 @@ refused() {
   [ -z "$(ls -A "$dest" | grep -v '^office.nmconnection$')" ]
   cmp "$dest/office.nmconnection" <(static office.nmconnection)
   [ ! -e "$src/office.nmconnection" ]
+}
+
+@test "a profile that cannot leave the FLOCKOS partition is taken all the same, again at the next boot; the unit fails" {
+  if [ "$(id -u)" = 0 ]; then skip "root ignores the folder modes this test relies on"; fi
+  static office.nmconnection >"$src/office.nmconnection"
+  chmod 555 "$src"
+  run bash "$script"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not remove office.nmconnection from the FLOCKOS partition: the next boot takes it again"* ]]
+  [ -e "$dest/office.nmconnection" ] && [ -e "$src/office.nmconnection" ]
+  chmod 755 "$src"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [ ! -e "$src" ]
+  cmp "$dest/office.nmconnection" <(static office.nmconnection)
 }
 
 @test "a missing profile folder on /data is made, readable by root only" {

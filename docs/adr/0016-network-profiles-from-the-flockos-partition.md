@@ -91,7 +91,9 @@ same boot when the `.flock` has a Wi-Fi network.
 The profile is written under `.flockos-profile-<name>.part` in the same folder, renamed to
 its name, and synced to `/data` before anything leaves the partition. A power loss before
 the rename leaves a part file, which the next run removes; after it, the file is still on
-the partition, and the next boot takes it again, with the same result.
+the partition, and the next boot takes it again, with the same result. So does a file the
+partition does not let go (read-only after an error): it is taken at every boot, and the
+unit fails until it can be removed.
 
 ### 6. The secret on FAT
 

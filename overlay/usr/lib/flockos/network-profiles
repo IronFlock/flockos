@@ -216,7 +216,10 @@ done
 # takes them again at the next boot.
 sync
 for f in ${taken[@]+"${taken[@]}"}; do
-  remove "$f"
+  if ! remove "$f"; then
+    say "could not remove $(basename -- "$f") from the FLOCKOS partition: the next boot takes it again" >&2
+    rc=1
+  fi
 done
 rmdir "$src" 2>/dev/null || true
 sync
