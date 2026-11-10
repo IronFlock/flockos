@@ -180,6 +180,14 @@ teardown() { rm -rf "$tmp"; }
   grep -q '^Before=chrony.service' "$units/flockos-ptp.service"
   grep -q 'ln -sfn /data/flockos/ptp.conf "$ROOT/etc/flockos/ptp.conf"' "$repo/build/customize.sh"
   grep -q 'chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service' "$repo/build/customize.sh"
+  # The first boot's presets keep that set, and nothing that takes chrony's place.
+  p=$repo/overlay/usr/lib/systemd/system-preset/10-flockos-time.preset
+  for u in chrony.service flockos-ptp.service flockos-ptp.path flockos-ptp4l.service flockos-phc2sys.service; do
+    grep -qx "enable $u" "$p"
+  done
+  for u in chronyd-restricted.service timemaster.service chrony-wait.service; do
+    grep -qx "disable $u" "$p"
+  done
 }
 
 @test "chrony replaces systemd-timesyncd in every image, with linuxptp for PTP" {

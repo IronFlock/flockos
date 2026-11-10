@@ -428,7 +428,8 @@ class Runner:
     def wait_running(self):
         state = self.vm.run("systemctl is-system-running --wait", timeout=self.boot_timeout, check=False).strip()
         if state != "running":
-            failed = self.vm.run("systemctl --failed --no-legend --plain --no-pager --full", check=False)
+            failed = self.vm.run("systemctl --failed --no-legend --plain --no-pager --full; "
+                                 "systemctl status --failed --no-pager -l -n 20", check=False)
             raise TestFailure(f"system state {state!r}; failed units:\n{failed}")
 
     def rauc_status(self):
@@ -567,7 +568,16 @@ class Runner:
         time stamps, so ptp4l cannot run PTP here: this checks the wiring,
         PTP itself is a hardware check."""
         for unit in ("chrony.service", "flockos-ptp.service", "flockos-ptp.path"):
-            self.vm.run(f"systemctl is-active {unit}")
+            state = self.vm.run(f"systemctl is-active {unit}", check=False).strip()
+            if state != "active":
+                info = self.vm.run(f"systemctl status --no-pager -l {unit}; "
+                                   f"journalctl -b --no-pager -u {unit} | tail -30; "
+                                   "systemctl list-units --no-pager --all 'chrony*' timemaster.service", check=False)
+                raise TestFailure(f"{unit} is {state}:\n{info}")
+        # The first boot's presets enabled nothing that takes chrony's place
+        # (10-flockos-time.preset).
+        for unit in ("chronyd-restricted.service", "timemaster.service", "chrony-wait.service"):
+            self.vm.run(f"! systemctl -q is-enabled {unit}")
         self.vm.run("test ! -e /usr/lib/systemd/system/systemd-timesyncd.service")
         self.vm.run("chronyc -n tracking")
         self.vm.run("test -L /etc/flockos/ptp.conf")
