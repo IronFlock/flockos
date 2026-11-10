@@ -132,6 +132,20 @@ enroll_env() {
   [ -s "$tmp/state/enrolled" ]
 }
 
+@test "enroll removes the other .flock files of the FLOCKOS partition once it has enrolled from one" {
+  enroll_env
+  echo old >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo new >"$tmp/esp/new.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --shred-source --hostname-from-flock" ]
+  # The one it used is ironflock-init's to shred; the other would enroll the
+  # device again at the next boot.
+  [ ! -e "$tmp/esp/old.flock" ] && [ -e "$tmp/esp/new.flock" ]
+  [[ "$output" == *"removed old.flock"* ]]
+}
+
 @test "enroll on a new slot uses the agent's own copy on /data" {
   enroll_env
   echo agent >"$tmp/agent/device-config.flock"

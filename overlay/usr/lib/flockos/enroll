@@ -5,7 +5,10 @@
 # update, which brings a slot without the SSH user and the agent's unit) and
 # whenever a new .flock lies on the FLOCKOS partition. The .flock is the newest
 # *.flock on the FLOCKOS partition, else the agent's own copy on /data. With
-# neither the device stays unenrolled, reachable on the console only.
+# neither the device stays unenrolled, reachable on the console only. Once it
+# has enrolled from the FLOCKOS partition, the other .flock files there go too:
+# each would enroll the device again at the next boot. While a factory reset
+# is pending or has begun (ADR-0015), a .flock there waits for it.
 # `ironflock-init enroll` needs no network: the agent comes from the image or
 # from /data.
 set -euo pipefail
@@ -19,10 +22,15 @@ init=${FLOCKOS_INIT:-/usr/sbin/ironflock-init}
 conf=${FLOCKOS_ENROLL_CONF:-/etc/flockos/enroll.conf}
 
 flock=""
-for f in "$esp"/*.flock; do
-  [ -f "$f" ] || continue
-  if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
-done
+if [ -e "$esp/factory-reset.conf" ] || [ -e "$esp/factory-reset.keep" ]; then
+  echo "enroll: a factory reset is pending: no .flock is taken from the FLOCKOS partition before it"
+  if [ -e "$state/enrolled" ]; then exit 0; fi
+else
+  for f in "$esp"/*.flock; do
+    [ -f "$f" ] || continue
+    if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
+  done
+fi
 if [ -z "$flock" ] && [ -f "$agent_dir/device-config.flock" ]; then
   flock=$agent_dir/device-config.flock
 fi
@@ -43,3 +51,10 @@ fi
 mkdir -p "$state"
 date -u +%Y-%m-%dT%H:%M:%SZ >"$state/enrolled"
 echo "enroll: this slot is enrolled from $(basename "$flock")"
+if [ "$flock" != "$agent_dir/device-config.flock" ]; then
+  for f in "$esp"/*.flock; do
+    [ -f "$f" ] && [ "$f" != "$flock" ] || continue
+    shred -u "$f" 2>/dev/null || rm -f "$f"
+    echo "enroll: removed $(basename "$f") from the FLOCKOS partition, which was not used"
+  done
+fi

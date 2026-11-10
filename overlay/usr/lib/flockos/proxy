@@ -118,7 +118,11 @@ put() {
 }
 
 rc=0
-if [ "${1:-}" != apply ] && [ -f "$esp/proxy.conf" ]; then
+# A factory reset that is pending or has begun (ADR-0015): the FLOCKOS
+# partition's proxy.conf and .flock are for the device after it, and wait.
+reset_pending=no
+if [ -e "$esp/factory-reset.conf" ] || [ -e "$esp/factory-reset.keep" ]; then reset_pending=yes; fi
+if [ "${1:-}" != apply ] && [ "$reset_pending" = no ] && [ -f "$esp/proxy.conf" ]; then
   if parse "$esp/proxy.conf"; then
     mkdir -p "$(dirname "$conf")"
     (umask 077 && cp "$esp/proxy.conf" "$conf.new")
@@ -131,6 +135,8 @@ if [ "${1:-}" != apply ] && [ -f "$esp/proxy.conf" ]; then
     echo "proxy: ignored the FLOCKOS partition's proxy.conf, which has an error; the device keeps its own" >&2
     rc=1
   fi
+elif [ "${1:-}" != apply ] && [ -f "$esp/proxy.conf" ]; then
+  echo "proxy: a factory reset is pending: the FLOCKOS partition's proxy.conf waits for it"
 fi
 
 http_proxy="" https_proxy="" no_proxy="" ntp=""
@@ -144,7 +150,7 @@ if [ -n "$http_proxy$https_proxy" ]; then
   # The .flock that enroll takes on this boot, else the agent's copy.
   flock=""
   for f in "$esp"/*.flock; do
-    [ -f "$f" ] || continue
+    if [ ! -f "$f" ] || [ "$reset_pending" = yes ]; then continue; fi
     if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
   done
   [ -n "$flock" ] || flock=$agent_flock
