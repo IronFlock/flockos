@@ -103,8 +103,8 @@ for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$work/root/usr/lib/systemd/system/systemd-timesyncd.service"
-check "a factory reset runs before /data is mounted (ADR-0015)" \
-  bash -c "grep -q '^PARTLABEL=data .*x-systemd.requires=flockos-factory-reset.service' '$work/root/etc/fstab' && test -x '$work/root/usr/lib/flockos/factory-reset' && test -f '$work/root/usr/lib/systemd/system/flockos-factory-reset.service'"
+check "a factory reset runs before /data is mounted, and no mount stops the boot (ADR-0015)" \
+  bash -c "test -x '$work/root/usr/lib/flockos/factory-reset' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/flockos-factory-reset.service' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/flockos-data-missing.service' && ! grep -v '^#' '$work/root/etc/fstab' | grep . | grep -v nofail"
 for setting in ptp.conf proxy.conf; do
   check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$work/root/etc/flockos/$setting')\" = /data/flockos/$setting ]"
 done

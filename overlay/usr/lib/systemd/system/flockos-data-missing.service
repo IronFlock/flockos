@@ -1,0 +1,22 @@
+# /data could not be mounted (no filesystem, a broken one, a disk that does
+# not answer, a factory reset that could not make one). /etc/fstab mounts it
+# and its folders with nofail, so the device still comes up, on the root
+# slot's own folders, and its agent can start and reach IronFlock from a
+# .flock on the FLOCKOS partition. This says so on the console and in
+# /run/flockos/data-missing, which enroll and flockos-proxy read. /data's mount
+# wants it (data.mount.wants/); no [Install], so no preset touches it.
+[Unit]
+Description=IronFlockOS: say that /data could not be mounted
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0015-factory-reset-requested-on-the-flockos-partition.md
+DefaultDependencies=no
+After=data.mount
+Before=local-fs.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathIsMountPoint=!/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/flockos/data-missing
+StandardOutput=journal+console
+StandardError=journal+console
