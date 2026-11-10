@@ -112,12 +112,21 @@ repart() {
   [ "$(min_disk_size "$tmp/repart.d" 4900016128)" = $((2 * mib + 64 * mib + 512 * mib + 8 * gib + gib)) ]
 }
 
-@test "min_disk_size: the raw size without repart.d (the installer), and never less than it" {
+@test "min_disk_size: the raw size for the installer (no repart.d given), and never less than it" {
   [ "$(min_disk_size "" 5638213632)" = 5638213632 ]
-  mkdir "$tmp/empty"
-  [ "$(min_disk_size "$tmp/empty" 5638213632)" = 5638213632 ]
   repart amd64-efi base
   [ "$(min_disk_size "$tmp/repart.d" 99999999999)" = 99999999999 ]
+}
+
+@test "min_disk_size: a device image whose repart.d is missing or empty stops the build" {
+  mkdir "$tmp/empty"
+  for dir in "$tmp/empty" "$tmp/missing"; do
+    run min_disk_size "$dir" 4564471808
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$dir has no repart.d definitions"* ]]
+    run write_sizes "$BATS_TEST_FILENAME" "$dir" "$tmp/x.sizes"
+    [ "$status" -ne 0 ]
+  done
 }
 
 @test "min_disk_size: one partition, /data, takes the rest of the disk" {
@@ -151,42 +160,46 @@ repart() {
   [ "$(cat "$tmp/y.sizes")" = "$(printf 'raw_size=3000\nmin_disk_size=3000')" ]
 }
 
-# kernel ROOT VERSION: a kernel's module lists as depmod writes them.
+# kernel ROOT VERSION: a kernel's module lists as the kernel package and
+# depmod leave them: modules.alias (depmod) and modules.builtin.modinfo
+# (NUL-separated <module>.<key>=<value> records, as the kernel installs it).
 kernel() {
   local d=$1/usr/lib/modules/$2
   mkdir -p "$d"
   printf '# Aliases extracted from modules themselves.\nalias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e\nalias virtio:d00000001v* virtio_net\n' >"$d/modules.alias"
-  printf '# Aliases extracted from modules themselves.\nalias pci:v*d*sv*sd*bc01sc08i02* nvme\n' >"$d/modules.builtin.alias"
+  printf 'nvme.license=GPL\0nvme.alias=pci:v*d*sv*sd*bc01sc08i02*\0ext4.alias=fs-ext4\0ext4.description=Fourth Extended Filesystem\0of_x.alias=of:N*T*Cbrcm,bcm2835-sdhost\0' >"$d/modules.builtin.modinfo"
 }
 
-@test "hardware_list: each kernel's module and built-in aliases, under a comment line" {
+@test "hardware_list: each kernel's module aliases, then its built-in ones from modules.builtin.modinfo, under a comment line" {
   kernel "$tmp/root" 6.12.48+deb13-amd64
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' '# kernel 6.12.48+deb13-amd64: modules.alias and modules.builtin.alias' \
+  [ "$output" = "$(printf '%s\n' '# kernel 6.12.48+deb13-amd64: modules.alias and the aliases of modules.builtin.modinfo' \
     'alias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e' 'alias virtio:d00000001v* virtio_net' \
-    'alias pci:v*d*sv*sd*bc01sc08i02* nvme')" ]
+    'alias pci:v*d*sv*sd*bc01sc08i02* nvme' 'alias fs-ext4 ext4' 'alias of:N*T*Cbrcm,bcm2835-sdhost of_x')" ]
   # The Raspberry Pi's two kernels.
   kernel "$tmp/root" 6.12.47+rpt-rpi-2712
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64 6.12.47+rpt-rpi-2712
   [ "$(grep -c '^# kernel ' <<<"$output")" = 2 ]
-  [ "$(grep -c '^alias ' <<<"$output")" = 6 ]
+  [ "$(grep -c '^alias ' <<<"$output")" = 10 ]
 }
 
-@test "hardware_list: a kernel without modules.alias stops the build; without built-in aliases it warns" {
+@test "hardware_list: a kernel without modules.alias or modules.builtin.modinfo stops the build" {
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -ne 0 ]
   [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.alias"* ]]
   kernel "$tmp/root" 6.12.48+deb13-amd64
-  rm "$tmp/root/usr/lib/modules/6.12.48+deb13-amd64/modules.builtin.alias"
+  rm "$tmp/root/usr/lib/modules/6.12.48+deb13-amd64/modules.builtin.modinfo"
+  # depmod writes the built-in aliases only as modules.builtin.alias.bin.
+  printf 'alias pci:v*d*sv*sd*bc01sc08i02* nvme\n' >"$tmp/root/usr/lib/modules/6.12.48+deb13-amd64/modules.builtin.alias"
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"warning: kernel 6.12.48+deb13-amd64 has no modules.builtin.alias"* ]]
-  [[ "$output" == *"alias virtio:d00000001v* virtio_net"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.builtin.modinfo"* ]]
 }
 
-@test "the build publishes each image's hardware list, gzip without a name or time" {
-  grep -qx 'hardware_list "$ROOT" "${kernel_versions\[@\]}" | gzip -9n >"$OUT/$NAME.modules.alias.gz"' \
+@test "the build publishes each disk image's hardware list, gzip without a name or time" {
+  grep -qx '  hardware_list "$ROOT" "${kernel_versions\[@\]}" | gzip -9n >"$OUT/$NAME.modules.alias.gz"' \
     "$BATS_TEST_DIRNAME/../../build/customize.sh"
+  grep -qx 'if \[ "$BOOTLOADER" != tegra \]; then' "$BATS_TEST_DIRNAME/../../build/customize.sh"
   grep -q "\-o -name '\*.modules.alias.gz'" "$BATS_TEST_DIRNAME/../../build/publish.sh"
 }

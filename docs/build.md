@@ -57,7 +57,7 @@ Artefacts land in `out/<image-id>/`:
 | `<image-id>-<version>.sources.tsv` | the source packages of the image, from which the release publishes their source ([release.md](release.md#source-code)) |
 | `<image-id>-<version>.os-release` | the image's `/etc/os-release` |
 | `<image-id>-<version>.sizes` | `raw_size=` and `min_disk_size=` of the image, in bytes, for the release catalog ([below](#the-smallest-disk)); not published itself |
-| `<image-id>-<version>.modules.alias.gz` | the hardware list: the `modules.alias` and `modules.builtin.alias` of the image's kernels, which `ironflock os install` matches a machine against ([release.md](release.md#what-ironflock-os-install-reads)) |
+| `<image-id>-<version>.modules.alias.gz` | the hardware list: the aliases of the drivers of the image's kernels, from `modules.alias` and `modules.builtin.modinfo`, which `ironflock os install` matches a machine against ([release.md](release.md#what-ironflock-os-install-reads)); not for Jetson, which has no disk image |
 | `SHA256SUMS` | checksums of the image and the bundle |
 
 ## Disk layout on a device

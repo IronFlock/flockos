@@ -111,18 +111,23 @@ with `min_disk_size` below `raw_size`.
 
 **The hardware list** tells which devices the image's kernels have a driver
 for. The build (`hardware_list` in `build/lib.sh`) takes each kernel's
-`modules.alias`, the drivers built as modules, and `modules.builtin.alias`, the
-drivers built into the kernel, which `modules.alias` leaves out. The file is
-gzip of text lines: `alias <pattern> <module>`, as depmod writes them, and
-before each kernel's lines a comment, `# kernel <version>: ...`. One kernel on
-the EFI targets; the Raspberry Pi image has two. A device has a driver when
-its modalias (`/sys/.../modalias`, such as `pci:v00008086d000015B8sv...`)
-matches a pattern by shell rules (`*`, `?`, `[...]`), as modprobe matches
-them. `os install` matches the disk controller and the network card. A match
-says nothing about a firmware file the driver may need. Every image has one,
-the installer too; it is in `SHA256SUMS`, and the signed catalog carries its
-hash. The SLSA provenance covers the images and bundles, not it, as it does
-not cover the SBOMs either.
+`modules.alias`, the drivers built as modules, and the drivers built into the
+kernel, which `modules.alias` leaves out: depmod writes those only into the
+binary `modules.builtin.alias.bin`, from the `<module>.alias=<pattern>`
+records of `modules.builtin.modinfo`, which the kernel package ships, and the
+build reads them from there. A kernel without either file stops the build.
+The file is gzip of text lines: `alias <pattern> <module>`, as depmod writes
+them, and before each kernel's lines a comment, `# kernel <version>: ...`.
+One kernel on the EFI targets; the Raspberry Pi image has two; Jetson, which
+has no disk image, has no list. A device has a driver when its modalias
+(`/sys/.../modalias`, such as `pci:v00008086d000015B8sv...`) matches a
+pattern by shell rules (`*`, `?`, `[...]`), as modprobe matches them, after
+it has turned `-` into `_` outside `[...]` in both. `os install` matches the
+disk controller and the network card. A match says nothing about a firmware
+file the driver may need. Every disk image has one, the installer too; it is
+in `SHA256SUMS`, and the signed catalog carries its hash. The SLSA provenance
+covers the images and bundles, not it, as it does not cover the SBOMs
+either.
 
 ## Release notes
 

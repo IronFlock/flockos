@@ -131,15 +131,18 @@ size_bytes() {
 # without (/data, which takes the rest of the disk) at 1 GiB, and 2 MiB for
 # the GPT: 1 MiB in front of the first partition (genimage's offset) and
 # 1 MiB at the end, for the backup GPT and the alignment. Never less than
-# RAW_SIZE. Without repart.d (the installer, which makes no partitions) it is
-# RAW_SIZE. build/gce-image.sh sizes the Compute Engine images by the same
-# sum (GCE_DATA_MIN of /data), rounded up to whole GiB.
+# RAW_SIZE. An empty REPART_DIR is the installer, which makes no partitions:
+# then it is RAW_SIZE. A REPART_DIR without definitions is an error: a device
+# image without them would claim a disk too small for slot B and /data.
+# build/gce-image.sh sizes the Compute Engine images by the same sum
+# (GCE_DATA_MIN of /data), rounded up to whole GiB.
 min_disk_size() {
   local dir=$1 raw=$2 f min total=$((2 * 1024 * 1024)) rest=0
-  if [ -z "$dir" ] || ! compgen -G "$dir/*.conf" >/dev/null; then
+  if [ -z "$dir" ]; then
     echo "$raw"
     return 0
   fi
+  compgen -G "$dir/*.conf" >/dev/null || die "$dir has no repart.d definitions: no smallest disk for the image"
   for f in "$dir"/*.conf; do
     min=$(sed -n 's/^SizeMinBytes=//p' "$f" | tail -n 1)
     if [ -n "$min" ]; then
@@ -158,23 +161,24 @@ min_disk_size() {
 # hardware_list ROOT KERNEL...: the devices the kernels of the tree ROOT have a
 # driver for, which `ironflock os install` matches a machine's disk controller
 # and network card against: the "alias <pattern> <module>" lines of each
-# kernel's modules.alias (drivers built as modules) and modules.builtin.alias
-# (drivers built into the kernel, which modules.alias leaves out), each
-# kernel's after a comment line. Fails when a kernel has no modules.alias.
+# kernel's modules.alias (drivers built as modules), then the same lines for
+# the drivers built into the kernel, which modules.alias leaves out, each
+# kernel's after a comment line. depmod puts the built-in ones only into the
+# binary modules.builtin.alias.bin; it reads them from modules.builtin.modinfo
+# ("<module>.alias=<pattern>" records, NUL-separated), which the kernel
+# package ships (Debian's and the Raspberry Pi's 6.12 kernels do), and so
+# does this. Fails when a kernel lacks either file.
 hardware_list() {
-  local root=$1 v dir f
+  local root=$1 v dir
   shift
   for v in "$@"; do
     dir=$root/usr/lib/modules/$v
     [ -s "$dir/modules.alias" ] || die "kernel $v has no modules.alias in ${dir#"$root"} (depmod)"
-    echo "# kernel $v: modules.alias and modules.builtin.alias"
-    for f in modules.alias modules.builtin.alias; do
-      if [ -f "$dir/$f" ]; then
-        grep '^alias ' "$dir/$f" || true
-      else
-        warn "kernel $v has no $f: its built-in drivers are not in the hardware list"
-      fi
-    done
+    [ -s "$dir/modules.builtin.modinfo" ] ||
+      die "kernel $v has no modules.builtin.modinfo in ${dir#"$root"}: no list of its built-in drivers"
+    echo "# kernel $v: modules.alias and the aliases of modules.builtin.modinfo"
+    grep '^alias ' "$dir/modules.alias" || true
+    tr '\0' '\n' <"$dir/modules.builtin.modinfo" | sed -n 's/^\([^.=]*\)\.alias=\(..*\)$/alias \2 \1/p'
   done
 }
 
