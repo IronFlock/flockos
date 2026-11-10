@@ -143,8 +143,13 @@ Every step can run again, and the request is removed last.
   same, keeping nothing of it, and the record says so. Such a device would not come up
   anyway.
 - **A FLOCKOS partition that cannot be written** stops the reset before it begins. If it
-  becomes read-only during the reset, the request cannot be removed and the next boot
-  resets again; `fsck.vfat` checks the partition at every boot.
+  becomes read-only during the reset, the request and `factory-reset.keep` cannot be
+  removed, and the next boot resets again from the same kept files. This is accepted: a
+  reset whose files are still there counts as begun, and one that has begun finishes.
+  Each such reset ends in a restart, so the device does not come up until the partition
+  can be written again; `fsck.vfat` checks and repairs it at every boot. Nothing outside
+  the FLOCKOS partition records that a reset is finished, so nothing ends the repeat on a
+  partition that stays read-only: such a device has to be flashed again.
 - **The same system goes on.** The other slot may hold an older IronFlockOS that knows no
   reset and would mount the half-cleared `/data`. On GRUB every boot counts as a try of
   its slot until it is marked good, so a power loss, or the reset's own restart, would
