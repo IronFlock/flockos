@@ -19,7 +19,9 @@
           "image": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.img.gz",
             "sha256": "0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a",
-            "size": 412345678
+            "size": 412345678,
+            "raw_size": 4564471808,
+            "min_disk_size": 9934209024
           },
           "bundle": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.raucb",
@@ -36,7 +38,9 @@
           "image": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-installer-1.0.0.img.gz",
             "sha256": "2d7a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f6e5d4c",
-            "size": 834567890
+            "size": 834567890,
+            "raw_size": 5638213632,
+            "min_disk_size": 5638213632
           },
           "payloads": [
             "flockos-amd64-efi-base",
@@ -51,7 +55,9 @@
           "image": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-nvidia-1.0.0.img.gz",
             "sha256": "5a0d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f",
-            "size": 702345678
+            "size": 702345678,
+            "raw_size": 8859439104,
+            "min_disk_size": 18524143616
           },
           "bundle": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-amd64-efi-nvidia-1.0.0.raucb",
@@ -68,7 +74,9 @@
           "image": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-rpi-arm64-base-1.0.0.img.gz",
             "sha256": "3e8b2a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f6e5d",
-            "size": 655360000
+            "size": 655360000,
+            "raw_size": 4900016128,
+            "min_disk_size": 10269753344
           },
           "bundle": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.0/flockos-rpi-arm64-base-1.0.0.raucb",
@@ -92,7 +100,9 @@
           "image": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.1/flockos-amd64-efi-base-1.0.1.img.gz",
             "sha256": "5a0d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a0b5e1c6f0f5d7d4f2a8d5c1e3b9a7f",
-            "size": 412398765
+            "size": 412398765,
+            "raw_size": 4564471808,
+            "min_disk_size": 9934209024
           },
           "bundle": {
             "url": "https://instance-registry.ironflock.com/dl/flockos/1.0.1/flockos-amd64-efi-base-1.0.1.raucb",

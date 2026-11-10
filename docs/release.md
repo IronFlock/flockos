@@ -73,6 +73,8 @@ keeps an image made from the same file.
 - FlockFlasher (from the release after v2.2.4) reloads the catalog when its
   board list is shown, at most every five minutes, so a new release appears
   without restarting it.
+- Each image names what `ironflock os install` needs of a disk
+  ([below](#what-ironflock-os-install-reads)). Releases up to 0.14.0 do not.
 - The catalog is signed in the device-agent's envelope with the Cloud KMS key
   `ironflock-release/flockos-catalog`. The tool verifies its own output, and
   `catalog verify -pubkey pki/flockos-catalog.pub manifest.json` checks a
@@ -89,6 +91,22 @@ keeps an image made from the same file.
 - `vm-images` makes each VM image's tarball and prints the cloud calls.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
+
+## What `ironflock os install` reads
+
+`ironflock os install` of device-init (its ADR-0008) writes an image onto the
+disk of a running machine. Besides an image's `url`, `sha256` and `size`, it
+reads these fields of `releases.<version>.images.<image-id>` in the catalog.
+Releases up to 0.14.0 have none of them.
+
+| Field | What |
+|-------|------|
+| `image.raw_size` | The image decompressed, in bytes: what is written from the disk's first byte. |
+| `image.min_disk_size` | The smallest disk, in bytes, on which the image becomes a working device: every partition of the device's layout, `/data` at 1 GiB, 2 MiB for the GPT ([build.md](build.md#the-smallest-disk)). At least `raw_size`; the installer's is its `raw_size`. |
+
+Both come from the build's `<image-id>-<version>.sizes`; `tools/catalog`
+refuses a release image without them, and a catalog with only one of them or
+with `min_disk_size` below `raw_size`.
 
 ## Release notes
 

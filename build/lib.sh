@@ -124,6 +124,48 @@ size_bytes() {
   esac
 }
 
+# min_disk_size REPART_DIR RAW_SIZE: the smallest disk, in bytes, on which an
+# image becomes a working device (the release catalog's min_disk_size). The
+# whole layout of a device is in the repart.d definitions its first boot
+# applies (REPART_DIR, rendered): every partition at its SizeMinBytes, the one
+# without (/data, which takes the rest of the disk) at 1 GiB, and 2 MiB for
+# the GPT: 1 MiB in front of the first partition (genimage's offset) and
+# 1 MiB at the end, for the backup GPT and the alignment. Never less than
+# RAW_SIZE. Without repart.d (the installer, which makes no partitions) it is
+# RAW_SIZE. build/gce-image.sh sizes the Compute Engine images by the same
+# sum (GCE_DATA_MIN of /data), rounded up to whole GiB.
+min_disk_size() {
+  local dir=$1 raw=$2 f min total=$((2 * 1024 * 1024)) rest=0
+  if [ -z "$dir" ] || ! compgen -G "$dir/*.conf" >/dev/null; then
+    echo "$raw"
+    return 0
+  fi
+  for f in "$dir"/*.conf; do
+    min=$(sed -n 's/^SizeMinBytes=//p' "$f" | tail -n 1)
+    if [ -n "$min" ]; then
+      min=$(size_bytes "$min") || return 1
+      total=$((total + min))
+    else
+      rest=$((rest + 1))
+    fi
+  done
+  [ "$rest" -eq 1 ] || die "$dir: $rest partitions without SizeMinBytes; /data alone takes the rest of the disk"
+  total=$((total + $(size_bytes 1G)))
+  if [ "$total" -lt "$raw" ]; then total=$raw; fi
+  echo "$total"
+}
+
+# write_sizes DISK REPART_DIR FILE: the raw size of the disk image DISK and
+# min_disk_size, as the KEY=value lines raw_size= and min_disk_size= of FILE
+# (<image-id>-<version>.sizes, which tools/catalog puts into the catalog).
+write_sizes() {
+  local raw min
+  raw=$(wc -c <"$1" | tr -d ' ') && [ -n "$raw" ] || die "cannot read the size of $1"
+  min=$(min_disk_size "$2" "$raw") || die "no min_disk_size for $1"
+  printf 'raw_size=%s\nmin_disk_size=%s\n' "$raw" "$min" >"$3"
+  log "$(basename "$3" .sizes): $raw bytes raw, for a disk of at least $min bytes"
+}
+
 # valid_target / valid_variant / valid_kernel NAME: the build matrix axes
 # (master plan, section 3.1).
 valid_target() { case "$1" in amd64-efi | arm64-efi | rpi-arm64 | jetson-orin) return 0 ;; *) return 1 ;; esac }

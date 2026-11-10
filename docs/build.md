@@ -56,6 +56,7 @@ Artefacts land in `out/<image-id>/`:
 | `<image-id>-<version>.packages.tsv` | every Debian package in the image with its version |
 | `<image-id>-<version>.sources.tsv` | the source packages of the image, from which the release publishes their source ([release.md](release.md#source-code)) |
 | `<image-id>-<version>.os-release` | the image's `/etc/os-release` |
+| `<image-id>-<version>.sizes` | `raw_size=` and `min_disk_size=` of the image, in bytes, for the release catalog ([below](#the-smallest-disk)); not published itself |
 | `SHA256SUMS` | checksums of the image and the bundle |
 
 ## Disk layout on a device
@@ -95,6 +96,29 @@ CI run, from 75% full, and fails the build from 90%
 (`FLOCKOS_SLOT_FILL_WARN`, `FLOCKOS_SLOT_FILL_MAX`). v0.10.0's trees fill about a
 third of their slots (1.2 to 1.4 GiB of 4 GiB, 2.1 GiB of nvidia's 8 GiB).
 Outgrowing a slot takes a new image id with a larger slot, not a bundle.
+
+### The smallest disk
+
+An image becomes a working device on a disk that holds its whole layout:
+every partition of `repart.d` at its `SizeMinBytes` (the FLOCKOS partition,
+on the Raspberry Pi both boot partitions, both slots), `/data` at 1 GiB, and
+2 MiB for the GPT (1 MiB in front of the first partition, 1 MiB at the end for
+the backup GPT and the alignment). The image stage computes it from the
+rendered `repart.d` (`min_disk_size` in `build/lib.sh`) and writes it with the
+image's raw size to `<image-id>-<version>.sizes`; the release catalog names
+both ([release.md](release.md#what-ironflock-os-install-reads)). The
+installer makes no partitions: its smallest disk is its raw size.
+
+| Image | Smallest disk |
+|-------|---------------|
+| `amd64-efi base`, `arm64-efi base`, both `-rt` | 9,934,209,024 bytes (9.25 GiB + 2 MiB) |
+| `amd64-efi nvidia` | 18,524,143,616 bytes (17.25 GiB + 2 MiB) |
+| `rpi-arm64 base` | 10,269,753,344 bytes (9.5625 GiB + 2 MiB) |
+
+The raw image of `base` holds the FLOCKOS partition and slot A: 4,564,471,808
+bytes in 0.14.0. The Compute Engine images of a release have the smallest
+disk rounded up to whole GiB, 10 GiB and 18 GiB for nvidia ([release.md](release.md),
+"The VM images"), the numbers ADR-0008 of device-init gives.
 
 ## Boot and A/B
 

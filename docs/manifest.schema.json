@@ -61,6 +61,31 @@
         "size": { "type": "integer", "minimum": 1 }
       }
     },
+    "diskImage": {
+      "description": "An artifact with what a disk needs for it: raw_size and min_disk_size, both or neither (releases up to 0.14.0 have neither).",
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        {
+          "type": "object",
+          "properties": {
+            "raw_size": {
+              "description": "The image decompressed, in bytes: what is written to a disk from its first byte. The disk image's own GPT is laid out in 512-byte sectors.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "min_disk_size": {
+              "description": "The smallest disk, in bytes, on which the image becomes a working device: every partition of the device's layout (the image's and those systemd-repart adds on the first boot: the second root slot, and /data at 1 GiB) and 2 MiB for the GPT (build/lib.sh min_disk_size). At least raw_size; the installer's is its raw_size.",
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "dependentRequired": {
+            "raw_size": ["min_disk_size"],
+            "min_disk_size": ["raw_size"]
+          }
+        }
+      ]
+    },
     "release": {
       "type": "object",
       "required": ["build_id", "buildtime", "min_agent", "images"],
@@ -95,7 +120,7 @@
         "architecture": { "enum": ["amd64", "arm64"] },
         "image": {
           "description": "The raw disk image, <image-id>-<version>.img.gz, as FlockFlasher writes it.",
-          "$ref": "#/$defs/artifact"
+          "$ref": "#/$defs/diskImage"
         },
         "bundle": {
           "description": "The RAUC bundle, <image-id>-<version>.raucb. The device-agent downloads it from <its update base>/flockos/<version>/<the last segment of url> (an IronFlock appliance's OS mirror serves the same paths; on the cloud it is url), checks size and sha256, and hands it to RAUC, which checks the signature and compatible. The installer has none.",

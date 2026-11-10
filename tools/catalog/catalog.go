@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,13 +30,24 @@ type Bundle struct {
 	Compatible string `json:"compatible"`
 }
 
+// DiskImage is the raw disk image (.img.gz) and what a disk needs for it:
+// RawSize, the image decompressed, and MinDiskSize, the smallest disk on
+// which it becomes a working device (build/lib.sh min_disk_size: every
+// partition of the layout, 1 GiB of /data). Both in bytes, from the build's
+// <image-id>-<version>.sizes. Releases up to 0.14.0 have neither.
+type DiskImage struct {
+	Artifact
+	RawSize     int64 `json:"raw_size,omitempty"`
+	MinDiskSize int64 `json:"min_disk_size,omitempty"`
+}
+
 type Image struct {
-	Target       string   `json:"target"`
-	Variant      string   `json:"variant"`
-	Kernel       string   `json:"kernel"`
-	Architecture string   `json:"architecture"`
-	Image        Artifact `json:"image"`
-	Bundle       *Bundle  `json:"bundle,omitempty"`
+	Target       string    `json:"target"`
+	Variant      string    `json:"variant"`
+	Kernel       string    `json:"kernel"`
+	Architecture string    `json:"architecture"`
+	Image        DiskImage `json:"image"`
+	Bundle       *Bundle   `json:"bundle,omitempty"`
 	// Payloads are the image ids an installer stick carries (installer.conf
 	// payload= picks one). Only the installer has them; a release up to
 	// 0.10.0 has none, and readers take that as the target's base image.
@@ -162,9 +174,10 @@ func targetArch(repo, target string) (string, error) {
 }
 
 // buildRelease reads one release from dir: one directory per image as the
-// release pipeline leaves them (flockos-<id>/ with <id>-<version>.img.gz, the
-// .raucb but for the installer, <id>-<version>.os-release, and for the
-// installer <id>-<version>.payloads, the image ids it carries one per line).
+// release pipeline leaves them (flockos-<id>/ with <id>-<version>.img.gz, its
+// raw size and minimum disk size in <id>-<version>.sizes, the .raucb but for
+// the installer, <id>-<version>.os-release, and for the installer
+// <id>-<version>.payloads, the image ids it carries one per line).
 // Files are published below baseURL.
 func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error) {
 	entries, err := os.ReadDir(dir)
@@ -208,9 +221,13 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 			return Release{}, err
 		}
 		img := Image{Target: target, Variant: variant, Kernel: kernel, Architecture: arch}
-		img.Image, err = artifact(filepath.Join(dir, id, name+".img.gz"), baseURL+"/"+name+".img.gz")
+		img.Image.Artifact, err = artifact(filepath.Join(dir, id, name+".img.gz"), baseURL+"/"+name+".img.gz")
 		if err != nil {
 			return Release{}, err
+		}
+		img.Image.RawSize, img.Image.MinDiskSize, err = diskSizes(filepath.Join(dir, id, name+".sizes"))
+		if err != nil {
+			return Release{}, fmt.Errorf("%s: %w", id, err)
 		}
 		bundlePath := filepath.Join(dir, id, name+".raucb")
 		switch _, err := os.Stat(bundlePath); {
@@ -242,6 +259,29 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 		}
 	}
 	return rel, nil
+}
+
+// diskSizes reads an image's .sizes file (build/lib.sh write_sizes):
+// raw_size= and min_disk_size=, in bytes.
+func diskSizes(path string) (raw, minDisk int64, err error) {
+	fields, err := osRelease(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, f := range []struct {
+		key  string
+		into *int64
+	}{{"raw_size", &raw}, {"min_disk_size", &minDisk}} {
+		n, err := strconv.ParseInt(fields[f.key], 10, 64)
+		if err != nil || n <= 0 {
+			return 0, 0, fmt.Errorf("%s: %s is not a size in bytes: %q", filepath.Base(path), f.key, fields[f.key])
+		}
+		*f.into = n
+	}
+	if minDisk < raw {
+		return 0, 0, fmt.Errorf("%s: min_disk_size %d is less than raw_size %d", filepath.Base(path), minDisk, raw)
+	}
+	return raw, minDisk, nil
 }
 
 // payloads reads an installer's .payloads file: image ids, one per line.
@@ -392,7 +432,7 @@ func (c Catalog) Validate() error {
 			if !imageIDRe.MatchString(id) {
 				errs = append(errs, fmt.Errorf("%s: not an image id", id))
 			}
-			for _, a := range []*Artifact{&img.Image, bundleArtifact(img.Bundle)} {
+			for _, a := range []*Artifact{&img.Image.Artifact, bundleArtifact(img.Bundle)} {
 				if a == nil {
 					continue
 				}
@@ -402,6 +442,10 @@ func (c Catalog) Validate() error {
 			}
 			if !strings.HasSuffix(img.Image.URL, "/"+id+"-"+v+".img.gz") {
 				errs = append(errs, fmt.Errorf("%s %s: the image is not %s-%s.img.gz", v, id, id, v))
+			}
+			// Both or neither (releases up to 0.14.0); the disk holds the image.
+			if d := img.Image; (d.RawSize != 0 || d.MinDiskSize != 0) && (d.RawSize <= 0 || d.MinDiskSize < d.RawSize) {
+				errs = append(errs, fmt.Errorf("%s %s: raw_size %d and min_disk_size %d", v, id, d.RawSize, d.MinDiskSize))
 			}
 			if (img.Variant == "installer") == (img.Bundle != nil) {
 				errs = append(errs, fmt.Errorf("%s %s: the installer and only the installer has no bundle", v, id))
