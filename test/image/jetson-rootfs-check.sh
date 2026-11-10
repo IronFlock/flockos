@@ -98,10 +98,12 @@ check "RAUC: compatible, the custom backend, APP and APP_b" \
 check "no repart.d (NVIDIA's flash writes the layout)" test ! -e "$root/usr/lib/repart.d"
 check "fstab: /boot/efi is NVIDIA's ESP, /data the layout's data partition" \
   bash -c "grep -q '^PARTLABEL=esp  *[/]boot[/]efi  *vfat ' '$root/etc/fstab' && grep -q '^PARTLABEL=data  *[/]data ' '$root/etc/fstab' && ! grep -q '^PARTLABEL=FLOCKOS' '$root/etc/fstab'"
+check "the apps' data is /data/apps, the mount point in the tree" \
+  bash -c "grep -q '^/data/apps  *[/]apps  *none  *bind,nofail,' '$root/etc/fstab' && test -d '$root/apps'"
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
   flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
-  flockos-network-profiles.service flockos-network-profiles-trial.service; do
+  flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$root/usr/lib/systemd/system/systemd-timesyncd.service"

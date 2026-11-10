@@ -524,6 +524,7 @@ class Runner:
                 raise TestFailure(f"{path} is not mounted")
             if source and not out.endswith(source[len('/data'):]):
                 raise TestFailure(f"{path} is mounted from {out}, expected {source}")
+        self.apps_on_data()
         mid = self.vm.run("cat /etc/machine-id").strip()
         if not re.fullmatch(r"[0-9a-f]{32}", mid):
             raise TestFailure(f"machine-id not initialised: {mid!r}")
@@ -554,6 +555,35 @@ class Runner:
         if self.flock:
             self.enrolled(first=True)
         self.vm.run("echo flockos-test > /data/flockos-test-marker")
+        # An app's data, which the reboot and the update into slot B keep.
+        self.vm.run("mkdir -p /apps/prod/flockos-test && echo flockos-test > /apps/prod/flockos-test/data.txt")
+
+    def explain(self, *units):
+        """What a step prints when the units it waited for are not as it
+        expected: their state and this boot's journal of them."""
+        names = " ".join(units)
+        journal = " ".join(f"-u {u}" for u in units)
+        return self.vm.run(f"systemctl status --no-pager -l -n 0 {names}; "
+                           f"journalctl -b --no-pager -o short-monotonic -n 80 {journal}", check=False)
+
+    def apps_on_data(self):
+        """/apps, the device-agent's -appsDir, is the bind mount of /data/apps
+        (/etc/fstab, nofail), Docker (and the agent, when enrolled) are ordered
+        after it, and flockos-apps-check found it so."""
+        units = ("apps.mount", "flockos-data-layout.service", "flockos-apps-check.service")
+        out = self.vm.run("findmnt -no SOURCE,FSROOT /apps", check=False).strip()
+        same = self.vm.run("[ \"$(stat -c %d:%i /apps)\" = \"$(stat -c %d:%i /data/apps)\" ] && echo same",
+                           check=False).strip()
+        check = self.vm.run("systemctl is-active flockos-apps-check.service", check=False).strip()
+        if not out.endswith("/apps") or same != "same" or check != "active":
+            raise TestFailure(f"/apps is not the bind mount of /data/apps (findmnt {out!r}, "
+                              f"apps-check {check!r}):\n{self.explain(*units)}")
+        self.vm.run("test ! -e /run/flockos/apps-not-persistent")
+        ordered = ["docker.service"] + (["ironflock-device-agent.service"] if self.flock else [])
+        for unit in ordered:
+            after = self.vm.run(f"systemctl show -p After --value {unit}").split()
+            if "apps.mount" not in after:
+                raise TestFailure(f"{unit} is not ordered after apps.mount: {after}\n{self.explain(*units)}")
 
     def rt_kernel(self):
         """An -rt image (WP-4b.1): the PREEMPT_RT kernel, and a new rt.conf
@@ -761,37 +791,50 @@ class Runner:
             # No proxy for the rest of the test: the update downloads directly.
             self.vm.run("rm /data/flockos/proxy.conf")
             self.wait_for("[ -z \"$(docker info --format '{{.HTTPSProxy}}')\" ]", 120, "Docker to drop the proxy")
+        # The app's data of the first boot: /apps is on /data.
+        self.apps_on_data()
+        self.vm.run("grep -qx flockos-test /apps/prod/flockos-test/data.txt")
         if getattr(self, "profile_seeded", None):
-            nic, address, gateway = self.profile_seeded
-            name = f"{STATIC_PROFILE}.nmconnection"
-            self.vm.run(f"test ! -e /boot/efi/network/{name}")
-            self.vm.run(f"test \"$(stat -c '%a %U' /data/network/connections/{name})\" = '600 root'")
-            self.vm.run("journalctl -b --no-pager -o cat -u flockos-network-profiles"
-                        f" | grep -q 'took {name} (ethernet)'")
-            # NetworkManager runs the card on the profile: the address without
-            # DHCP's "dynamic", the gateway, and the host stays reachable (the
-            # update downloads from it).
-            self.wait_for(f"[ \"$(nmcli -g GENERAL.CONNECTION device show {nic})\" = {STATIC_PROFILE} ]", 60,
-                          "NetworkManager to bring up the static profile")
-            addr = self.vm.run(f"ip -o -4 addr show dev {nic}")
-            if f" {address} " not in addr or "dynamic" in addr:
-                raise TestFailure(f"{nic} does not have the static address {address}:\n{addr}")
-            self.vm.run(f"ip -o -4 route show default | grep -q '^default via {gateway} dev {nic} '")
-            self.vm.run(f"curl -fsS -o /dev/null {self.http}/")
-            # The profile is on trial (ADR-0016, section 10): the device it
-            # replaced nothing on goes back to no profile after 15 minutes
-            # unless the agent connects. The test .flock's agent never does,
-            # so the test leaves its mark of a connection, and the trial ends
-            # with the profile kept, before the update needs the network.
-            self.vm.run("systemctl is-active flockos-network-profiles-trial.service")
-            self.vm.run(f"test -e /data/network/trial/new/{name} && grep -qx phase=new /data/network/trial/state")
-            # Written again at every look: a restart of the agent's unit
-            # empties its folder.
-            self.wait_for("mkdir -p /run/ironflock-device-agent && echo test >/run/ironflock-device-agent/connected"
-                          " && test ! -e /data/network/trial", 150, "the trial to keep the profile")
-            self.vm.run(f"test -e /data/network/connections/{name}")
-            self.vm.run("journalctl -b --no-pager -o cat -u flockos-network-profiles-trial"
-                        " | grep -q 'the profiles from the FLOCKOS partition stay'")
+            try:
+                self.static_profile_taken()
+            except TestFailure as e:
+                units = ("flockos-network-profiles.service", "flockos-network-profiles-trial.service",
+                         "NetworkManager.service")
+                raise TestFailure(f"{e}\n{self.explain(*units)}") from None
+
+    def static_profile_taken(self):
+        """The static profile of network_profile, after the reboot: taken,
+        brought up by NetworkManager, on trial, and kept by the trial."""
+        nic, address, gateway = self.profile_seeded
+        name = f"{STATIC_PROFILE}.nmconnection"
+        self.vm.run(f"test ! -e /boot/efi/network/{name}")
+        self.vm.run(f"test \"$(stat -c '%a %U' /data/network/connections/{name})\" = '600 root'")
+        self.vm.run("journalctl -b --no-pager -o cat -u flockos-network-profiles"
+                    f" | grep -q 'took {name} (ethernet)'")
+        # NetworkManager runs the card on the profile: the address without
+        # DHCP's "dynamic", the gateway, and the host stays reachable (the
+        # update downloads from it).
+        self.wait_for(f"[ \"$(nmcli -g GENERAL.CONNECTION device show {nic})\" = {STATIC_PROFILE} ]", 60,
+                      "NetworkManager to bring up the static profile")
+        addr = self.vm.run(f"ip -o -4 addr show dev {nic}")
+        if f" {address} " not in addr or "dynamic" in addr:
+            raise TestFailure(f"{nic} does not have the static address {address}:\n{addr}")
+        self.vm.run(f"ip -o -4 route show default | grep -q '^default via {gateway} dev {nic} '")
+        self.vm.run(f"curl -fsS -o /dev/null {self.http}/")
+        # The profile is on trial (ADR-0016, section 10): the device it
+        # replaced nothing on goes back to no profile after 15 minutes
+        # unless the agent connects. The test .flock's agent never does,
+        # so the test leaves its mark of a connection, and the trial ends
+        # with the profile kept, before the update needs the network.
+        self.vm.run("systemctl is-active flockos-network-profiles-trial.service")
+        self.vm.run(f"test -e /data/network/trial/new/{name} && grep -qx phase=new /data/network/trial/state")
+        # Written again at every look: a restart of the agent's unit
+        # empties its folder.
+        self.wait_for("mkdir -p /run/ironflock-device-agent && echo test >/run/ironflock-device-agent/connected"
+                      " && test ! -e /data/network/trial", 150, "the trial to keep the profile")
+        self.vm.run(f"test -e /data/network/connections/{name}")
+        self.vm.run("journalctl -b --no-pager -o cat -u flockos-network-profiles-trial"
+                    " | grep -q 'the profiles from the FLOCKOS partition stay'")
 
     def install_bundle(self):
         self.vm.run(f"curl -fsS -o /var/cache/flockos/test.raucb {self.http}/bundle.raucb", timeout=600)
@@ -811,6 +854,9 @@ class Runner:
         if self.vm.run("cat /etc/machine-id").strip() != self.machine_id:
             raise TestFailure("machine-id changed with the update")
         self.vm.run("grep -qx flockos-test /data/flockos-test-marker")
+        # The app's data of slot A is there in slot B: /apps is on /data.
+        self.apps_on_data()
+        self.vm.run("grep -qx flockos-test /apps/prod/flockos-test/data.txt")
         if self.flock:
             self.enrolled(first=False)
         if self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip() != self.host_key:

@@ -10,7 +10,7 @@ teardown() { rm -rf "$tmp"; }
 @test "data-layout creates the /data tree with private network profiles" {
   FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
-  for d in ironflock home cache fwupd pstore flockos rauc etc/ssh network/connections log/journal; do
+  for d in ironflock home cache fwupd pstore flockos rauc etc/ssh apps network/connections log/journal; do
     [ -d "$tmp/$d" ]
   done
   [ "$(stat -c %a "$tmp/network/connections")" = 700 ]
@@ -40,6 +40,79 @@ teardown() { rm -rf "$tmp"; }
 @test "fstab puts all of /var/log on /data" {
   grep -qE '^/data/log +/var/log +none +bind,x-systemd.requires=flockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
   ! grep -q '/var/log/journal' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+}
+
+@test "data-layout makes /data/apps, the apps' data, kept as it is" {
+  FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
+  [ "$status" -eq 0 ]
+  [ -d "$tmp/apps" ]
+  mkdir -p "$tmp/apps/prod/my-app"
+  echo kept >"$tmp/apps/prod/my-app/state"
+  FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/apps/prod/my-app/state")" = kept ]
+}
+
+@test "fstab: /apps is /data/apps, nofail, and Docker, the agent and enroll wait for it" {
+  fstab=$BATS_TEST_DIRNAME/../../overlay/etc/fstab
+  line=$(grep -E '^/data/apps +/apps +none ' "$fstab")
+  opts=$(echo "$line" | awk '{ print $4 }')
+  # A mount that fails does not stop the boot (the lifeline: the agent starts).
+  [[ ",$opts," == *",nofail,"* ]]
+  [[ ",$opts," == *",bind,"* ]]
+  [[ ",$opts," == *",x-systemd.requires=flockos-data-layout.service,"* ]]
+  # nofail drops the order before local-fs.target: whoever writes under /apps
+  # is ordered after the mount itself.
+  for unit in docker.service ironflock-device-agent.service flockos-enroll.service; do
+    [[ ",$opts," == *",x-systemd.before=$unit,"* ]]
+  done
+  # Never required: a failed mount keeps nothing from starting.
+  [[ "$opts" != *"x-systemd.required-by"* ]]
+  ! grep -rqE '^(Requires|BindsTo|Requisite|RequiresMountsFor)=.*(apps\.mount|/apps)' "$BATS_TEST_DIRNAME/../../overlay"
+  # The mount point is in the image.
+  grep -q '"$ROOT/etc/NetworkManager/system-connections" "$ROOT/apps"' "$BATS_TEST_DIRNAME/../../build/customize.sh"
+}
+
+# apps_check: apps-check against $tmp/data and $tmp/apps.
+apps_check() {
+  FLOCKOS_APPS=$tmp/apps FLOCKOS_DATA=$tmp/data FLOCKOS_RUN=$tmp/run run sh "$lib/apps-check"
+}
+
+@test "apps-check: /apps bound from /data/apps passes quietly and clears an old mark" {
+  mkdir -p "$tmp/data/apps" "$tmp/run"
+  # A bind mount has the folder's device and inode; a link stands in here.
+  ln -s "$tmp/data/apps" "$tmp/apps"
+  echo old >"$tmp/run/apps-not-persistent"
+  apps_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/apps is /data/apps"* ]]
+  [ ! -e "$tmp/run/apps-not-persistent" ]
+}
+
+@test "apps-check: the slot's own /apps, or no /data/apps, fails loudly and leaves a mark, and changes nothing else" {
+  mkdir -p "$tmp/data/apps" "$tmp/apps"
+  apps_check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"/apps is not /data/apps: the apps run, but their data is lost at the next OS update"* ]]
+  grep -q 'is not /data/apps' "$tmp/run/apps-not-persistent"
+  [ -z "$(ls -A "$tmp/apps")" ]
+  rmdir "$tmp/data/apps"
+  apps_check
+  [ "$status" -eq 1 ]
+  [ ! -e "$tmp/data/apps" ]
+}
+
+@test "apps-check's unit: after the mount, before Docker and the agent, which need nothing of it" {
+  u=$BATS_TEST_DIRNAME/../../overlay/usr/lib/systemd/system/flockos-apps-check.service
+  grep -qx 'After=apps.mount' "$u"
+  grep -qx 'Before=docker.service ironflock-device-agent.service' "$u"
+  grep -qx 'ExecStart=/usr/lib/flockos/apps-check' "$u"
+  grep -qx 'StandardError=journal+console' "$u"
+  ! grep -qE '^(Requires|BindsTo|Requisite|RequiredBy|OnFailure|FailureAction)=' "$u"
+  # Enabled on devices, masked on the installer, whose fstab has no /apps.
+  grep -qx '  systemctl --root="$ROOT" enable flockos-apps-check.service' "$BATS_TEST_DIRNAME/../../build/customize.sh"
+  grep -qx '  systemctl --root="$ROOT" mask flockos-apps-check.service' "$BATS_TEST_DIRNAME/../../build/customize.sh"
+  ! grep -q '/apps' "$BATS_TEST_DIRNAME/../../profiles/installer/overlay/etc/fstab"
 }
 
 # slot_proven BOOTED ENV...: slot-proven on a booted slot and a grubenv.

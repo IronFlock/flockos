@@ -77,6 +77,23 @@ persistent paths from it (master plan, section 3.2):
 | `/var/cache/flockos` | `/data/cache` (downloaded bundles) |
 | `/var/lib/fwupd` | `/data/fwupd` |
 | `/var/lib/systemd/pstore` | `/data/pstore` (what the kernel recorded about a crash, kept across updates) |
+| `/apps` | `/data/apps` (the apps' data: the device-agent's `-appsDir`, each app's `/data` and `/shared`; `nofail`, see below) |
+
+`/apps` is mounted `nofail`: a mount that fails does not stop the boot, as
+the device-agent is the device's lifeline. Docker, the agent and enroll are
+ordered after the mount in `/etc/fstab` itself (`x-systemd.before=`), as
+`nofail` drops its order before `local-fs.target`, so none of them writes
+under `/apps` before it is there. When it failed, they start all the same on
+the slot's own `/apps`, and `flockos-apps-check`, between the mount and them,
+says on the console and in the journal that the apps' data is lost at the
+next update, leaves `/run/flockos/apps-not-persistent`, and fails.
+
+Up to 0.14.0 `/apps` was part of the root slot, and every update started the
+apps with empty data. The update into 0.15.0 does so one last time: its slot
+mounts the empty `/data/apps`, and the apps' data of before stays in the
+other slot's `/apps`. There is no migration: copying it at that boot would be
+a long step at the worst moment, and no device in the field runs IronFlockOS
+yet.
 
 SSH host keys are made on the first boot in `/data/etc/ssh` and `sshd` is
 pointed there. The machine-id is generated on the first boot in the slot; RAUC's

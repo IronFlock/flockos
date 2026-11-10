@@ -15,3 +15,9 @@ PARTLABEL=data     /data      ext4  defaults,x-systemd.requires=systemd-repart.s
 /data/cache                /var/cache/flockos                      none  bind,x-systemd.requires=flockos-data-layout.service  0  0
 /data/fwupd                /var/lib/fwupd                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0
 /data/pstore               /var/lib/systemd/pstore                 none  bind,x-systemd.requires=flockos-data-layout.service  0  0
+# The apps' data: /apps is the device-agent's -appsDir. nofail: a mount that
+# fails does not stop the boot, and the apps run on the slot's /apps, which
+# flockos-apps-check reports. nofail also drops the mount's order before
+# local-fs.target, so Docker, the agent and enroll are ordered after it here:
+# none of them writes under /apps before it is mounted, or before it failed.
+/data/apps                 /apps                                   none  bind,nofail,x-systemd.requires=flockos-data-layout.service,x-systemd.before=docker.service,x-systemd.before=ironflock-device-agent.service,x-systemd.before=flockos-enroll.service  0  0

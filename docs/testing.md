@@ -70,7 +70,9 @@ Sequence:
    (not on `-rt` kernels, which turn EFI runtime services off); with it on, the
    kernel is locked down in integrity mode;
    `systemd-repart` created `rootfs-b` (same size as `rootfs-a`) and `data` (grown
-   to the disk); `/data` and its bind mounts are in place; machine-id
+   to the disk); `/data` and its bind mounts are in place, `/apps` the bind mount
+   of `/data/apps` with Docker and the agent ordered after it and
+   `flockos-apps-check` content, and an app's file is written there; machine-id
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses
    root and passwords; no account has a password; RAUC reports slot A booted with
    the right compatible, tried and not marked good by anything at boot (the
@@ -103,7 +105,8 @@ Sequence:
    has from DHCP on its card matched by MAC address, as `ironflock os install`
    writes one, goes to the FLOCKOS partition's `network/` folder, and
    `network-profiles check` accepts it.
-2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
+2. **Reboot.** machine-id, SSH host key, the persistent journal and the app's
+   file in `/apps` survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
@@ -119,7 +122,8 @@ Sequence:
    the same address).
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
-   machine-id, host key and `/data`, and is enrolled again from the agent's copy
+   machine-id, host key, `/data` and the app's file of slot A in `/apps`, and is
+   enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
    the agent's place.
 4. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md)).

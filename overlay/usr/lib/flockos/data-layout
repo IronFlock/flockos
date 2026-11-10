@@ -7,6 +7,9 @@ set -eu
 d=${FLOCKOS_DATA:-/data}
 var_log=${FLOCKOS_VAR_LOG:-/var/log}
 mkdir -p "$d/ironflock" "$d/home" "$d/cache" "$d/fwupd" "$d/pstore" "$d/flockos" "$d/rauc" "$d/etc/ssh"
+# The apps' data, which the agent keeps under its -appsDir /apps (bound from
+# here): it outlives updates.
+mkdir -p "$d/apps"
 mkdir -p "$d/network/connections"
 chmod 0700 "$d/network/connections"
 # journald writes here once the journal is flushed; same ownership and mode

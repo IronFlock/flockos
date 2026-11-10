@@ -97,10 +97,12 @@ check "the backend reads the image's autoboot.txt: slot A is primary" \
 check "repart.d: rootfs-b and data come on the first boot" \
   test -f "$work/root/usr/lib/repart.d/60-data.conf"
 check "fstab mounts FLOCKOS and /data" bash -c "grep -q '^PARTLABEL=FLOCKOS ' '$work/root/etc/fstab' && grep -q '^PARTLABEL=data ' '$work/root/etc/fstab'"
+check "the apps' data is /data/apps, the mount point in the image" \
+  bash -c "grep -q '^/data/apps  *[/]apps  *none  *bind,nofail,' '$work/root/etc/fstab' && test -d '$work/root/apps'"
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
   flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
-  flockos-network-profiles.service flockos-network-profiles-trial.service; do
+  flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$work/root/usr/lib/systemd/system/systemd-timesyncd.service"
