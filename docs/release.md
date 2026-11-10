@@ -150,6 +150,13 @@ A release goes to the test channel. Once it has proven itself on test devices,
 production moves to it, without a rebuild:
 
 ```sh
+just promote production [<version>]
+```
+
+Without a version it takes the one on the test channel. It shows the move, asks
+before it goes on, and starts this run:
+
+```sh
 gh workflow run release.yml --ref v<version> -f promote-production=true
 ```
 

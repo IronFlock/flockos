@@ -154,6 +154,56 @@ outlives updates.
 The device-agent marks the booted slot good once it has reached the platform
 (WP-2.4, device-agent 1.6.0); a slot it never marks falls back.
 
+## Time
+
+chrony keeps the clock on every image ([ADR-0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md)).
+It uses the distribution's NTP pools and the NTP servers DHCP hands out
+(NetworkManager passes them to chrony).
+`chronyd -s` (`/etc/default/chrony`) starts the clock from the real-time clock or,
+on a board without one, at the time chronyd last stopped, as systemd-timesyncd
+did with its clock file. `chronyc tracking` and `chronyc sources` show the state.
+
+PTP is a device setting. `/etc/flockos/ptp.conf` links to
+`/data/flockos/ptp.conf`, so it outlives updates:
+
+```ini
+interface=enp88s0   # the interface for PTP; without it PTP is off
+role=client         # client (default) or server, see below
+domain=0            # 0 to 255
+transport=udp4      # udp4, udp6 or l2
+delay=e2e           # e2e or p2p
+priority1=64        # role=server only: the priority it announces; lower wins
+```
+
+`flockos-ptp` reads it at boot, before chrony starts, and again whenever the
+file changes (`flockos-ptp.path`): a change applies within seconds, without a
+reboot. With an interface, `flockos-ptp4l` runs PTP on it and `flockos-phc2sys`
+moves the time between that interface's hardware clock and the system clock.
+Apps read the clock; none needs `SYS_TIME` or `/dev/ptp*` for it.
+
+- **client:** `ptp4l` keeps the hardware clock on the master's time and never
+  becomes a master itself. `phc2sys` hands that time to chrony's PTP source
+  through a socket, only while `ptp4l` follows a master (the flags linuxptp's
+  `timemaster` uses for chrony). chrony selects PTP over NTP, whose error is far
+  larger, and falls back to NTP when the samples stop. So a device without
+  internet access keeps PTP time, and a device whose master goes away keeps
+  NTP time.
+- **server:** `ptp4l` is the master on the interface and never takes time from
+  it; devices there, such as cameras, follow it. `phc2sys` keeps the hardware
+  clock on the system clock, which chrony keeps on NTP. It waits up to two
+  minutes for chrony's first synchronisation, so the clients do not see the
+  boot's correction; without NTP it serves the clock as it runs. Clocks ship
+  with `priority1` 128, and the lower value wins, so the default 64 makes the
+  device the master against them; on a tie the lowest clock identity would
+  win. A later correction of the system clock reaches the clients too.
+
+`ptp4l` needs an interface with hardware time stamps (`ethtool -T <interface>`);
+the journal of `flockos-ptp4l` says when it has none. `chronyc sources` lists
+`#* PTP` while a client keeps PTP time; `journalctl -u flockos-ptp4l -u flockos-phc2sys`
+and `pmc -u -b 0 -d <domain> 'GET CURRENT_DATA_SET' 'GET PARENT_DATA_SET'`
+(`offsetFromMaster`; a server's own `clockIdentity` as `grandmasterIdentity`)
+show the PTP side.
+
 ## The nvidia variant
 
 `nvidia` is `base` plus NVIDIA's driver for containers on amd64 (WP-4.1;

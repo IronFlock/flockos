@@ -1,0 +1,21 @@
+# systemd applies presets on the first boot of every slot (machine-id
+# "uninitialized") and enables what no preset names. The first matching line
+# wins, and this file sorts before the distribution's.
+#
+# chrony keeps the time; PTP runs through the flockos-ptp units
+# (docs/build.md, "Time").
+enable chrony.service
+enable flockos-ptp.service
+enable flockos-ptp.path
+enable flockos-ptp4l.service
+enable flockos-phc2sys.service
+# Both conflict with chrony.service (chronyd.service): enabled, they take
+# chrony's place at random.
+disable chronyd-restricted.service
+disable timemaster.service
+# time-sync.target does not wait for NTP, as with systemd-timesyncd: offline
+# the wait fails, and the device would boot degraded.
+disable chrony-wait.service
+disable chrony-dnssrv@.timer
+disable ptp4l@.service
+disable phc2sys@.service
