@@ -1,0 +1,6 @@
+[Unit]
+Description=IronFlockOS: apply a changed /etc/flockos/proxy.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/flockos/proxy apply

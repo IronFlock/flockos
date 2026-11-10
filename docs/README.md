@@ -31,5 +31,6 @@
 | [0011](adr/0011-secure-boot-with-debians-signed-boot-chain.md) | The EFI targets boot Debian's signed chain (Microsoft-signed shim, Debian's GRUB and kernel), so PCs boot IronFlockOS with Secure Boot on; convenience, not tamper resistance | accepted |
 | [0012](adr/0012-the-os-is-named-ironflockos.md) | The OS is named IronFlockOS; identifiers that software matches or that are in the field keep `flockos` | accepted |
 | [0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md) | chrony replaces systemd-timesyncd; PTP through linuxptp per device, as chrony's source (client) or served from the system clock (server) | accepted |
+| [0014](adr/0014-proxy-per-device-from-the-flockos-partition.md) | The proxy is a device setting on `/data`, taken from the FLOCKOS partition, for the agent, Docker and containerd; `ntp` for networks that block NTP | accepted |
 
 Planned: `migration.md`, how devices of the previous OS move to IronFlockOS (a reflash).

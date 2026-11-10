@@ -1,0 +1,10 @@
+# Applies a new proxy.conf as soon as it is written.
+[Unit]
+Description=IronFlockOS: watch /data/flockos/proxy.conf
+
+[Path]
+PathChanged=/data/flockos/proxy.conf
+Unit=flockos-proxy-reload.service
+
+[Install]
+WantedBy=multi-user.target

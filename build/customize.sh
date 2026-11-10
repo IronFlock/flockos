@@ -160,31 +160,35 @@ chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
 # --- units -----------------------------------------------------------------
 if [ "$VARIANT" = installer ]; then
   # The installer runs on the console and nothing else: no device services,
-  # no /data, no slots, no SSH.
+  # no /data, no slots, no SSH. flockos-proxy would take the stick's
+  # proxy.conf, which the installer copies to the installed disk.
   systemctl --root="$ROOT" enable flockos-installer.service NetworkManager.service
   systemctl --root="$ROOT" disable flockos-ssh-hostkeys.service \
     flockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
   systemctl --root="$ROOT" mask flockos-enroll.service \
     flockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
-    systemd-repart.service
+    systemd-repart.service flockos-proxy.service flockos-proxy.path flockos-proxy-reload.service
 else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
   # chrony keeps the time; the PTP units run only when ptp.conf names an
-  # interface (docs/build.md, "Time").
+  # interface (docs/build.md, "Time"). flockos-proxy hands the site's proxy
+  # to the agent and Docker (docs/build.md, "Proxy").
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
     flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
-    NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service
+    NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service \
+    flockos-proxy.service
   # GRUB counts every boot as a try; the Pi's tryboot counts only the first
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then
     systemctl --root="$ROOT" enable flockos-slot-proven.path flockos-slot-keep.timer
   fi
-  # The device's own enroll and PTP settings live on /data, so they outlive
-  # updates.
+  # The device's own enroll, PTP and proxy settings live on /data, so they
+  # outlive updates.
   mkdir -p "$ROOT/etc/flockos"
   ln -sfn /data/flockos/enroll.conf "$ROOT/etc/flockos/enroll.conf"
   ln -sfn /data/flockos/ptp.conf "$ROOT/etc/flockos/ptp.conf"
+  ln -sfn /data/flockos/proxy.conf "$ROOT/etc/flockos/proxy.conf"
 fi
 if [ "$KERNEL" = rt ]; then
   systemctl --root="$ROOT" enable flockos-rt-tuning.service

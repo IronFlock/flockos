@@ -606,6 +606,36 @@ class Runner:
         # ptp4l failed on the NIC without hardware time stamps, as expected.
         self.vm.run("systemctl reset-failed flockos-ptp4l.service flockos-phc2sys.service 2>/dev/null || true")
 
+    def proxy(self):
+        """Proxy (docs/build.md, "Proxy"): a proxy.conf reaches Docker (its
+        info names the proxy and NO_PROXY), the agent's environment while it
+        runs, and chrony (ntp=). Nothing listens on the proxy address, so
+        this checks the wiring; the hardware checklist uses a real proxy. A
+        proxy.conf on the FLOCKOS partition is taken over at the next boot
+        (checked in reboot_persists)."""
+        for unit in ("flockos-proxy.service", "flockos-proxy.path"):
+            self.vm.run(f"systemctl is-active {unit}")
+        self.vm.run("test -L /etc/flockos/proxy.conf")
+        if self.vm.run("docker info --format '{{.HTTPProxy}}'").strip():
+            raise TestFailure("Docker has a proxy before any proxy.conf")
+        self.vm.run("printf 'http_proxy=http://10.0.2.2:3128\\nno_proxy=registry.example\\nntp=10.0.2.2\\n'"
+                    " > /data/flockos/proxy.conf")
+        self.wait_for("[ \"$(docker info --format '{{.HTTPSProxy}}')\" = http://10.0.2.2:3128 ]", 120,
+                      "Docker to take the proxy")
+        no_proxy = self.vm.run("docker info --format '{{.NoProxy}}'").strip().split(",")
+        for want in ("localhost", "127.0.0.1", "registry.example"):
+            if want not in no_proxy:
+                raise TestFailure(f"Docker's NO_PROXY lacks {want}: {no_proxy}")
+        self.vm.run("test \"$(stat -c %a /run/flockos/proxy.env)\" = 600")
+        self.wait_for("chronyc -n sources | grep -q ' 10\\.0\\.2\\.2 '", 60, "chrony's NTP server from proxy.conf")
+        # The agent runs on an enrolled slot; it gets the proxy when it restarts.
+        self.wait_for("pid=$(systemctl show -p MainPID --value ironflock-device-agent.service); "
+                      "[ \"${pid:-0}\" = 0 ] || tr '\\0' '\\n' </proc/$pid/environ | "
+                      "grep -qx HTTPS_PROXY=http://10.0.2.2:3128", 60, "the agent to take the proxy")
+        # For the next boot: the FLOCKOS partition's proxy.conf replaces the device's.
+        self.vm.run("printf 'http_proxy=http://10.0.2.2:3129\\n' > /boot/efi/proxy.conf")
+        self.proxy_seeded = True
+
     def enrolled(self, first):
         """The slot is enrolled from the test .flock: SSH user, sudo rule,
         the agent's unit; on the first boot the .flock left the FLOCKOS
@@ -678,6 +708,16 @@ class Runner:
             raise TestFailure(f"the journal is not persistent ({boots} boot)")
         if self.booted() != "A":
             raise TestFailure("not on slot A after a plain reboot")
+        if getattr(self, "proxy_seeded", False):
+            self.vm.run("test ! -e /boot/efi/proxy.conf")
+            self.vm.run("grep -qx 'http_proxy=http://10.0.2.2:3129' /data/flockos/proxy.conf")
+            self.vm.run("test \"$(stat -c %a /data/flockos/proxy.conf)\" = 600")
+            proxy = self.vm.run("docker info --format '{{.HTTPSProxy}}'").strip()
+            if proxy != "http://10.0.2.2:3129":
+                raise TestFailure(f"Docker's proxy after the boot with a FLOCKOS proxy.conf is {proxy!r}")
+            # No proxy for the rest of the test: the update downloads directly.
+            self.vm.run("rm /data/flockos/proxy.conf")
+            self.wait_for("[ -z \"$(docker info --format '{{.HTTPSProxy}}')\" ]", 120, "Docker to drop the proxy")
 
     def install_bundle(self):
         self.vm.run(f"curl -fsS -o /var/cache/flockos/test.raucb {self.http}/bundle.raucb", timeout=600)
@@ -937,7 +977,8 @@ def main():
         if args.variant == "nvidia":
             runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
         runner.step("time: chrony, PTP from ptp.conf as chrony's source", runner.time_sync)
-        runner.step("reboot: machine-id, host key, journal persist", runner.reboot_persists)
+        runner.step("proxy: proxy.conf to Docker, the agent and chrony", runner.proxy)
+        runner.step("reboot: machine-id, host key, journal persist, proxy.conf from FLOCKOS", runner.reboot_persists)
         if args.only != "boot":
             runner.step("update into slot B", runner.update_to_b)
             if args.only != "update":

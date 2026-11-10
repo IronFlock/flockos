@@ -160,6 +160,18 @@ SH
   grep -q 'target: /dev/nvme0n1' "$tmp/esp/flockos-installer.log"
 }
 
+@test "dry run: the .flock and the site's proxy.conf go to the new FLOCKOS partition" {
+  fake_machine
+  printf 'confirm=no\n' >"$tmp/esp/installer.conf"
+  printf 'http_proxy=http://proxy:3128\n' >"$tmp/esp/proxy.conf"
+  PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_PAYLOAD_DIR=$tmp/payload FLOCKOS_DRY_RUN=1 run bash "$lib/installer"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"copying device.flock to the new FLOCKOS partition"* ]]
+  [[ "$output" == *"copying proxy.conf to the new FLOCKOS partition"* ]]
+  # The stick keeps it, for the next device.
+  [ -e "$tmp/esp/proxy.conf" ]
+}
+
 @test "dry run: with confirm=yes anything but 'yes' stops before writing" {
   fake_machine
   PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_PAYLOAD_DIR=$tmp/payload FLOCKOS_DRY_RUN=1 run bash "$lib/installer" <<<"no"

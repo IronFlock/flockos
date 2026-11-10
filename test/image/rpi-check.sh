@@ -99,11 +99,13 @@ check "repart.d: rootfs-b and data come on the first boot" \
 check "fstab mounts FLOCKOS and /data" bash -c "grep -q '^PARTLABEL=FLOCKOS ' '$work/root/etc/fstab' && grep -q '^PARTLABEL=data ' '$work/root/etc/fstab'"
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
-  flockos-ptp4l.service flockos-phc2sys.service; do
+  flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path; do
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$work/root/usr/lib/systemd/system/systemd-timesyncd.service"
-check "ptp.conf is the device's, on /data" bash -c "[ \"\$(readlink '$work/root/etc/flockos/ptp.conf')\" = /data/flockos/ptp.conf ]"
+for setting in ptp.conf proxy.conf; do
+  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$work/root/etc/flockos/$setting')\" = /data/flockos/$setting ]"
+done
 check "rauc-mark-good is masked" bash -c "[ \"\$(systemctl --root='$work/root' is-enabled rauc-mark-good.service)\" = masked ]"
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
   test ! -e "$work/root/usr/lib/systemd/system/flockos-mark-good.service"

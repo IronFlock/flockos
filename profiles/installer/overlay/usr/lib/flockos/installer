@@ -88,12 +88,19 @@ else
 fi
 
 esp_target=$(installer_partition "$target" 1)
-if [ -n "$flock" ]; then
-  say "copying $(basename "$flock") to the new FLOCKOS partition ($esp_target)"
+# The .flock, and the site's proxy (docs/build.md, "Proxy"), which the
+# installed device takes over on its first boot.
+carry=()
+[ -n "$flock" ] && carry+=("$flock")
+[ -f "$esp/proxy.conf" ] && carry+=("$esp/proxy.conf")
+if [ ${#carry[@]} -gt 0 ]; then
+  for f in "${carry[@]}"; do
+    say "copying $(basename "$f") to the new FLOCKOS partition ($esp_target)"
+  done
   if [ "$dry" != 1 ]; then
     mnt=$(mktemp -d)
     mount -t vfat "$esp_target" "$mnt"
-    cp "$flock" "$mnt/"
+    cp "${carry[@]}" "$mnt/"
     sync
     umount "$mnt"
     rmdir "$mnt"

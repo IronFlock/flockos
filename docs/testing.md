@@ -87,10 +87,18 @@ Sequence:
    source away; removing the file stops them. QEMU's interface has no hardware
    time stamps, so this checks the wiring; PTP itself is on the hardware
    checklist.
+   Then the proxy: a `proxy.conf` reaches Docker (`docker info` names the proxy,
+   and `NO_PROXY` holds `localhost` and the file's `no_proxy`), the agent's
+   environment while it runs, and chrony (`ntp=`); `proxy.env` is readable by
+   root only. Nothing listens on the proxy address: a real proxy is on the
+   hardware checklist.
 2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
+   The `proxy.conf` put on the FLOCKOS partition before the reboot has replaced
+   the device's (mode 0600) and left the partition, and Docker uses it; the test
+   then removes the proxy.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
    machine-id, host key and `/data`, and is enrolled again from the agent's copy
@@ -188,4 +196,9 @@ WP-4b.2, WP-5.4, WP-6.6):
    shows the device's own `clockIdentity` as `grandmasterIdentity`, and a client
    (a camera, or a second device with `ptp.conf` as a client) reports an offset
    to it of well under a microsecond.
-9. Target-specific items in `docs/targets/<target>.md`.
+9. Behind a proxy (`docs/build.md`, "Proxy"), on a network that blocks direct
+   internet access: flash with a `proxy.conf` next to the `.flock`; the device
+   enrolls and the agent reaches the platform; an app's image pulls; an OS
+   update downloads and installs; remote access works; `chronyc sources` uses
+   the `ntp=` servers.
+10. Target-specific items in `docs/targets/<target>.md`.

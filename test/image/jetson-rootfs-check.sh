@@ -100,11 +100,13 @@ check "fstab: /boot/efi is NVIDIA's ESP, /data the layout's data partition" \
   bash -c "grep -q '^PARTLABEL=esp  *[/]boot[/]efi  *vfat ' '$root/etc/fstab' && grep -q '^PARTLABEL=data  *[/]data ' '$root/etc/fstab' && ! grep -q '^PARTLABEL=FLOCKOS' '$root/etc/fstab'"
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
-  flockos-ptp4l.service flockos-phc2sys.service; do
+  flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$root/usr/lib/systemd/system/systemd-timesyncd.service"
-check "ptp.conf is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/flockos/ptp.conf')\" = /data/flockos/ptp.conf ]"
+for setting in ptp.conf proxy.conf; do
+  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/flockos/$setting')\" = /data/flockos/$setting ]"
+done
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
   test ! -e "$root/usr/lib/systemd/system/flockos-mark-good.service"
 for unit in rauc-mark-good.service nv-l4t-bootloader-config.service nv-rootfs-validation-config.service; do

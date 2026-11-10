@@ -204,6 +204,51 @@ and `pmc -u -b 0 -d <domain> 'GET CURRENT_DATA_SET' 'GET PARENT_DATA_SET'`
 (`offsetFromMaster`; a server's own `clockIdentity` as `grandmasterIdentity`)
 show the PTP side.
 
+## Proxy
+
+A site that reaches the internet only through a proxy sets it in
+`/etc/flockos/proxy.conf`, which links to `/data/flockos/proxy.conf`, so it
+outlives updates ([ADR-0014](adr/0014-proxy-per-device-from-the-flockos-partition.md)):
+
+```ini
+http_proxy=http://proxy.corp.example:3128   # http://, https://, socks5:// or socks5h://
+https_proxy=http://proxy.corp.example:3128  # default: http_proxy
+no_proxy=10.0.0.0/8,.corp.example           # reached directly, comma-separated
+ntp=10.0.0.1,ntp.corp.example               # NTP servers, where NTP to the internet is blocked
+```
+
+A user and password go into the URL, percent-encoded
+(`http://user:p%40ss@proxy:3128`). The file may hold them: it is readable by
+root only, and the log shows the URL without them.
+
+A device behind a proxy cannot reach the platform before it knows the proxy, so
+the file comes with the boot medium: a `proxy.conf` on the FLOCKOS partition,
+next to the `.flock` (FlockFlasher writes it), replaces the device's on the next
+boot and is removed from the partition. The installer stick passes its
+`proxy.conf` on to the disk it installs, and keeps it for the next device. On a
+device that runs, editing `/etc/flockos/proxy.conf` applies within seconds.
+
+`flockos-proxy` turns the file into `/run/flockos/proxy.env` at boot, before
+containerd, Docker, the device-agent and chrony start, and again whenever the
+file changes (`flockos-proxy.path`), restarting those that run. Drop-ins in the
+image hand the file to the three services: the agent uses the proxy for its
+platform connection, its downloads (OS updates, firmware, agent updates) and
+remote-access tunnels, and passes it to the apps it starts; Docker and
+containerd pull images through it. An app that runs gets the proxy when the
+agent next creates it.
+
+`NO_PROXY` holds `localhost`, `127.0.0.1` and `::1`, then the hosts the
+device-agent's own installer keeps off a proxy, from the device's `.flock`: the
+appliance's domain and its subdomains, and the LAN registries
+(`insecure-registries` and a `docker_registry_url` with a port), and then
+`no_proxy`. A proxy cannot reach back into the LAN, so an appliance behind it
+would be out of reach. A host reached by name needs its name in `no_proxy`, not
+its address.
+
+NTP does not pass an HTTP proxy, and without the right time TLS through the
+proxy fails. chrony already uses the NTP servers DHCP hands out; `ntp=` adds
+servers for networks that hand out none (`chronyc sources` lists them).
+
 ## The nvidia variant
 
 `nvidia` is `base` plus NVIDIA's driver for containers on amd64 (WP-4.1;
