@@ -1,0 +1,6 @@
+[Unit]
+Description=IronFlockOS: apply a changed /etc/flockos/ptp.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/flockos/ptp apply

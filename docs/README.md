@@ -30,5 +30,6 @@
 | [0010](adr/0010-flockos-images-for-virtual-devices.md) | Compute Engine images of every release for the virtual-device-manager; the `.flock` of a VM through its instance metadata | accepted |
 | [0011](adr/0011-secure-boot-with-debians-signed-boot-chain.md) | The EFI targets boot Debian's signed chain (Microsoft-signed shim, Debian's GRUB and kernel), so PCs boot IronFlockOS with Secure Boot on; convenience, not tamper resistance | accepted |
 | [0012](adr/0012-the-os-is-named-ironflockos.md) | The OS is named IronFlockOS; identifiers that software matches or that are in the field keep `flockos` | accepted |
+| [0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md) | chrony replaces systemd-timesyncd; PTP through linuxptp is chrony's source on devices whose `ptp.conf` names an interface | accepted |
 
 Planned: `migration.md`, how devices of the previous OS move to IronFlockOS (a reflash).

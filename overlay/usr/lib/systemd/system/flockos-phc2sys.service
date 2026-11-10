@@ -1,0 +1,20 @@
+# Hands the PTP time of ptp4l's hardware clock to chrony through the socket
+# of chrony's PTP source, while ptp4l follows a master (-a); chrony falls
+# back to NTP when the samples stop (docs/build.md, "Time"). The flags are
+# linuxptp's timemaster's for chrony.
+[Unit]
+Description=IronFlockOS: PTP time to chrony (phc2sys)
+Documentation=man:phc2sys(8) https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+ConditionPathExists=/run/flockos/ptp/phc2sys.env
+After=flockos-ptp.service flockos-ptp4l.service chrony.service
+# phc2sys connects to chrony's socket once, at its start.
+PartOf=chrony.service
+
+[Service]
+EnvironmentFile=/run/flockos/ptp/phc2sys.env
+ExecStart=/usr/sbin/phc2sys -a -r -R 1 -n ${PTP_DOMAIN} -E refclock_sock --refclock_sock_address /run/chrony/ptp.sock -l 5 -m -q
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

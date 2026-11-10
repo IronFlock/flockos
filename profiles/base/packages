@@ -6,7 +6,6 @@
 # system
 systemd
 systemd-sysv
-systemd-timesyncd
 udev
 dbus
 kmod
@@ -40,6 +39,11 @@ wpasupplicant
 iw
 wireless-regdb
 nftables
+
+# time (docs/build.md, "Time"): chrony from NTP, and PTP when the device's
+# ptp.conf names an interface (ptp4l, phc2sys)
+chrony
+linuxptp
 
 # updates: RAUC, its GRUB environment tool, and firmware (lane 3)
 rauc

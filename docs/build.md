@@ -154,6 +154,41 @@ outlives updates.
 The device-agent marks the booted slot good once it has reached the platform
 (WP-2.4, device-agent 1.6.0); a slot it never marks falls back.
 
+## Time
+
+chrony keeps the clock on every image ([ADR-0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md)).
+It uses the distribution's NTP pools and the NTP servers DHCP hands out
+(NetworkManager passes them to chrony).
+`chronyd -s` (`/etc/default/chrony`) starts the clock from the real-time clock or,
+on a board without one, at the time chronyd last stopped, as systemd-timesyncd
+did with its clock file. `chronyc tracking` and `chronyc sources` show the state.
+
+PTP is a device setting. `/etc/flockos/ptp.conf` links to
+`/data/flockos/ptp.conf`, so it outlives updates:
+
+```ini
+interface=enp88s0   # the interface toward the PTP master; without it PTP is off
+domain=0            # 0 to 255
+transport=udp4      # udp4, udp6 or l2
+delay=e2e           # e2e or p2p
+```
+
+`flockos-ptp` reads it at boot, before chrony starts, and again whenever the
+file changes (`flockos-ptp.path`). With an interface, `flockos-ptp4l` keeps that
+interface's hardware clock on the master's time, as a client only: the device
+never serves PTP. `flockos-phc2sys` hands that time to chrony's PTP source
+through a socket, only while `ptp4l` follows a master (the flags linuxptp's
+`timemaster` uses for chrony). chrony selects PTP over NTP, whose error is far
+larger, and falls back to NTP when the samples stop. So a device without
+internet access keeps PTP time, and a device whose master goes away keeps NTP
+time. Apps read the clock; none needs `SYS_TIME` or `/dev/ptp*` for it.
+
+`ptp4l` needs an interface with hardware time stamps (`ethtool -T <interface>`);
+the journal of `flockos-ptp4l` says when it has none. `chronyc sources` lists
+`#* PTP` while PTP keeps the time; `journalctl -u flockos-ptp4l -u flockos-phc2sys`
+and `pmc -u -b 0 -d <domain> 'GET CURRENT_DATA_SET'` (`offsetFromMaster`) show
+the PTP side.
+
 ## The nvidia variant
 
 `nvidia` is `base` plus NVIDIA's driver for containers on amd64 (WP-4.1;

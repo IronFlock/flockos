@@ -1,0 +1,136 @@
+#!/bin/bash
+# PTP as chrony's time source (docs/build.md, "Time").
+#
+# /etc/flockos/ptp.conf (-> /data/flockos/ptp.conf, a device setting), KEY=value:
+#   interface=<name>          the network interface toward the PTP master;
+#                             without it PTP is off
+#   domain=<0-255>            PTP domain (default 0)
+#   transport=udp4|udp6|l2    PTP over UDP/IPv4, UDP/IPv6 or Ethernet (default udp4)
+#   delay=e2e|p2p             delay mechanism (default e2e)
+#
+# With an interface it writes ptp4l's configuration, phc2sys's domain and
+# chrony's PTP source to /run/flockos. flockos-ptp4l keeps the interface's
+# hardware clock on the PTP master's time; flockos-phc2sys hands that time to
+# chrony, only while ptp4l follows a master. chrony prefers it over its NTP
+# sources, which stay as the fallback. The device takes time from PTP only: it
+# never becomes a master for others (clientOnly).
+#
+# Without an argument (flockos-ptp.service, at boot before chrony) it writes the
+# files; the units start on them. "apply" (flockos-ptp-reload.service, when the
+# file changes) also restarts what the change concerns.
+set -euo pipefail
+
+# FLOCKOS_PTP_CONF, FLOCKOS_RUN: for the unit tests only.
+conf=${FLOCKOS_PTP_CONF:-/etc/flockos/ptp.conf}
+run=${FLOCKOS_RUN:-/run/flockos}
+
+interface="" domain=0 transport=udp4 delay=e2e
+if [ -f "$conf" ]; then
+  n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line=${line%$'\r'}
+    case "$line" in '' | '#'*) continue ;; esac
+    if [[ ! "$line" =~ ^([a-z]+)=([A-Za-z0-9._:-]*)$ ]]; then
+      echo "ptp: $conf:$n: not a key=value line" >&2
+      exit 1
+    fi
+    key=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
+    case "$key" in
+      interface)
+        # A kernel interface name: at most 15 characters, no slash or space.
+        [ -z "$value" ] || [[ "$value" =~ ^[A-Za-z0-9._:-]{1,15}$ ]] || {
+          echo "ptp: $conf:$n: interface must be a network interface name (enp88s0)" >&2
+          exit 1
+        }
+        interface=$value
+        ;;
+      domain)
+        [[ "$value" =~ ^[0-9]{1,3}$ ]] && [ "$((10#$value))" -le 255 ] || {
+          echo "ptp: $conf:$n: domain must be a number from 0 to 255" >&2
+          exit 1
+        }
+        domain=$((10#$value))
+        ;;
+      transport)
+        [[ "$value" =~ ^(udp4|udp6|l2)$ ]] || {
+          echo "ptp: $conf:$n: transport must be udp4, udp6 or l2" >&2
+          exit 1
+        }
+        transport=$value
+        ;;
+      delay)
+        [[ "$value" =~ ^(e2e|p2p)$ ]] || {
+          echo "ptp: $conf:$n: delay must be e2e or p2p" >&2
+          exit 1
+        }
+        delay=$value
+        ;;
+      *)
+        echo "ptp: $conf:$n: unknown key $key" >&2
+        exit 1
+        ;;
+    esac
+  done <"$conf"
+fi
+
+ptp4l_conf=$run/ptp/ptp4l.conf
+phc2sys_env=$run/ptp/phc2sys.env
+chrony_conf=$run/chrony/ptp.conf
+
+# Writes $2 to $1 unless it says that already; prints "changed" if it wrote.
+put() {
+  if [ ! -f "$1" ] || [ "$(cat "$1")" != "$2" ]; then
+    printf '%s\n' "$2" >"$1.new"
+    mv "$1.new" "$1"
+    echo changed
+  fi
+}
+
+mkdir -p "$run/ptp" "$run/chrony"
+changed=""
+if [ -n "$interface" ]; then
+  case "$transport" in udp4) nt=UDPv4 ;; udp6) nt=UDPv6 ;; l2) nt=L2 ;; esac
+  case "$delay" in e2e) dm=E2E ;; p2p) dm=P2P ;; esac
+  changed+=$(put "$ptp4l_conf" "# Written by /usr/lib/flockos/ptp from $conf.
+[global]
+clientOnly 1
+domainNumber $domain
+network_transport $nt
+delay_mechanism $dm
+time_stamping hardware
+logging_level 5
+verbose 1
+use_syslog 0
+
+[$interface]")
+  changed+=$(put "$phc2sys_env" "PTP_DOMAIN=$domain")
+  # The settings linuxptp's timemaster gives chrony for a PTP source: phc2sys
+  # sends one sample a second (-R 1), chrony takes four per poll of 4 s.
+  changed+=$(put "$chrony_conf" "# Written by /usr/lib/flockos/ptp from $conf: PTP on $interface, domain $domain.
+refclock SOCK /run/chrony/ptp.sock refid PTP poll 2 filter 4 precision 1e-9 delay 1e-4")
+else
+  for f in "$ptp4l_conf" "$phc2sys_env" "$chrony_conf"; do
+    if [ -e "$f" ]; then
+      rm -f "$f"
+      changed+=changed
+    fi
+  done
+fi
+
+if [ -n "$interface" ]; then
+  echo "ptp: on $interface, domain $domain, $transport, $delay"
+else
+  echo "ptp: off (no interface in $conf)"
+fi
+
+[ "${1:-}" = apply ] || exit 0
+[ -n "$changed" ] || exit 0
+# chrony reads its sources at start; phc2sys connects to chrony's socket at
+# its own start, so it follows chrony (PartOf=chrony.service).
+if [ -n "$interface" ]; then
+  systemctl restart chrony.service flockos-ptp4l.service flockos-phc2sys.service
+else
+  systemctl stop flockos-phc2sys.service flockos-ptp4l.service
+  systemctl try-restart chrony.service
+fi

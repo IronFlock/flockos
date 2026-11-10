@@ -559,6 +559,35 @@ class Runner:
         self.vm.run("test -e /run/flockos/rt-reboot-required")
         self.rt_pending = True
 
+    def time_sync(self):
+        """Time (docs/build.md, "Time"): chrony instead of systemd-timesyncd.
+        A ptp.conf that names the NIC gives chrony a PTP source and starts
+        ptp4l and phc2sys; removing it takes them away again. QEMU's NIC has
+        no hardware time stamps, so ptp4l cannot follow a master here: this
+        checks the wiring, PTP itself is a hardware check."""
+        for unit in ("chrony.service", "flockos-ptp.service", "flockos-ptp.path"):
+            self.vm.run(f"systemctl is-active {unit}")
+        self.vm.run("test ! -e /usr/lib/systemd/system/systemd-timesyncd.service")
+        self.vm.run("chronyc -n tracking")
+        self.vm.run("test -L /etc/flockos/ptp.conf")
+        nic = self.vm.run("ip -o route show default | awk '{print $5; exit}'").strip()
+        if not nic:
+            raise TestFailure("no default route to name as the PTP interface")
+        self.vm.run(f"printf 'interface={nic}\\ndomain=24\\n' > /data/flockos/ptp.conf")
+        self.wait_for("chronyc -n sources | grep -q '^#. PTP '", 60, "chrony's PTP source")
+        self.vm.run(f"grep -qx '\\[{nic}\\]' /run/flockos/ptp/ptp4l.conf")
+        self.vm.run("grep -qx 'domainNumber 24' /run/flockos/ptp/ptp4l.conf")
+        for unit in ("flockos-ptp4l.service", "flockos-phc2sys.service"):
+            started = self.vm.run(f"systemctl show -p InvocationID --value {unit}").strip()
+            if not started:
+                raise TestFailure(f"{unit} did not start for ptp.conf")
+        self.vm.run("rm /data/flockos/ptp.conf")
+        self.wait_for("! chronyc -n sources | grep -q '^#. PTP '", 60, "chrony to drop the PTP source")
+        self.vm.run("! systemctl -q is-active flockos-ptp4l.service flockos-phc2sys.service")
+        self.vm.run("test ! -e /run/flockos/ptp/ptp4l.conf")
+        # ptp4l failed on the NIC without hardware time stamps, as expected.
+        self.vm.run("systemctl reset-failed flockos-ptp4l.service flockos-phc2sys.service 2>/dev/null || true")
+
     def enrolled(self, first):
         """The slot is enrolled from the test .flock: SSH user, sudo rule,
         the agent's unit; on the first boot the .flock left the FLOCKOS
@@ -889,6 +918,7 @@ def main():
             runner.step("rt kernel: PREEMPT_RT, tuning from rt.conf into grubenv", runner.rt_kernel)
         if args.variant == "nvidia":
             runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
+        runner.step("time: chrony, PTP from ptp.conf as chrony's source", runner.time_sync)
         runner.step("reboot: machine-id, host key, journal persist", runner.reboot_persists)
         if args.only != "boot":
             runner.step("update into slot B", runner.update_to_b)

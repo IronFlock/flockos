@@ -170,17 +170,21 @@ if [ "$VARIANT" = installer ]; then
 else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
+  # chrony keeps the time; the PTP units run only when ptp.conf names an
+  # interface (docs/build.md, "Time").
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
     flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
-    NetworkManager.service systemd-timesyncd.service
+    NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service
   # GRUB counts every boot as a try; the Pi's tryboot counts only the first
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then
     systemctl --root="$ROOT" enable flockos-slot-proven.path flockos-slot-keep.timer
   fi
-  # The device's own enroll settings live on /data, so they outlive updates.
+  # The device's own enroll and PTP settings live on /data, so they outlive
+  # updates.
   mkdir -p "$ROOT/etc/flockos"
   ln -sfn /data/flockos/enroll.conf "$ROOT/etc/flockos/enroll.conf"
+  ln -sfn /data/flockos/ptp.conf "$ROOT/etc/flockos/ptp.conf"
 fi
 if [ "$KERNEL" = rt ]; then
   systemctl --root="$ROOT" enable flockos-rt-tuning.service

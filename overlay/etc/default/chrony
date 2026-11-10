@@ -1,0 +1,10 @@
+# chronyd's options; chrony.service reads DAEMON_OPTS (docs/build.md, "Time").
+# -F 1: the distribution's system call filter.
+# -s: at start, set the clock from the real-time clock, or, on a board
+#     without one (Raspberry Pi 4), to the time chronyd last stopped (the drift
+#     file's time), so the clock never starts before the last run while NTP
+#     is out of reach. systemd-timesyncd did this with its clock file.
+DAEMON_OPTS="-F 1 -s"
+
+# Ubuntu's chrony.service: not in a container.
+SYNC_IN_CONTAINER="no"
