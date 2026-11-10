@@ -1,8 +1,9 @@
-# Keeps the hardware clock of the interface in ptp.conf on the PTP master's
-# time (docs/build.md, "Time"). Only when ptp.conf names an interface:
-# flockos-ptp writes the configuration.
+# PTP on the interface in ptp.conf (docs/build.md, "Time"): as a client it
+# keeps the interface's hardware clock on the master's time, as a server it is
+# the master there. Only when ptp.conf names an interface: flockos-ptp writes
+# the configuration.
 [Unit]
-Description=IronFlockOS: PTP client (ptp4l)
+Description=IronFlockOS: PTP on the network (ptp4l)
 Documentation=man:ptp4l(8) https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
 ConditionPathExists=/run/flockos/ptp/ptp4l.conf
 After=flockos-ptp.service

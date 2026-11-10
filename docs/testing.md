@@ -83,9 +83,10 @@ Sequence:
    `nvidia-ctk` and `nvidia-container-cli` run.
    Then the time: chrony runs and systemd-timesyncd is gone; a `ptp.conf` that
    names the VM's interface gives chrony a PTP source and starts `ptp4l` and
-   `phc2sys`, and removing it takes them away again. QEMU's interface has no
-   hardware time stamps, so this checks the wiring; PTP itself is on the
-   hardware checklist.
+   `phc2sys`; `role=server` gives `ptp4l` the master's settings and takes the
+   source away; removing the file stops them. QEMU's interface has no hardware
+   time stamps, so this checks the wiring; PTP itself is on the hardware
+   checklist.
 2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
@@ -180,8 +181,11 @@ WP-4b.2, WP-5.4, WP-6.6):
    confirm the fallback.
 7. `fwupdmgr get-devices` lists the board's devices; note which have firmware on
    LVFS.
-8. Where the site has a PTP master: `ptp.conf` with the interface toward it
-   (`docs/build.md`, "Time"); `chronyc sources` shows `#* PTP` within a few
-   minutes; with the master's cable unplugged, chrony selects an NTP source
-   again.
+8. Where the site uses PTP (`docs/build.md`, "Time"). As a client, `ptp.conf`
+   with the interface toward the master: `chronyc sources` shows `#* PTP` within
+   a few minutes; with the master's cable unplugged, chrony selects an NTP source
+   again. As a server, `role=server` on the interface toward the clients: `pmc`
+   shows the device's own `clockIdentity` as `grandmasterIdentity`, and a client
+   (a camera, or a second device with `ptp.conf` as a client) reports an offset
+   to it of well under a microsecond.
 9. Target-specific items in `docs/targets/<target>.md`.

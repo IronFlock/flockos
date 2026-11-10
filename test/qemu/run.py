@@ -562,9 +562,10 @@ class Runner:
     def time_sync(self):
         """Time (docs/build.md, "Time"): chrony instead of systemd-timesyncd.
         A ptp.conf that names the NIC gives chrony a PTP source and starts
-        ptp4l and phc2sys; removing it takes them away again. QEMU's NIC has
-        no hardware time stamps, so ptp4l cannot follow a master here: this
-        checks the wiring, PTP itself is a hardware check."""
+        ptp4l and phc2sys; role=server makes ptp4l a master and takes the
+        source away; removing the file stops them. QEMU's NIC has no hardware
+        time stamps, so ptp4l cannot run PTP here: this checks the wiring,
+        PTP itself is a hardware check."""
         for unit in ("chrony.service", "flockos-ptp.service", "flockos-ptp.path"):
             self.vm.run(f"systemctl is-active {unit}")
         self.vm.run("test ! -e /usr/lib/systemd/system/systemd-timesyncd.service")
@@ -581,10 +582,17 @@ class Runner:
             started = self.vm.run(f"systemctl show -p InvocationID --value {unit}").strip()
             if not started:
                 raise TestFailure(f"{unit} did not start for ptp.conf")
+        # role=server: master on the interface, from the system clock; chrony
+        # keeps NTP only.
+        self.vm.run(f"printf 'interface={nic}\\nrole=server\\npriority1=10\\n' > /data/flockos/ptp.conf")
+        self.wait_for("grep -qx 'serverOnly 1' /run/flockos/ptp/ptp4l.conf", 60, "ptp4l's server settings")
+        self.vm.run("grep -qx 'priority1 10' /run/flockos/ptp/ptp4l.conf")
+        self.wait_for("chronyc -n sources >/dev/null && ! chronyc -n sources | grep -q '^#. PTP '", 60,
+                      "chrony to drop the PTP source of a server")
         self.vm.run("rm /data/flockos/ptp.conf")
-        self.wait_for("! chronyc -n sources | grep -q '^#. PTP '", 60, "chrony to drop the PTP source")
-        self.vm.run("! systemctl -q is-active flockos-ptp4l.service flockos-phc2sys.service")
-        self.vm.run("test ! -e /run/flockos/ptp/ptp4l.conf")
+        self.wait_for("test ! -e /run/flockos/ptp/ptp4l.conf", 60, "the PTP settings to go")
+        self.wait_for("! systemctl -q is-active flockos-ptp4l.service flockos-phc2sys.service", 60,
+                      "ptp4l and phc2sys to stop")
         # ptp4l failed on the NIC without hardware time stamps, as expected.
         self.vm.run("systemctl reset-failed flockos-ptp4l.service flockos-phc2sys.service 2>/dev/null || true")
 
