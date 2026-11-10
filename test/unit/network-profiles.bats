@@ -373,10 +373,212 @@ refused() {
   grep -q '^Before=.*data.mount' "$units/flockos-factory-reset.service"
   # Enroll, which writes the .flock's Wi-Fi profile, comes after NetworkManager.
   grep -q '^After=.*NetworkManager.service' "$units/flockos-enroll.service"
-  # Enabled on devices; the installer has no /data.
-  grep -qx '  systemctl --root="$ROOT" enable flockos-network-profiles.service' "$repo/build/customize.sh"
-  grep -qx '  systemctl --root="$ROOT" mask flockos-network-profiles.service' "$repo/build/customize.sh"
+  # Enabled on devices, with the trial's watch; the installer has no /data.
+  grep -qx '  systemctl --root="$ROOT" enable flockos-network-profiles.service flockos-network-profiles-trial.service' \
+    "$repo/build/customize.sh"
+  grep -qx '  systemctl --root="$ROOT" mask flockos-network-profiles.service flockos-network-profiles-trial.service' \
+    "$repo/build/customize.sh"
   for check in "$repo/test/image/rpi-check.sh" "$repo/test/image/jetson-rootfs-check.sh"; do
-    grep -q 'flockos-network-profiles.service; do' "$check"
+    grep -q 'flockos-network-profiles.service flockos-network-profiles-trial.service; do' "$check"
   done
+}
+
+@test "a failed, refused or killed run keeps nothing from starting: no unit needs it, it needs nothing but its mounts" {
+  # Only ordering: NetworkManager, enrollment, the agent and multi-user.target
+  # start after it, whatever its result.
+  for u in flockos-network-profiles.service flockos-network-profiles-trial.service; do
+    ! grep -qE '^(Requires|Requisite|BindsTo|PartOf|Upholds|OnFailure|FailureAction|SuccessAction|RequiredBy|UpheldBy)=' "$units/$u"
+  done
+  ! grep -rlE '^(Requires|Requisite|BindsTo|PartOf)=.*flockos-network-profiles' "$repo/overlay" "$repo/profiles"
+  # The watch is ordered before nothing, so nothing waits for its loop.
+  ! grep -q '^Before=' "$units/flockos-network-profiles-trial.service"
+  grep -qx 'Type=simple' "$units/flockos-network-profiles-trial.service"
+}
+
+# trial_env: an enrolled device whose agent has not connected, at uptime 1000
+# of boot one.
+trial_env() {
+  mkdir -p "$tmp/agent" "$tmp/run"
+  : >"$tmp/agent/enrolled"
+  echo "1000.42 1900.00" >"$tmp/uptime"
+  echo boot-one >"$tmp/boot_id"
+  printf '#!/bin/sh\necho "$*" >>"%s/systemctl.log"\n' "$tmp" >"$tmp/bin/systemctl"
+  chmod +x "$tmp/bin/systemctl"
+  export FLOCKOS_AGENT_DIR=$tmp/agent FLOCKOS_AGENT_RUN=$tmp/run FLOCKOS_UPTIME=$tmp/uptime FLOCKOS_BOOT_ID=$tmp/boot_id
+  trial=$tmp/data/network/trial
+}
+
+at() { echo "$1.00 0.00" >"$tmp/uptime"; }
+tstate() { sed -n "s/^$1=//p" "$trial/state"; }
+
+dhcp='[connection]
+id=office
+uuid=6f1b1f8e-4a52-4f3e-9d0b-5a1c2e3d4f50
+type=ethernet
+
+[ipv4]
+method=auto
+'
+
+@test "trial: the profiles taken stay once the device-agent has connected with them" {
+  trial_env
+  static office.nmconnection >"$src/office.nmconnection"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [ "$(tstate phase)" = new ]
+  [ "$(tstate window)" = 900 ]
+  [ -e "$trial/new/office.nmconnection" ]
+  [ -z "$(ls -A "$trial/old")" ]
+  at 1300
+  run bash "$script" trial
+  [ "$status" -eq 0 ]
+  [ "$(tstate elapsed)" = 300 ]
+  : >"$tmp/run/connected"
+  run bash "$script" trial
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"the device-agent has connected: the profiles from the FLOCKOS partition stay (office.nmconnection)"* ]]
+  [ ! -e "$trial" ]
+  cmp "$dest/office.nmconnection" <(static office.nmconnection)
+  [ ! -e "$tmp/systemctl.log" ]
+}
+
+@test "trial: without the agent's connection the earlier profiles come back after 15 minutes, and stay once it connects" {
+  trial_env
+  printf '%s' "$dhcp" >"$dest/office.nmconnection"
+  # Another profile of the same uuid, which the taken one removes.
+  static old-name.nmconnection >"$dest/old-name.nmconnection"
+  printf '%s' "$wifi" >"$dest/ironflock-wifi.nmconnection"
+  cp "$dest/office.nmconnection" "$tmp/office.before"
+  cp "$dest/old-name.nmconnection" "$tmp/old-name.before"
+  static office.nmconnection >"$src/office.nmconnection"
+  static lab.nmconnection 11111111-2222-4333-8444-555555555555 >"$src/lab.nmconnection"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [ ! -e "$dest/old-name.nmconnection" ]
+  at 1899
+  run bash "$script" trial
+  [ "$(tstate phase)" = new ]
+  [ ! -e "$tmp/systemctl.log" ]
+  at 1900
+  run bash "$script" trial
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"has not connected with the profiles from the FLOCKOS partition (lab.nmconnection office.nmconnection): back to the earlier ones (office.nmconnection old-name.nmconnection) for 30 minutes"* ]]
+  cmp "$dest/office.nmconnection" "$tmp/office.before"
+  cmp "$dest/old-name.nmconnection" "$tmp/old-name.before"
+  [ ! -e "$dest/lab.nmconnection" ]
+  [ -e "$dest/ironflock-wifi.nmconnection" ]
+  [ "$(mode "$dest/office.nmconnection")" = 600 ]
+  [ "$(cat "$tmp/systemctl.log")" = "try-restart NetworkManager.service" ]
+  [ "$(tstate phase)" = old ]
+  [ "$(tstate window)" = 1800 ]
+  [ "$(tstate elapsed)" = 0 ]
+  : >"$tmp/run/connected"
+  run bash "$script" trial
+  [[ "$output" == *"has connected with the earlier profiles: they stay, the ones from the FLOCKOS partition go (lab.nmconnection office.nmconnection)"* ]]
+  [ ! -e "$trial" ]
+  cmp "$dest/office.nmconnection" "$tmp/office.before"
+  [ ! -e "$dest/lab.nmconnection" ]
+}
+
+@test "trial: while neither connects the two take turns, twice as long each time, at most 4 hours" {
+  trial_env
+  printf '%s' "$dhcp" >"$dest/office.nmconnection"
+  static office.nmconnection >"$src/office.nmconnection"
+  bash "$script"
+  t=1000
+  for want in "old 1800" "new 3600" "old 7200" "new 14400" "old 14400" "new 14400"; do
+    t=$((t + $(tstate window)))
+    at "$t"
+    run bash "$script" trial
+    [ "$status" -eq 0 ]
+    [ "$(tstate phase) $(tstate window)" = "$want" ]
+  done
+  # On the taken profile now.
+  cmp "$dest/office.nmconnection" <(static office.nmconnection)
+  [ "$(wc -l <"$tmp/systemctl.log" | tr -d ' ')" = 6 ]
+}
+
+@test "trial: an unenrolled device's clock stands still; uptime counts across boots, not the wall clock" {
+  trial_env
+  rm "$tmp/agent/enrolled"
+  static office.nmconnection >"$src/office.nmconnection"
+  bash "$script"
+  at 100000
+  run bash "$script" trial
+  [ "$(tstate phase)" = new ]
+  [ "$(tstate elapsed)" = 0 ]
+  : >"$tmp/agent/enrolled"
+  # A new boot: its uptime so far counts, the time the device was off not.
+  echo boot-two >"$tmp/boot_id"
+  at 600
+  run bash "$script" trial
+  [ "$(tstate elapsed)" = 600 ]
+  [ "$(tstate boot)" = boot-two ]
+  at 899
+  run bash "$script" trial
+  [ "$(tstate phase)" = new ]
+  at 900
+  run bash "$script" trial
+  [ "$(tstate phase)" = old ]
+}
+
+@test "trial: a profile taken again unchanged leaves the trial as it is; new ones join it against the same earlier profiles" {
+  trial_env
+  printf '%s' "$dhcp" >"$dest/office.nmconnection"
+  cp "$dest/office.nmconnection" "$tmp/office.before"
+  static office.nmconnection >"$src/office.nmconnection"
+  bash "$script"
+  at 1500
+  bash "$script" trial
+  # The next boot: the partition kept the file (read-only), and a Wi-Fi
+  # profile came.
+  mkdir -p "$src"
+  static office.nmconnection >"$src/office.nmconnection"
+  printf '%s' "$wifi" >"$src/site-wifi.nmconnection"
+  echo boot-two >"$tmp/boot_id"
+  at 30
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"office.nmconnection is the device's profile already"* ]]
+  [ "$(tstate phase)" = new ]
+  cmp "$trial/old/office.nmconnection" "$tmp/office.before"
+  [ -e "$trial/new/site-wifi.nmconnection" ]
+  [ ! -e "$trial/old/site-wifi.nmconnection" ]
+  # The window starts over with the newcomer.
+  [ "$(tstate elapsed)" = 0 ]
+  at 930
+  bash "$script" trial
+  cmp "$dest/office.nmconnection" "$tmp/office.before"
+  [ ! -e "$dest/site-wifi.nmconnection" ]
+}
+
+@test "trial: profiles taken after a roll-back begin a new trial against the profiles in use" {
+  trial_env
+  printf '%s' "$dhcp" >"$dest/office.nmconnection"
+  static office.nmconnection >"$src/office.nmconnection"
+  bash "$script"
+  at 1900
+  bash "$script" trial
+  [ "$(tstate phase)" = old ]
+  mkdir -p "$src"
+  printf '%s' "$wifi" >"$src/site-wifi.nmconnection"
+  run bash "$script"
+  [[ "$output" == *"the profiles rolled back before stay out; a new trial begins"* ]]
+  [ "$(tstate phase)" = new ]
+  [ "$(ls "$trial/new")" = site-wifi.nmconnection ]
+  [ -z "$(ls -A "$trial/old")" ]
+  [ "$(sed -n 's/^method=//p' "$dest/office.nmconnection")" = auto ]
+}
+
+@test "the trial's watch: after NetworkManager and the profiles, while a trial lasts, and it starts again when it fails" {
+  u=$units/flockos-network-profiles-trial.service
+  grep -qx 'ExecStart=/usr/lib/flockos/network-profiles trial-watch' "$u"
+  grep -qx 'After=flockos-network-profiles.service NetworkManager.service' "$u"
+  grep -qx 'RequiresMountsFor=/data /opt/ironflock' "$u"
+  grep -qx 'ConditionPathExists=/data/network/trial/state' "$u"
+  grep -qx 'Restart=on-failure' "$u"
+  grep -qx 'WantedBy=multi-user.target' "$u"
+  # The marks it judges by: the agent's unit and its connection.
+  grep -q 'agent_run=${FLOCKOS_AGENT_RUN:-/run/ironflock-device-agent}' "$script"
+  grep -q 'agent_dir=${FLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}' "$script"
 }

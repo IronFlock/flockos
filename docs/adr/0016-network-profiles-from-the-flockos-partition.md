@@ -129,6 +129,12 @@ its blocks are written again, someone who reads the raw medium may find the pass
 | `flockos-proxy` | before containerd, Docker, the agent and chrony | independent |
 | NetworkManager | | reads the profiles at its start |
 | `flockos-gce-flock`, `flockos-enroll` | after NetworkManager | after: enroll writes the `.flock`'s Wi-Fi |
+| `flockos-network-profiles-trial` | after NetworkManager, while a trial lasts | judges the taken profiles (section 10) |
+
+Nothing depends on the unit's result: NetworkManager, enrollment, the agent and
+`multi-user.target` are only ordered after it. A refused profile, a failed or hung run and
+the time limit delay NetworkManager by at most the limit (two minutes, and systemd's
+90 seconds to stop what hangs), and never keep it from starting.
 
 ### 8. A factory reset
 
@@ -145,7 +151,8 @@ the new `/data`:
 
 A refused request is renamed before this unit runs; the profiles are then taken as
 without one. A reset that failed before it began keeps the request, and the profiles wait
-on.
+on. The reset does not keep a running trial (section 10): its earlier profiles are on
+`/data/network/trial`, which a reset clears, and the profiles in use at the reset stay.
 
 ### 9. The contract for the caller
 
@@ -183,6 +190,11 @@ by these rules:
   `network-profiles: refused <name>.nmconnection: <reason>; renamed to ...` in the journal
   and on the console, and the unit has failed. While a factory reset is pending or has
   begun, the files stay where they are.
+- **The trial.** A profile taken stays only once the device-agent has connected with it.
+  Without a connection within 15 minutes of an enrolled device's uptime the device's
+  earlier profiles come back (section 10); `journalctl -u flockos-network-profiles-trial`
+  says which stayed. A device whose profile does not work comes back on its earlier
+  network only where it has one (after `os install`: DHCP).
 - **`check`.** `/usr/lib/flockos/network-profiles check FILE` on a device: exit 0 and no
   output when FILE (by its name and content) would be taken; exit 1 and one line
   `network-profiles: <reason>` on stderr when not, without the file's name; exit 2 for
@@ -197,6 +209,54 @@ What else `os install` reads from a release, each image's raw size, its smallest
 its hardware list (`image.raw_size`, `image.min_disk_size`, `modules_alias`), is in
 [release.md](../release.md#what-ironflock-os-install-reads).
 
+### 10. A way back: the taken profiles are on trial
+
+A profile NetworkManager reads can still take a device off its network: a wrong static
+address that takes the card over from a working DHCP profile, a wrong Wi-Fi password, a
+profile NetworkManager refuses that replaced a working one of its name. The device-agent's
+connection to IronFlock is the device's only lifeline (device-agent, "The lifeline rule"),
+so the taken profiles are judged by it.
+
+- **What is kept.** Before a profile changes the device's profiles, the device's profile of
+  its name and those of its uuid are copied to `/data/network/trial/old/`, the taken
+  profile to `/data/network/trial/new/`, and `/data/network/trial/state` holds the phase
+  (`new`, the taken profiles in use, or `old`), the window and the time counted. A profile
+  taken again unchanged (a partition that does not let it go) changes nothing and leaves a
+  trial as it is.
+- **The judge.** `flockos-network-profiles-trial` runs while a trial lasts, after
+  NetworkManager, and looks once a minute. When the agent has connected
+  (`/run/ironflock-device-agent/connected`, which the agent writes once connected, from
+  device-agent 1.3.0), the profiles in use stay and the trial ends. Until then the uptime
+  of an enrolled device counts (`/opt/ironflock/device-agent/enrolled`), measured by
+  `/proc/uptime` and the boot id, so neither the clock, which a device without battery
+  restores from its last run, nor the time a device is off counts. An unenrolled device has
+  no agent to judge by, and its trial waits.
+- **The switch.** After 15 minutes without a connection the earlier profiles come back:
+  the taken ones go, the kept ones are written again, profiles the trial does not know
+  (such as the `.flock`'s Wi-Fi) stay, and NetworkManager restarts. While the agent does
+  not connect, the two take turns, each window twice as long as the one before, up to four
+  hours. The first connection decides which stay; the taken ones that lost are deleted.
+  15 minutes is the time `os install --host` waits for a connection after the hand-over
+  (ADR-0008 of device-init); the slowest of its experiments connected after 7 min 55 s.
+- **More profiles during a trial** join it: the earlier profiles stay the ones from before
+  the trial, and the window starts over. Profiles taken while the earlier ones are back
+  begin a new trial against those.
+
+Where this cannot bring a device back:
+
+- When neither the taken nor the earlier profiles reach IronFlock. On the first boot after
+  `os install` the earlier profiles are none, which is NetworkManager's DHCP on every
+  wired card: a wrong static address on a network with DHCP comes back, on one without it
+  does not.
+- When the agent cannot connect for another reason (IronFlock out of reach, a wrong proxy,
+  a device removed from IronFlock): the profiles take turns until it can, at most every
+  four hours, and the first connection keeps whichever is in use, as both reached it.
+- On a FLOCKOS partition that stays read-only, a profile that lost is taken again at every
+  boot, and the device is off its network for 15 minutes of each boot before the earlier
+  profiles come back.
+- A FLOCKOS partition or `/data` that cannot be mounted stops the boot before this unit,
+  as it did before ADR-0016 (`/etc/fstab`).
+
 ## Consequences
 
 - `os install` gives a machine with a static address or a Wi-Fi network its network on
@@ -206,7 +266,11 @@ its hardware list (`image.raw_size`, `image.min_disk_size`, `modules_alias`), is
   new one.
 - A wrong profile takes a device off its network as surely as a right one puts it on.
   IronFlockOS checks the form, not whether the address or password is right; the caller
-  checks what it can (ADR-0008 of device-init: the address, the gateway, the card).
+  checks what it can (ADR-0008 of device-init: the address, the gateway, the card). The
+  trial (section 10) brings the earlier profiles back after 15 minutes without a
+  connection; a device with no working earlier profile stays off.
+- A device whose agent does not connect for another reason switches its profiles at most
+  every four hours until it does.
 - The partition carries a Wi-Fi password until the first boot, as it carries the `.flock`.
 - NetworkManager's whole format is open, also kinds of connection `os install` refuses
   (VLANs, bonds, 802.1X): a person or a later tool can use them.

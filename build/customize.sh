@@ -169,7 +169,7 @@ if [ "$VARIANT" = installer ]; then
     flockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
     systemd-repart.service flockos-proxy.service flockos-proxy.path flockos-proxy-reload.service
   # The installer has no /data to put the stick's network profiles on.
-  systemctl --root="$ROOT" mask flockos-network-profiles.service
+  systemctl --root="$ROOT" mask flockos-network-profiles.service flockos-network-profiles-trial.service
 else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
@@ -181,8 +181,8 @@ else
     NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service \
     flockos-proxy.service
   # NetworkManager profiles from the FLOCKOS partition (docs/build.md,
-  # "Network profiles").
-  systemctl --root="$ROOT" enable flockos-network-profiles.service
+  # "Network profiles"), on trial until the agent has connected with them.
+  systemctl --root="$ROOT" enable flockos-network-profiles.service flockos-network-profiles-trial.service
   # GRUB counts every boot as a try; the Pi's tryboot counts only the first
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then
@@ -219,7 +219,7 @@ if [ "$VARIANT" = installer ]; then
   systemctl --root="$ROOT" is-enabled flockos-installer.service >/dev/null || die "flockos-installer.service is not enabled"
 else
   for unit in flockos-ssh-hostkeys.service flockos-enroll.service flockos-gce-flock.service flockos-fwupd-shim.service \
-    flockos-network-profiles.service; do
+    flockos-network-profiles.service flockos-network-profiles-trial.service; do
     systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
   done
   [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||

@@ -101,7 +101,7 @@ check "fstab: /boot/efi is NVIDIA's ESP, /data the layout's data partition" \
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
   flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
-  flockos-network-profiles.service; do
+  flockos-network-profiles.service flockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$root/usr/lib/systemd/system/systemd-timesyncd.service"

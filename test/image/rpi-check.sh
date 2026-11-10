@@ -100,7 +100,7 @@ check "fstab mounts FLOCKOS and /data" bash -c "grep -q '^PARTLABEL=FLOCKOS ' '$
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
   flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
-  flockos-network-profiles.service; do
+  flockos-network-profiles.service flockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$work/root/usr/lib/systemd/system/systemd-timesyncd.service"

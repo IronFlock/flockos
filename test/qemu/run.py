@@ -778,6 +778,20 @@ class Runner:
                 raise TestFailure(f"{nic} does not have the static address {address}:\n{addr}")
             self.vm.run(f"ip -o -4 route show default | grep -q '^default via {gateway} dev {nic} '")
             self.vm.run(f"curl -fsS -o /dev/null {self.http}/")
+            # The profile is on trial (ADR-0016, section 10): the device it
+            # replaced nothing on goes back to no profile after 15 minutes
+            # unless the agent connects. The test .flock's agent never does,
+            # so the test leaves its mark of a connection, and the trial ends
+            # with the profile kept, before the update needs the network.
+            self.vm.run("systemctl is-active flockos-network-profiles-trial.service")
+            self.vm.run(f"test -e /data/network/trial/new/{name} && grep -qx phase=new /data/network/trial/state")
+            # Written again at every look: a restart of the agent's unit
+            # empties its folder.
+            self.wait_for("mkdir -p /run/ironflock-device-agent && echo test >/run/ironflock-device-agent/connected"
+                          " && test ! -e /data/network/trial", 150, "the trial to keep the profile")
+            self.vm.run(f"test -e /data/network/connections/{name}")
+            self.vm.run("journalctl -b --no-pager -o cat -u flockos-network-profiles-trial"
+                        " | grep -q 'the profiles from the FLOCKOS partition stay'")
 
     def install_bundle(self):
         self.vm.run(f"curl -fsS -o /var/cache/flockos/test.raucb {self.http}/bundle.raucb", timeout=600)

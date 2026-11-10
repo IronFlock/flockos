@@ -323,6 +323,14 @@ ADR-0016 has the rules and the contract for the caller;
 `/usr/lib/flockos/network-profiles check FILE` tells whether a file would be
 taken.
 
+The profiles taken are on trial, as a profile NetworkManager reads can still
+take a device off its network: the device's profiles they replaced are kept in
+`/data/network/trial`, and `flockos-network-profiles-trial` keeps the taken
+ones once the device-agent has connected with them. Without a connection
+within 15 minutes of an enrolled device's uptime the earlier profiles come
+back, and while the agent does not connect the two take turns, twice as long
+each time, up to four hours (ADR-0016, section 10).
+
 Enrollment writes the `.flock`'s Wi-Fi as `ironflock-wifi.nmconnection` after
 NetworkManager has started.
 

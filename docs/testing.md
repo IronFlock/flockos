@@ -112,8 +112,11 @@ Sequence:
    then removes the proxy. The network profile has left the partition for
    `/data/network/connections` (mode 0600, root's), and NetworkManager runs the
    card on it: the address without DHCP's `dynamic` flag, the default route
-   through the gateway, and the host still answers. The profile stays for the
-   rest of the test (QEMU's DHCP would hand out the same address).
+   through the gateway, and the host still answers. The profile is on trial
+   (`flockos-network-profiles-trial` runs); the test writes the agent's mark of
+   a connection, which its own agent never earns, and the trial ends with the
+   profile kept. It stays for the rest of the test (QEMU's DHCP would hand out
+   the same address).
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
    machine-id, host key and `/data`, and is enrolled again from the agent's copy
