@@ -172,8 +172,11 @@ by these rules:
 - **The content.** A NetworkManager keyfile, UTF-8, at most 64 KiB, no NUL byte, LF line
   ends (CRLF and a byte order mark are accepted). Every line blank, `#` comment, `[group]`
   or `key=value`; the first group before the first key. A `[connection]` group with
-  `type=` (`ethernet`, `wifi`, ...) and a `uuid=` of a new random UUID, which makes the
-  profile replace any of the device's with that uuid. A key of the
+  `type=` (`ethernet`, `wifi`, ...) and a `uuid=`: IronFlockOS takes any valid UUID, and
+  the profile replaces any of the device's with that uuid (section 4). `os install`
+  derives it from the card's permanent MAC address, so the same machine gets the same
+  profile again, and a second install replaces the first one's profile instead of
+  adding another. A key of the
   `[ethernet]` or `[wifi]` group `mac-address=` binds the profile to the card, as
   interface names may differ between the old system and IronFlockOS. Mode and owner on
   the partition do not matter; the device makes the file 0600 and root's.
