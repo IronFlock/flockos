@@ -86,6 +86,24 @@ JSON
   [ "$(value HTTP_PROXY)" = http://new:3128 ]
 }
 
+@test "a FLOCKOS proxy.conf with the execute bits FAT shows becomes the device's with mode 600" {
+  printf 'http_proxy=http://new:3128\n' >"$tmp/esp/proxy.conf"
+  chmod 0755 "$tmp/esp/proxy.conf"
+  run bash "$proxy"
+  [ "$status" -eq 0 ]
+  [ "$(mode "$tmp/data/proxy.conf")" = 600 ]
+  # Also over a device file that had another mode, and a stale part file.
+  printf 'http_proxy=http://newer:3128\n' >"$tmp/esp/proxy.conf"
+  chmod 0755 "$tmp/esp/proxy.conf"
+  chmod 0644 "$tmp/data/proxy.conf"
+  printf 'stale' >"$tmp/data/proxy.conf.new"
+  chmod 0755 "$tmp/data/proxy.conf.new"
+  run bash "$proxy"
+  [ "$status" -eq 0 ]
+  [ "$(mode "$tmp/data/proxy.conf")" = 600 ]
+  grep -qx 'http_proxy=http://newer:3128' "$tmp/data/proxy.conf"
+}
+
 @test "a FLOCKOS proxy.conf with an error stays there; the device keeps its own, and the unit fails" {
   printf 'http_proxy=http://old:3128\n' >"$tmp/data/proxy.conf"
   printf 'http_proxy=proxy-without-scheme:3128\n' >"$tmp/esp/proxy.conf"

@@ -45,6 +45,10 @@
 set -euo pipefail
 # Names and keyfiles are checked byte by byte, alike in every locale.
 export LC_ALL=C
+# Profiles hold passwords: whatever this writes is root's alone. The modes
+# of the device's profiles are set besides (chmod 0600): a file on the FAT
+# partition shows the execute bits, which cp would keep.
+umask 077
 
 # FLOCKOS_ESP, FLOCKOS_CONNECTIONS, FLOCKOS_AGENT_RUN, FLOCKOS_AGENT_DIR,
 # FLOCKOS_UPTIME, FLOCKOS_BOOT_ID: for the unit tests only.
@@ -455,7 +459,6 @@ if ! compgen -G "$src/*.nmconnection" >/dev/null; then
   exit 0
 fi
 
-umask 077
 mkdir -p "$dest"
 # What a power loss or the unit's time limit left of an earlier run;
 # NetworkManager ignores names that begin with a dot.

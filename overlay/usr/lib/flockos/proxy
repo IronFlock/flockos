@@ -125,7 +125,10 @@ if [ -e "$esp/factory-reset.conf" ] || [ -e "$esp/factory-reset.keep" ]; then re
 if [ "${1:-}" != apply ] && [ "$reset_pending" = no ] && [ -f "$esp/proxy.conf" ]; then
   if parse "$esp/proxy.conf"; then
     mkdir -p "$(dirname "$conf")"
+    # cp keeps the source's mode under the umask, and a file on the FAT
+    # partition shows the execute bits (0700): the mode is set, not inherited.
     (umask 077 && cp "$esp/proxy.conf" "$conf.new")
+    chmod 0600 "$conf.new"
     mv "$conf.new" "$conf"
     # It may hold a password; the FLOCKOS partition is readable by anyone
     # who holds the disk.

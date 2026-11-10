@@ -334,6 +334,25 @@ refused() {
   [ "$(wc -l <"$tmp/awk.log" | tr -d ' ')" -le 22 ]
 }
 
+@test "a profile with the execute bits FAT shows, and an earlier one of another mode, are root's alone on /data and in the trial" {
+  trial_env
+  printf '%s' "$dhcp" >"$dest/office.nmconnection"
+  chmod 0644 "$dest/office.nmconnection"
+  static office.nmconnection >"$src/office.nmconnection"
+  chmod 0755 "$src/office.nmconnection"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [ "$(mode "$dest/office.nmconnection")" = 600 ]
+  [ "$(mode "$trial/new/office.nmconnection")" = 600 ]
+  [ "$(mode "$trial")" = 700 ]
+  [ "$(mode "$trial/state")" = 600 ]
+  # Rolled back, the earlier profile is 600 as NetworkManager wants it.
+  at 1900
+  run bash "$script" trial
+  [ "$(tstate phase)" = old ]
+  [ "$(mode "$dest/office.nmconnection")" = 600 ]
+}
+
 @test "a missing profile folder on /data is made, readable by root only" {
   rm -r "$tmp/data/network"
   static office.nmconnection >"$src/office.nmconnection"
