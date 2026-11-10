@@ -66,7 +66,11 @@ The image holds the FLOCKOS partition and slot A only. On the first boot
 `systemd-repart` (definitions in `targets/<target>/repart.d/`) creates slot B
 with the same size and the `data` partition over the rest of the disk, and
 formats `data`. `/etc/fstab` mounts `data` at `/data` and bind-mounts the
-persistent paths from it (master plan, section 3.2):
+persistent paths from it (master plan, section 3.2). No mount there can stop
+the boot (`nofail`, each still ordered before `local-fs.target`): a device
+whose `/data` cannot be mounted runs on the root slot's own folders, without
+Docker, and `flockos-data-missing` says so on the console and in
+`/run/flockos/data-missing` (ADR-0015).
 
 | Path | From |
 |------|------|
@@ -187,9 +191,10 @@ On the device `flockos-enroll.service` runs `ironflock-init enroll` on the first
 boot of every slot and whenever a `.flock` lies on the FLOCKOS partition: with
 the newest `.flock` there (removed afterwards, and every other `.flock` there
 with it, as each would enroll the device again), else with the agent's own copy
-on `/data`. While a factory reset is pending or has begun, a `.flock` there
-waits for it ("Factory reset"). An A/B update brings a slot without the SSH user and the agent's
-unit; enroll puts them back without network. Enroll also sets the hostname
+on `/data`. While a factory reset may still find the old owner's data on
+`/data`, a `.flock` there waits; once it has begun to erase, or without
+`/data`, enroll takes it and leaves it there ("Factory reset"). An A/B update
+brings a slot without the SSH user and the agent's unit; enroll puts them back without network. Enroll also sets the hostname
 from the device name in the `.flock` (ADR-0009), made into a valid hostname by
 `ironflock-init`. A device keeps its hostname with `hostname-from-flock=no` in
 `/etc/flockos/enroll.conf`, which links to `/data/flockos/enroll.conf` and so
@@ -268,8 +273,8 @@ root only, and the log shows the URL without them.
 A device behind a proxy cannot reach the platform before it knows the proxy, so
 the file comes with the boot medium: a `proxy.conf` on the FLOCKOS partition,
 next to the `.flock` (FlockFlasher writes it), replaces the device's on the next
-boot and is removed from the partition; while a factory reset is pending or has
-begun, it waits for it. The installer stick passes its
+boot and is removed from the partition; during a factory reset it waits, or is
+taken and left there, as the `.flock` is ("Factory reset"). The installer stick passes its
 `proxy.conf` on to the disk it installs, and keeps it for the next device. On a
 device that runs, editing `/etc/flockos/proxy.conf` applies within seconds.
 
@@ -363,44 +368,39 @@ keep-network=yes   # keep the network profiles, proxy.conf and ptp.conf (default
 ```
 
 `flockos-factory-reset` (`/usr/lib/flockos/factory-reset`) copies what is kept
-into `factory-reset.keep` on the FLOCKOS partition, makes a new filesystem on
-the data partition, puts the kept files back, clears what the enrollment, the
-agent, apps and users left in both root slots, writes `factory-reset.log`,
-removes the request and restarts. What is kept: RAUC's state (`/data/rauc`)
-always; with `keep-network=yes` also `/data/network/connections`,
-`/data/flockos/proxy.conf` and `/data/flockos/ptp.conf`. Everything else on
-`/data` goes: the agent and its `.flock` copy, Docker's images and containers,
-the homes, the logs, the host keys, `enroll.conf`, `rt.conf`. In the root slots
-the reset removes `/apps` (the apps' files), containerd's and NetworkManager's
-state, root's files, the sudo rule and the agent's unit,
-`/var/lib/flockos/enrolled` and the accounts the enrollment made, and sets the
-hostname back to `flockos` and the machine-id to `uninitialized`;
-`slot-proven`, `ORDER` and the `_OK` flags of `grubenv` stay, so updates and
-fallback work as before. ADR-0015 lists every path.
+into `factory-reset.keep` on the FLOCKOS partition, clears what the
+enrollment, the agent, apps and users left in both root slots, makes a new
+filesystem on the data partition, puts the kept files back, writes
+`factory-reset.log`, removes the request and restarts. What is kept: RAUC's
+state (`/data/rauc`) always; with `keep-network=yes` also
+`/data/network/connections`, `/data/flockos/proxy.conf` and
+`/data/flockos/ptp.conf`. Everything else on `/data` goes. In the root slots
+the reset removes `/apps`, containerd's and NetworkManager's state, root's
+files, the sudo rule and the agent's unit, `/var/lib/flockos/enrolled` and the
+accounts the enrollment made, and sets the hostname back to `flockos` and the
+machine-id to `uninitialized`; `slot-proven`, `ORDER` and the `_OK` flags of
+`grubenv` stay. ADR-0015 lists every path. The boot after the reset is a first
+boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf` and a
+`.flock` on the FLOCKOS partition taken in.
 
-The boot after the reset is a first boot: a new machine-id and new SSH host
-keys, `/data` laid out anew, a `proxy.conf` and a `.flock` on the FLOCKOS
-partition taken in, enrollment with that `.flock`, or none. Until then, while
-`factory-reset.conf` or `factory-reset.keep` is on the partition, enroll and
-`flockos-proxy` leave the `.flock` and `proxy.conf` there alone; after a refused
-request they take them as without one. Network profiles on the partition
-([Network profiles](#network-profiles)) wait the same way and are taken at
-that first boot: with `keep-network=yes` into the kept profiles, replacing
-those of the same name or uuid; with `keep-network=no` they are the only ones.
-
-A request the device does not understand (another key or value) is refused
-and renamed to `factory-reset.conf.refused`, and the device boots as before. A
-failure before the reset has begun (`factory-reset.keep` has its name) clears
-nothing, and the device boots as before. Once it has begun, only a new
-filesystem that cannot be made or mounted stops the boot before `/data`: the
-device stops in emergency mode, where nobody can log in, with the reason on
-the console; Enter or a power cycle tries again. Every later step that fails
-is named in the record (`result=incomplete`), and the device restarts into its
-first boot all the same. A power loss continues the reset at the next boot; on
-GRUB the reset clears the booted slot's `_TRY` flag just before it begins, so
-that boot is the same slot. On a Raspberry Pi that runs an update on trial, the
-reset waits for the next boot that is not a trial. The steps are on the
-console; `factory-reset.log` keeps the result.
+No failure of the reset keeps a device offline. Each request has three
+attempts, counted in `/var/lib/flockos/factory-reset.state` of the booted slot
+before each starts. A failed attempt is recorded, and the boot goes on with
+what `/data` holds; the next boot tries again. After the third failure the
+reset gives up: the device boots with the old `/data`, or a new one when the
+reset had begun to erase it, and the record says what of the old owner may be
+left. Every step that waits on a disk has a time limit; an attempt has 25
+minutes in all. The reset restarts the device only after it has completed,
+and a completed reset is marked done in the state and on the new `/data`, so it
+is never done twice. Where the count cannot be written there is no attempt.
+While a request is open, `/run/flockos/factory-reset-hold` tells enroll and
+`flockos-proxy` to leave the FLOCKOS partition's `.flock` and `proxy.conf`
+alone (`wait`, while the old owner's data may still be on `/data`) or to take
+them and leave them there (`copy`, once the erase has begun). A request the
+device does not understand is refused, not counted, and renamed to
+`factory-reset.conf.refused`. On a Raspberry Pi that runs an update on trial,
+the reset waits for the next boot that is not a trial. The steps are on the
+console and in the journal; `factory-reset.log` keeps the result.
 
 ### The contract for the CLI
 
@@ -428,6 +428,10 @@ from this section.
   or `keep-network=no\n`; an empty file is a reset with `keep-network=no`. The
   device refuses any other key or value; a new key comes with a release of
   IronFlockOS, and `check` tells whether a device knows it.
+- **Which request.** The device tells a request from another one by its
+  checksum, size and time of change. Each request has three attempts; one that
+  was completed or given up is not tried again. To try again after a give-up,
+  write the request anew (it gets a new time of change).
 - **Before writing.** The next start must run a system that has the reset: the
   running system must be the bootloader's next choice and marked good (`rauc
   status`: the booted slot is `boot_primary` and its `boot_status` is `good`),
@@ -440,48 +444,62 @@ from this section.
 - **Writing it.** As root: the whole content to a temporary name in the same
   folder, any `/boot/efi/.factory-reset*.part` (for example
   `.factory-reset.conf.part`), fsync, `check` it if you like, rename to
-  `factory-reset.conf`, fsync the folder. A request cut short by a power loss
-  could otherwise keep less than asked for. The reset removes every
-  `.factory-reset*.part` there when it ends (done, incomplete or refused).
+  `factory-reset.conf`, fsync the folder. The reset removes every
+  `.factory-reset*.part` there when a request ends (done, incomplete, gave-up or
+  refused).
 - **A new device (`-c`).** After the request, write the new `.flock` the same
   way (for example `.factory-reset.flock.part`) and rename it to
   `/boot/efi/<name>.flock`. Remove every other `*.flock` on the partition first:
   enroll takes the newest one by modification time, which FAT keeps to two
-  seconds, and removes all others once it has enrolled. If the `.flock` cannot
-  be written, remove the request again. A `proxy.conf` for the new site goes to
-  `/boot/efi/proxy.conf` the same way. While the request or `factory-reset.keep`
-  is there, neither is taken; a power loss between the request and the `.flock`
-  leaves a reset device that waits for a `.flock`, never the new identity on
-  the old data.
-- **A request already pending** (`factory-reset.conf` is there): replace it the
-  same way, or remove it to cancel. **A reset that has begun**
-  (`factory-reset.keep` is there; seen only with the medium in another
-  computer, or on a device in emergency mode): change nothing; it can no longer
-  be cancelled, and the next start goes on with it.
+  seconds. If the `.flock` cannot be written, remove the request again. A
+  `proxy.conf` for the new site goes to `/boot/efi/proxy.conf` the same way.
+  While the old owner's data may still be on `/data`, neither is taken: the
+  new identity never runs on the old data. After a failed attempt that had
+  begun to erase, both are taken and left on the partition, so the device
+  comes online as the new device before the next attempt. After a completed
+  reset enroll takes the `.flock` and removes it with every other `.flock`.
+- **A request already open** (`factory-reset.conf` is there, and no
+  `factory-reset.keep`): replace it the same way (it is then a new request), or
+  remove it, with the `.flock`, to cancel. **A reset that has begun**
+  (`factory-reset.keep` is there): change nothing; it goes on at the next
+  start.
 - **Then restart** (`systemctl reboot`). Nothing happens before the restart.
-- **At the next boot** the device resets as described above, restarts by
-  itself, and comes up as a first boot: enrolled with the new `.flock` and
-  reachable over SSH as its owner, or unenrolled and reachable on the console
-  only. Two restarts in all; the reset itself takes seconds, a few minutes on a
-  slow SD card.
-- **The record.** `/boot/efi/factory-reset.log`, replaced by every reset and
-  every refusal, `KEY=value` lines after a comment line. None is written when
-  the reset waits for a start that is not a trial, or when the script runs while
-  `/data` is mounted.
+- **At the next start** the device resets and restarts by itself, once, and
+  comes up as a first boot: enrolled with the new `.flock` and reachable over
+  SSH as its owner, or unenrolled and reachable on the console only. An attempt
+  that fails does not restart the device: it comes up as it is (`result=failed`)
+  and tries again at its next start, which nobody but a person or an update
+  brings about. Two restarts for a reset that works; up to an hour on a disk
+  that does not answer.
+- **The state.** `/var/lib/flockos/factory-reset.state` of the booted slot, for
+  a status: `request=`, `attempts=` (made so far), `erase=` (`no` or `started`),
+  `outcome=` (empty while open, `done` or `gave-up`), `last-failure=`. Read only.
+- **The record.** `/boot/efi/factory-reset.log`, replaced by every attempt, the
+  give-up and every refusal, and the same in the booted slot as
+  `/var/lib/flockos/factory-reset.log` (for when the FLOCKOS partition cannot be
+  written; take the newer by `time`). `KEY=value` lines after a comment line.
+  None is written when the reset waits for a start that is not a trial, when
+  the script runs while `/data` is mounted, or when a request done before is
+  found again (unless its record was lost: it is then written anew from the
+  mark the reset left on `/data`).
 
   | Key | Value |
   |-----|-------|
-  | `result` | `done`; `incomplete`, done but some steps failed; `refused`; or `failed` |
+  | `result` | `done`; `incomplete` (done, some steps failed); `failed` (this attempt, tried again at the next start); `gave-up`; `refused` |
   | `time` | when it was written, UTC, by the device's clock (`2026-11-10T18:00:00Z`) |
   | `image`, `version` | `IMAGE_ID` and `IMAGE_VERSION` of the system that ran it |
   | `slot` | the booted slot, `A`, `B` or `unknown` |
-  | `keep-network` | `done`, `incomplete`: `yes` or `no` as the request said; `unknown` when a reset that had begun could not read it back from `factory-reset.keep` |
+  | `request` | the request's identity (checksum, size, time of change), as in the state |
+  | `attempt`, `attempts-max` | all but `refused`: the attempt this is, of `3` |
+  | `keep-network` | `done`, `incomplete`, `gave-up`: `yes` or `no` as the request said; `unknown` when it could not be read back from `factory-reset.keep` |
   | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections flockos/proxy.conf flockos/ptp.conf`, space-separated |
   | `other-slot` | `done`, `incomplete`: `cleaned`, `none (...)` (no partition or filesystem), or `not cleaned (...)`: on another disk, no IronFlockOS, the booted slot is none of `system.conf`, cannot mount, error |
   | `note` | `done`, `incomplete`, when something could not be kept: why |
-  | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore` (putting back the kept files), `booted-slot`, `other-slot`, `grubenv`, `keep-file` (removing `factory-reset.keep`), `part-files` |
-  | `reason` | `refused`, `failed`: why; for `refused` one of the reasons of `check` |
-  | `begun` | `failed`: `no`, nothing was cleared, the device booted as before and tries again at every boot while the request is there; `yes`, the new filesystem could not be made or mounted, `/data` stays unmounted and the next boot goes on |
+  | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `keep-file` |
+  | `reason` | `failed`, `gave-up` (the last failure), `refused`: why; for `refused` one of the reasons of `check`; for `failed` also `cannot count the attempt in <file>` (no attempt was made) and `the attempt did not end within <n> seconds` |
+  | `begun` | `failed`: whether `factory-reset.keep` had its name |
+  | `data` | `failed`, `gave-up`: what `/data` holds now: `old` (not erased), `new` (a new filesystem, with the kept files), `none` (no filesystem mounts: the device runs without `/data`) |
+  | `left` | `gave-up`: what of the old owner may still be on the device, space-separated, of `data`, `booted-slot`, `other-slot`; empty when nothing is |
 
   It names nothing of the old owner.
 

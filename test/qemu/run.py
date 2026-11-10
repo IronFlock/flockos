@@ -891,7 +891,43 @@ class Runner:
                     pass
             raise TestFailure(f"{e}; the factory reset did not restart the device by itself\n{info}") from None
 
+    RESET_UNITS = ("flockos-factory-reset.service", "flockos-data-missing.service", "data.mount",
+                   "flockos-data-layout.service", "flockos-proxy.service", "flockos-enroll.service",
+                   "ironflock-device-agent.service")
+
+    def reset_diagnostics(self):
+        """What a failed factory reset step needs in CI's log: the units it
+        waited for, their journal, the reset's record and state, the FLOCKOS
+        partition, and the reset boot's own lines from the serial console (its
+        journal is lost with its restart)."""
+        units = " ".join(self.RESET_UNITS)
+        out = []
+        try:
+            out.append(self.vm.run(
+                f"systemctl status --no-pager -l {units}; "
+                f"journalctl -b --no-pager -o short-monotonic {' '.join('-u ' + u for u in self.RESET_UNITS)} | tail -n 300; "
+                "for f in /boot/efi/factory-reset.log /var/lib/flockos/factory-reset.log "
+                "/var/lib/flockos/factory-reset.state /run/flockos/factory-reset-hold /run/flockos/data-missing; do "
+                "echo \"== $f\"; cat \"$f\" 2>&1; done; ls -la /boot/efi; findmnt /data; systemctl --failed --no-pager",
+                timeout=120, check=False))
+        except TestFailure as e:
+            out.append(f"(no shell for the diagnostics: {e})")
+        try:
+            with open(self.vm.console, "rb") as fh:
+                lines = [line for line in fh.read().decode("utf-8", "replace").splitlines()
+                         if "factory-reset" in line or "data-missing" in line]
+            out.append("== the serial console's lines of the reset\n" + "\n".join(lines[-200:]))
+        except OSError:
+            pass
+        return "\n".join(out)
+
     def factory_reset(self):
+        try:
+            self._factory_reset()
+        except TestFailure as e:
+            raise TestFailure(f"{e}\n{self.reset_diagnostics()}") from None
+
+    def _factory_reset(self):
         """Factory reset (ADR-0015, docs/build.md "Factory reset") of the
         device in slot B, with the system it was updated from in slot A. Before
         it: an app's container runs (an image made in the VM from its own
@@ -902,8 +938,9 @@ class Runner:
         restarts by itself; the device then comes up on slot B without the old
         identity, containers, logs and data, with its network settings and
         RAUC's state, enrolled as the new device; slot A is cleared too, and B,
-        which had proven itself, is kept good. With --no-flock the device
-        stays unenrolled."""
+        which had proven itself, is kept good. The same request, put back as it
+        was (as when the FLOCKOS partition could not remove it), is not done a
+        second time. With --no-flock the device stays unenrolled."""
         if self.booted() != "B":
             raise TestFailure(f"the factory reset starts on slot {self.booted()}, expected B")
         self.vm.run("test -x /usr/lib/flockos/factory-reset")
@@ -933,6 +970,7 @@ class Runner:
         if out != "keep-network=yes":
             raise TestFailure(f"factory-reset check says {out!r}")
         self.vm.run("mv /boot/efi/.factory-reset.conf.part /boot/efi/factory-reset.conf && sync")
+        request_time = self.vm.run("stat -c %Y /boot/efi/factory-reset.conf").strip()
         new_flock = None
         if self.flock:
             new_flock = "flockos-ci-reset.flock"
@@ -947,7 +985,7 @@ class Runner:
             raise TestFailure(f"booted {self.booted()} after the factory reset, expected B: the reset's restart "
                               "must not count as a failed try")
         record = self.vm.run("cat /boot/efi/factory-reset.log")
-        for want in ("result=done", "keep-network=yes", "slot=B", "other-slot=cleaned"):
+        for want in ("result=done", "keep-network=yes", "slot=B", "other-slot=cleaned", "attempt=1"):
             if want not in record.splitlines():
                 raise TestFailure(f"the record lacks {want!r}:\n{record}")
         kept = next((line for line in record.splitlines() if line.startswith("kept=")), "").split("=", 1)[-1].split()
@@ -1009,8 +1047,25 @@ class Runner:
         # B had proven itself before the reset, so it is kept good once it has
         # stayed up, without the agent; the rest of the test needs it good.
         self.vm.run("test -e /var/lib/flockos/slot-proven")
-        self.wait_for("grub-editenv /boot/efi/EFI/BOOT/grubenv list | grep -qx B_TRY=0", 300,
-                      "slot B, proven before the reset, to be marked good again")
+        keep_b = "grub-editenv /boot/efi/EFI/BOOT/grubenv list | grep -qx B_TRY=0"
+        self.wait_for(keep_b, 300, "slot B, proven before the reset, to be marked good again")
+
+        # The same request put back as it was (content and time): the reset was
+        # completed, so it is not done again, and the device keeps its new
+        # identity.
+        self.vm.run(f"printf 'keep-network=yes\\n' > /boot/efi/factory-reset.conf"
+                    f" && touch -d @{request_time} /boot/efi/factory-reset.conf && sync")
+        self.vm.reboot(self.boot_timeout)
+        self.wait_running()
+        if self.booted() != "B":
+            raise TestFailure(f"booted {self.booted()} after the reboot with the old request, expected B")
+        self.vm.run("journalctl -b --no-pager -o cat -u flockos-factory-reset | grep -q 'it is not done again'")
+        self.vm.run("test ! -e /boot/efi/factory-reset.conf")
+        if self.vm.run("cat /etc/machine-id").strip() != mid:
+            raise TestFailure("the machine-id changed: the completed reset was done again")
+        if self.flock:
+            self.enrolled(first=False, owner=RESET_OWNER, name=RESET_FLOCK_NAME)
+        self.wait_for(keep_b, 300, "slot B to be marked good again")
         self.machine_id, self.host_key = mid, host_key
         self.vm.run("rm /data/flockos/proxy.conf")
 

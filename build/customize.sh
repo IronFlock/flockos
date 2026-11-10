@@ -172,6 +172,11 @@ if [ "$VARIANT" = installer ]; then
   systemctl --root="$ROOT" mask flockos-network-profiles.service flockos-network-profiles-trial.service
   # Its own fstab has no /apps on /data either: the check would only fail.
   systemctl --root="$ROOT" mask flockos-apps-check.service
+  # A factory reset (ADR-0015) is an installed device's: a request on the
+  # stick's FLOCKOS partition must not run on the stick, and the installer
+  # carries none to the disk it writes. Nothing wants these units on a stick
+  # (its fstab has no /data); the mask makes sure.
+  systemctl --root="$ROOT" mask flockos-factory-reset.service flockos-data-missing.service
 else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.

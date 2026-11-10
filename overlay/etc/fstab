@@ -1,23 +1,25 @@
 # IronFlockOS mounts (master plan, section 3.2). The root slot is mounted by the
 # kernel (root=PARTUUID=… from GRUB). Partition names are GPT names.
-PARTLABEL=FLOCKOS  /boot/efi  vfat  umask=0077,shortname=winnt  0  2
+# No mount here can stop the boot (nofail): a device must always come online.
+# Without FLOCKOS it boots without RAUC's grubenv; without /data it runs on
+# the root slot's own folders (flockos-data-missing.service says so). Each
+# mount stays ordered before local-fs.target (x-systemd.before).
+PARTLABEL=FLOCKOS  /boot/efi  vfat  umask=0077,shortname=winnt,nofail,x-systemd.before=local-fs.target  0  2
 # /data is created by systemd-repart on the first boot. A factory reset
-# (flockos-factory-reset.service, ADR-0015) runs before it is mounted; one
-# that fails after it has begun keeps it unmounted.
-PARTLABEL=data     /data      ext4  defaults,x-systemd.requires=systemd-repart.service,x-systemd.after=systemd-repart.service,x-systemd.requires=flockos-factory-reset.service  0  2
+# (flockos-factory-reset.service, ADR-0015) runs before it is mounted.
+PARTLABEL=data     /data      ext4  defaults,nofail,x-systemd.before=local-fs.target,x-systemd.requires=systemd-repart.service,x-systemd.after=systemd-repart.service  0  2
 
 # State that survives an A/B switch: bind mounts from /data, after
 # flockos-data-layout.service has created the directories.
-/data/ironflock            /opt/ironflock                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/home                 /home                                   none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/network/connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/log                  /var/log                                none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/cache                /var/cache/flockos                      none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/fwupd                /var/lib/fwupd                          none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-/data/pstore               /var/lib/systemd/pstore                 none  bind,x-systemd.requires=flockos-data-layout.service  0  0
-# The apps' data: /apps is the device-agent's -appsDir. nofail: a mount that
-# fails does not stop the boot, and the apps run on the slot's /apps, which
-# flockos-apps-check reports. nofail also drops the mount's order before
-# local-fs.target, so Docker, the agent and enroll are ordered after it here:
-# none of them writes under /apps before it is mounted, or before it failed.
-/data/apps                 /apps                                   none  bind,nofail,x-systemd.requires=flockos-data-layout.service,x-systemd.before=docker.service,x-systemd.before=ironflock-device-agent.service,x-systemd.before=flockos-enroll.service  0  0
+/data/ironflock            /opt/ironflock                          none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+/data/home                 /home                                   none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+/data/network/connections  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+/data/log                  /var/log                                none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+/data/cache                /var/cache/flockos                      none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+/data/fwupd                /var/lib/fwupd                          none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+/data/pstore               /var/lib/systemd/pstore                 none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target  0  0
+# The apps' data: /apps is the device-agent's -appsDir. When the mount fails,
+# the apps run on the slot's /apps, which flockos-apps-check reports. Docker,
+# the agent and enroll are ordered after it by name as well: none of them
+# writes under /apps before it is mounted, or before it failed.
+/data/apps                 /apps                                   none  bind,x-systemd.requires=flockos-data-layout.service,nofail,x-systemd.before=local-fs.target,x-systemd.before=docker.service,x-systemd.before=ironflock-device-agent.service,x-systemd.before=flockos-enroll.service  0  0

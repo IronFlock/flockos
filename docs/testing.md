@@ -32,11 +32,14 @@ the os-release contract, the target templates (GRUB A/B contract, RAUC
 `overlay/usr/lib/flockos` run against a temporary directory. The factory reset
 (`factory-reset.bats`) runs against folders that stand for the data partition
 and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk`, `blkid`,
-`findmnt`, `grub-editenv` and `sync`, a power loss at each call of them, failed
-steps through folders that take no new files, and, where `mawk` is installed,
-Debian's awk. The network profiles (`network-profiles.bats`) run against
-folders that stand for the FLOCKOS partition and `/data/network/connections`,
-with every rule a profile has to meet. They need bash and bats only:
+`findmnt`, `grub-editenv`, `sync` and `timeout`: a power loss at each call of
+them, a command that does not end, failed steps through folders that take no
+new files, and, where `mawk` is installed, Debian's awk. Each failure path
+shows that the boot goes on, that the attempt is counted (three, then the
+reset gives up), and what the record says.
+The network profiles (`network-profiles.bats`) run against folders that stand
+for the FLOCKOS partition and `/data/network/connections`, with every rule a
+profile has to meet. They need bash and bats only:
 
 ```sh
 just test
@@ -143,8 +146,14 @@ Sequence:
    new one; the network profile, `proxy.conf` and RAUC's
    record of slot B are kept; slot A, read with `debugfs`, has the image's
    hostname, `uninitialized` as machine-id and no `enrolled` mark; slot B,
-   proven before, is marked good again by `flockos-slot-keep`. With
-   `--no-flock` the device stays unenrolled, with the hostname `flockos`.
+   proven before, is marked good again by `flockos-slot-keep`. Then the same
+   request is put back as it was (content and time, as when the FLOCKOS
+   partition could not remove it) and the device restarts once: the reset is
+   not done again, the journal says so, and the device keeps its machine-id
+   and new identity. With `--no-flock` the device stays unenrolled, with the
+   hostname `flockos`. A failure of the step prints the units the reset touches
+   (`systemctl status`, their journal), the reset's record and state, the
+   FLOCKOS partition and the reset's lines from the serial console.
 5. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
    and nobody marks it good (as when the agent cannot reach the platform after
    an update); the next boot falls back to B.
