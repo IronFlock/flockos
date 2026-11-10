@@ -2,6 +2,13 @@
 # amd64 kernel and GRUB's environment tool (RAUC's grub backend).
 linux-image-amd64
 grub-common
+# Intel firmware that Debian 13 split out of firmware-misc-nonfree
+# (profiles/base/packages.debian): the i915 graphics firmware (DMC for the
+# display's power states, GuC, HuC for media) and the Sound Open Firmware of
+# Intel Smart Sound audio, both on most x86 IPCs and panel PCs since about
+# 2019.
+firmware-intel-graphics
+firmware-sof-signed
 # The Secure Boot chain (ADR-0011), which build/mkimage.sh copies onto the
 # FLOCKOS partition: Debian's shim, signed by Microsoft; MokManager, which
 # shim starts when a check fails; Debian's signed GRUB. Debian's kernels are
