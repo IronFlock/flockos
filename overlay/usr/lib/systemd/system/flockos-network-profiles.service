@@ -1,0 +1,24 @@
+# Network profiles from the FLOCKOS partition (ADR-0016, docs/build.md
+# "Network profiles"): NetworkManager keyfiles there, network/*.nmconnection,
+# become the device's profiles on /data before NetworkManager starts, on the
+# first boot and on every boot where one lies there. A factory reset runs
+# before /data is mounted, so before this; while one is pending or has begun
+# the profiles wait for it (ADR-0015).
+[Unit]
+Description=IronFlockOS: network profiles from the FLOCKOS partition
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0016-network-profiles-from-the-flockos-partition.md
+# /data with its folders, and the FLOCKOS partition.
+After=local-fs.target flockos-data-layout.service
+RequiresMountsFor=/data /boot/efi
+Before=NetworkManager.service
+ConditionPathExistsGlob=/boot/efi/network/*.nmconnection
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/flockos/network-profiles
+# A refused profile on the screen and the serial console too: a device
+# without its network is reached there.
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

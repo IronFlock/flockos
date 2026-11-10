@@ -1,0 +1,223 @@
+#!/bin/bash
+# Network profiles from the FLOCKOS partition (docs/build.md, "Network
+# profiles"; ADR-0016).
+#
+# NetworkManager keyfiles on the FLOCKOS partition (/boot/efi), as
+# network/<name>.nmconnection, become the device's profiles before
+# NetworkManager starts: on the first boot, where `ironflock os install`
+# puts them, and on every later boot where one lies there. Each goes to
+# /data/network/connections (which /etc/fstab binds to
+# /etc/NetworkManager/system-connections) with mode 0600, replaces the
+# device's profile of the same name and any other with the same uuid, and is
+# then removed from the partition. A profile may hold a Wi-Fi password, so it
+# is overwritten before it is removed, as proxy.conf is.
+#
+# A file is taken when:
+#   - its name is <name>.nmconnection, <name> 1 to 64 of A-Z a-z 0-9 . _ -
+#     and not beginning with . or -;
+#   - it is a regular file of 1 byte to 64 KiB, UTF-8 text without a NUL byte;
+#   - it is a keyfile as NetworkManager reads one: every line blank, a
+#     comment (#), a [group] or a key=value line, the first that is none of
+#     the first two a [group]; a [connection] group with type=, and a uuid=
+#     there, if any, is a UUID.
+# CRLF line ends and a byte order mark are accepted and written as LF and
+# without it. Any other file there is refused: it is renamed to
+# <name>.nmconnection.refused, so it is never taken by surprise later, the
+# reason goes to the journal and the console, the others are taken, and the
+# unit fails.
+#
+# While a factory reset is pending or has begun (factory-reset.conf or
+# factory-reset.keep on the partition, ADR-0015), the profiles are for the
+# device after it and wait.
+#
+# "check FILE" says whether FILE would be taken (exit 0, nothing printed) or
+# why not (exit 1, the reason on stderr) and changes nothing.
+set -euo pipefail
+# Names and keyfiles are checked byte by byte, alike in every locale.
+export LC_ALL=C
+
+# FLOCKOS_ESP, FLOCKOS_CONNECTIONS: for the unit tests only.
+esp=${FLOCKOS_ESP:-/boot/efi}
+dest=${FLOCKOS_CONNECTIONS:-/data/network/connections}
+src=$esp/network
+max_size=65536
+
+say() { echo "network-profiles: $*"; }
+
+# The grammar of GLib's key files, which NetworkManager reads profiles with.
+# Prints "type uuid" of a profile, or the reason it is none, and fails.
+# shellcheck disable=SC2016 # an awk program
+keyfile_awk='
+  function fail(msg) { print msg; bad = 1; exit 1 }
+  {
+    line = $0
+    sub(/^[ \t]+/, "", line)
+    if (line == "" || substr(line, 1, 1) == "#") next
+    if (substr(line, 1, 1) == "[") {
+      sub(/[ \t]+$/, "", line)
+      group = substr(line, 2, length(line) - 2)
+      if (substr(line, length(line), 1) != "]" || group == "" || index(group, "[") || index(group, "]"))
+        fail("line " NR " is not a [group] line")
+      groups++
+      next
+    }
+    eq = index(line, "=")
+    if (eq < 2) fail("line " NR " is not a key=value line")
+    if (!groups) fail("line " NR ": a key=value line before the first [group]")
+    key = substr(line, 1, eq - 1)
+    sub(/[ \t]+$/, "", key)
+    if (key == "" || index(key, "[") || index(key, "]")) fail("line " NR ": not a key name")
+    value = substr(line, eq + 1)
+    sub(/^[ \t]+/, "", value)
+    sub(/[ \t]+$/, "", value)
+    if (group == "connection" && key == "type") type = value
+    if (group == "connection" && key == "uuid") uuid = value
+  }
+  END {
+    if (bad) exit 1
+    if (type == "") { print "it has no type= in a [connection] group"; exit 1 }
+    print type " " uuid
+  }'
+
+# normalized FILE: FILE's text without a byte order mark, with LF line ends.
+normalized() {
+  local text
+  text=$(
+    cat -- "$1"
+    echo x
+  )
+  text=${text%x}
+  text=${text#$'\xef\xbb\xbf'}
+  printf '%s' "${text//$'\r\n'/$'\n'}"
+}
+
+# check FILE: sets type and uuid of a profile that is taken, or sets reason
+# and fails. The reason names no file.
+check() {
+  local name out size
+  name=$(basename -- "$1") reason="" type="" uuid=""
+  if [[ ! "$name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*\.nmconnection$ ]] || [ "${#name}" -gt $((64 + 13)) ]; then
+    reason="the name is not <name>.nmconnection with 1 to 64 of A-Z a-z 0-9 . _ -"
+    return 1
+  fi
+  if [ -L "$1" ] || [ ! -f "$1" ]; then
+    reason="it is not a file"
+    return 1
+  fi
+  size=$(wc -c <"$1" | tr -d ' ')
+  if [ "$size" -eq 0 ]; then
+    reason="it is empty"
+    return 1
+  fi
+  if [ "$size" -gt "$max_size" ]; then
+    reason="it is larger than 64 KiB"
+    return 1
+  fi
+  if [ "$(tr -d '\000' <"$1" | wc -c | tr -d ' ')" -ne "$size" ]; then
+    reason="it holds a NUL byte"
+    return 1
+  fi
+  if ! iconv -f UTF-8 -t UTF-8 <"$1" >/dev/null 2>&1; then
+    reason="it is not UTF-8 text"
+    return 1
+  fi
+  if ! out=$(normalized "$1" | awk "$keyfile_awk"); then
+    reason=$out
+    return 1
+  fi
+  type=${out%% *} uuid=${out#* }
+  if [[ ! "$type" =~ ^[a-z0-9-]+$ ]]; then
+    reason="type= is not a NetworkManager connection type"
+    return 1
+  fi
+  if [ -n "$uuid" ] && [[ ! "$uuid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+    reason="uuid= is not a UUID"
+    return 1
+  fi
+}
+
+# uuid_of FILE: the uuid in the [connection] group of a device's profile, in
+# lower case; nothing when it has none or is no keyfile.
+uuid_of() {
+  local out
+  out=$(normalized "$1" 2>/dev/null | awk "$keyfile_awk" 2>/dev/null) || return 0
+  printf '%s' "${out#* }" | tr '[:upper:]' '[:lower:]'
+}
+
+# remove FILE: overwritten first where that is possible, then removed.
+remove() {
+  shred -u "$1" 2>/dev/null || rm -f "$1"
+}
+
+if [ "${1:-}" = check ]; then
+  if [ "$#" -ne 2 ]; then
+    echo "usage: network-profiles check FILE" >&2
+    exit 2
+  fi
+  if check "$2"; then exit 0; fi
+  echo "network-profiles: $reason" >&2
+  exit 1
+fi
+if [ "$#" -ne 0 ]; then
+  echo "usage: network-profiles [check FILE]" >&2
+  exit 2
+fi
+
+if [ -e "$esp/factory-reset.conf" ] || [ -e "$esp/factory-reset.keep" ]; then
+  if compgen -G "$src/*.nmconnection" >/dev/null; then
+    say "a factory reset is pending: the profiles on the FLOCKOS partition wait for it"
+  fi
+  exit 0
+fi
+if ! compgen -G "$src/*.nmconnection" >/dev/null; then
+  say "no profile on the FLOCKOS partition"
+  exit 0
+fi
+
+umask 077
+mkdir -p "$dest"
+# What a power loss left of an earlier run; NetworkManager ignores names
+# that begin with a dot.
+rm -f "$dest"/.flockos-profile-*.part
+
+rc=0 taken=()
+for f in "$src"/*.nmconnection; do
+  name=$(basename -- "$f")
+  if ! check "$f"; then
+    say "refused $name: $reason; renamed to $name.refused" >&2
+    rm -rf "$f.refused"
+    mv -f "$f" "$f.refused" || say "could not rename $name" >&2
+    rc=1
+    continue
+  fi
+  part=$dest/.flockos-profile-$name.part
+  normalized "$f" >"$part"
+  chmod 0600 "$part"
+  if [ -e "$dest/$name" ]; then
+    say "$name replaces the device's profile of that name"
+  fi
+  mv -f "$part" "$dest/$name"
+  # NetworkManager keeps one profile per uuid: the new one wins.
+  if [ -n "$uuid" ]; then
+    want=$(printf '%s' "$uuid" | tr '[:upper:]' '[:lower:]')
+    for other in "$dest"/*; do
+      [ -f "$other" ] && [ "$other" != "$dest/$name" ] || continue
+      case "$(basename -- "$other")" in .*) continue ;; esac
+      if [ "$(uuid_of "$other")" = "$want" ]; then
+        rm -f "$other"
+        say "$name replaces $(basename -- "$other"), which has the same uuid"
+      fi
+    done
+  fi
+  taken+=("$f")
+  say "took $name ($type) from the FLOCKOS partition"
+done
+# On /data before they leave the FLOCKOS partition: a power loss in between
+# takes them again at the next boot.
+sync
+for f in ${taken[@]+"${taken[@]}"}; do
+  remove "$f"
+done
+rmdir "$src" 2>/dev/null || true
+sync
+exit "$rc"

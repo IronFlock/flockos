@@ -19,7 +19,8 @@ Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (boot chain and Secure Boot
 state, partitions grown, /data layout, identity, SSH policy, RAUC slot A good,
 Docker, fwupd); for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
-(state persists); update into slot B with the bundle of the same build;
+(state persists, a proxy.conf and a static network profile on the FLOCKOS
+partition are taken); update into slot B with the bundle of the same build;
 factory reset (ADR-0015): the device in slot B, with a running container,
 resets, keeps its network settings and RAUC's state, enrolls with a new
 .flock, and slot A is cleared too;
@@ -157,6 +158,8 @@ TEST_FLOCK_NAME = "flockos-ci"
 # The device the factory reset enrolls it as.
 RESET_OWNER = "flockosreset"
 RESET_FLOCK_NAME = "flockos-ci-reset"
+# The static network profile the FLOCKOS partition hands over (ADR-0016).
+STATIC_PROFILE = "flockos-ci-static"
 
 
 def test_flock(name, owner, device_key):
@@ -648,6 +651,34 @@ class Runner:
         self.vm.run("printf 'http_proxy=http://10.0.2.2:3129\\n' > /boot/efi/proxy.conf")
         self.proxy_seeded = True
 
+    def network_profile(self):
+        """Network profiles from the FLOCKOS partition (ADR-0016, docs/build.md
+        "Network profiles"): a profile for a static address goes to the
+        partition's network/ folder as `ironflock os install` writes one: the
+        address, gateway and DNS server the VM has now, on the card matched by
+        its MAC address. The next boot takes it (checked in reboot_persists).
+        QEMU's user network hands out the same address by DHCP, so the device
+        stays reachable either way; the profile is what tells them apart."""
+        self.vm.run("systemctl is-enabled flockos-network-profiles.service")
+        route = self.vm.run("ip -o -4 route show default").split()
+        if len(route) < 5 or route[0] != "default" or route[1] != "via" or route[3] != "dev":
+            raise TestFailure(f"no default route to copy: {' '.join(route)}")
+        gateway, nic = route[2], route[4]
+        mac = self.vm.run(f"cat /sys/class/net/{nic}/address").strip()
+        address = self.vm.run(f"ip -o -4 addr show dev {nic} | awk '{{print $4; exit}}'").strip()
+        dns = self.vm.run(f"nmcli -g IP4.DNS device show {nic} | head -n 1").strip()
+        if not re.fullmatch(r"[0-9.]+/[0-9]+", address) or not dns:
+            raise TestFailure(f"{nic} has no IPv4 address or DNS server to copy: {address!r}, {dns!r}")
+        profile = (f"[connection]\nid={STATIC_PROFILE}\nuuid={uuid.uuid4()}\ntype=ethernet\n\n"
+                   f"[ethernet]\nmac-address={mac}\n\n"
+                   f"[ipv4]\nmethod=manual\naddress1={address}\ngateway={gateway}\ndns={dns};\n\n"
+                   "[ipv6]\nmethod=disabled\n")
+        data = base64.b64encode(profile.encode()).decode()
+        path = f"/boot/efi/network/{STATIC_PROFILE}.nmconnection"
+        self.vm.run(f"mkdir -p /boot/efi/network && echo {data} | base64 -d > {path} && sync")
+        self.vm.run(f"/usr/lib/flockos/network-profiles check {path}")
+        self.profile_seeded = (nic, address, gateway)
+
     def enrolled(self, first, owner=TEST_OWNER, name=TEST_FLOCK_NAME, flock=None):
         """The slot is enrolled from the test .flock: SSH user, sudo rule,
         the agent's unit; on the first boot the .flock left the FLOCKOS
@@ -730,6 +761,23 @@ class Runner:
             # No proxy for the rest of the test: the update downloads directly.
             self.vm.run("rm /data/flockos/proxy.conf")
             self.wait_for("[ -z \"$(docker info --format '{{.HTTPSProxy}}')\" ]", 120, "Docker to drop the proxy")
+        if getattr(self, "profile_seeded", None):
+            nic, address, gateway = self.profile_seeded
+            name = f"{STATIC_PROFILE}.nmconnection"
+            self.vm.run(f"test ! -e /boot/efi/network/{name}")
+            self.vm.run(f"test \"$(stat -c '%a %U' /data/network/connections/{name})\" = '600 root'")
+            self.vm.run("journalctl -b --no-pager -o cat -u flockos-network-profiles"
+                        f" | grep -q 'took {name} (ethernet)'")
+            # NetworkManager runs the card on the profile: the address without
+            # DHCP's "dynamic", the gateway, and the host stays reachable (the
+            # update downloads from it).
+            self.wait_for(f"[ \"$(nmcli -g GENERAL.CONNECTION device show {nic})\" = {STATIC_PROFILE} ]", 60,
+                          "NetworkManager to bring up the static profile")
+            addr = self.vm.run(f"ip -o -4 addr show dev {nic}")
+            if f" {address} " not in addr or "dynamic" in addr:
+                raise TestFailure(f"{nic} does not have the static address {address}:\n{addr}")
+            self.vm.run(f"ip -o -4 route show default | grep -q '^default via {gateway} dev {nic} '")
+            self.vm.run(f"curl -fsS -o /dev/null {self.http}/")
 
     def install_bundle(self):
         self.vm.run(f"curl -fsS -o /var/cache/flockos/test.raucb {self.http}/bundle.raucb", timeout=600)
@@ -1140,7 +1188,10 @@ def main():
             runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
         runner.step("time: chrony, PTP from ptp.conf as chrony's source", runner.time_sync)
         runner.step("proxy: proxy.conf to Docker, the agent and chrony", runner.proxy)
-        runner.step("reboot: machine-id, host key, journal persist, proxy.conf from FLOCKOS", runner.reboot_persists)
+        runner.step("network profile: a static profile on the FLOCKOS partition, for the next boot",
+                    runner.network_profile)
+        runner.step("reboot: machine-id, host key, journal persist, proxy.conf and the static profile from FLOCKOS",
+                    runner.reboot_persists)
         if args.only != "boot":
             runner.step("update into slot B", runner.update_to_b)
             if args.only != "update":

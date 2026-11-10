@@ -34,7 +34,9 @@ the os-release contract, the target templates (GRUB A/B contract, RAUC
 and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk`, `blkid`,
 `findmnt`, `grub-editenv` and `sync`, a power loss at each call of them, failed
 steps through folders that take no new files, and, where `mawk` is installed,
-Debian's awk. They need bash and bats only:
+Debian's awk. The network profiles (`network-profiles.bats`) run against
+folders that stand for the FLOCKOS partition and `/data/network/connections`,
+with every rule a profile has to meet. They need bash and bats only:
 
 ```sh
 just test
@@ -96,13 +98,22 @@ Sequence:
    environment while it runs, and chrony (`ntp=`); `proxy.env` is readable by
    root only. Nothing listens on the proxy address: a real proxy is on the
    hardware checklist.
+   Then a network profile ([ADR-0016](adr/0016-network-profiles-from-the-flockos-partition.md)):
+   a profile for a static address, the address, gateway and DNS server the VM
+   has from DHCP on its card matched by MAC address, as `ironflock os install`
+   writes one, goes to the FLOCKOS partition's `network/` folder, and
+   `network-profiles check` accepts it.
 2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
    The `proxy.conf` put on the FLOCKOS partition before the reboot has replaced
    the device's (mode 0600) and left the partition, and Docker uses it; the test
-   then removes the proxy.
+   then removes the proxy. The network profile has left the partition for
+   `/data/network/connections` (mode 0600, root's), and NetworkManager runs the
+   card on it: the address without DHCP's `dynamic` flag, the default route
+   through the gateway, and the host still answers. The profile stays for the
+   rest of the test (QEMU's DHCP would hand out the same address).
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
    machine-id, host key and `/data`, and is enrolled again from the agent's copy
@@ -231,4 +242,9 @@ WP-4b.2, WP-5.4, WP-6.6):
     enrolls as the new device and runs no app of the old one;
     `factory-reset.log` says `result=done`. Then with an empty
     `factory-reset.conf` and no `.flock`: the device comes up unenrolled.
-11. Target-specific items in `docs/targets/<target>.md`.
+11. Network profiles (`docs/build.md`, "Network profiles"), where the board has
+    WiFi: flash with a `.flock` without WiFi and a WPA-PSK profile in `network/`
+    on the FLOCKOS partition, with the wired network unplugged. The device
+    joins that WiFi on its first boot and enrolls; the profile has left the
+    partition.
+12. Target-specific items in `docs/targets/<target>.md`.

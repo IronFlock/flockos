@@ -33,5 +33,6 @@
 | [0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md) | chrony replaces systemd-timesyncd; PTP through linuxptp per device, as chrony's source (client) or served from the system clock (server) | accepted |
 | [0014](adr/0014-proxy-per-device-from-the-flockos-partition.md) | The proxy is a device setting on `/data`, taken from the FLOCKOS partition, for the agent, Docker and containerd; `ntp` for networks that block NTP | accepted |
 | [0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md) | A factory reset is requested by `factory-reset.conf` on the FLOCKOS partition and runs at the next boot: a new filesystem on `/data`, RAUC's state and on request the network settings kept, both root slots cleared of the old owner; unknown requests are refused | accepted |
+| [0016](adr/0016-network-profiles-from-the-flockos-partition.md) | NetworkManager profiles on the FLOCKOS partition (`network/<name>.nmconnection`) become the device's profiles on `/data` before NetworkManager starts, for `ironflock os install`; files NetworkManager could not read are renamed, not taken | accepted |
 
 Planned: `migration.md`, how devices of the previous OS move to IronFlockOS (a reflash).

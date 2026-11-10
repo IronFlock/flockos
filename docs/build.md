@@ -252,6 +252,53 @@ NTP does not pass an HTTP proxy, and without the right time TLS through the
 proxy fails. chrony already uses the NTP servers DHCP hands out; `ntp=` adds
 servers for networks that hand out none (`chronyc sources` lists them).
 
+## Network profiles
+
+NetworkManager keeps a device's network profiles in
+`/etc/NetworkManager/system-connections`, which is `/data/network/connections`,
+so they outlive updates. A device on a network without DHCP, or on a Wi-Fi
+network other than its `.flock`'s, needs its profile before it can reach the
+platform, so the profile comes with the boot medium
+([ADR-0016](adr/0016-network-profiles-from-the-flockos-partition.md)): a
+NetworkManager keyfile on the FLOCKOS partition, `network/<name>.nmconnection`,
+becomes a profile of the device at the next boot and leaves the partition.
+`ironflock os install` puts one there for a machine with a static address or a
+Wi-Fi network; a person can put one there with the medium in another computer.
+
+```ini
+# network/office.nmconnection
+[connection]
+id=office
+uuid=6f1b1f8e-4a52-4f3e-9d0b-5a1c2e3d4f50
+type=ethernet
+
+[ethernet]
+mac-address=52:54:00:12:34:56
+
+[ipv4]
+method=manual
+address1=192.168.10.20/24
+gateway=192.168.10.1
+dns=192.168.10.1;
+```
+
+`flockos-network-profiles` (`/usr/lib/flockos/network-profiles`) runs at every
+boot where one lies there, the first included, after `/data` is mounted and
+before NetworkManager starts. It writes each profile to
+`/data/network/connections/<name>.nmconnection` with mode 0600, where it
+replaces the device's profile of that name and any other with the same `uuid`,
+then overwrites the file on the partition and removes it. A file that is not a
+keyfile NetworkManager can read (a name of other characters, over 64 KiB, no
+`type=` in `[connection]`, ...) is renamed to `<name>.nmconnection.refused`, the
+reason goes to the journal and the console, and the unit fails; the others are
+taken. While a factory reset is pending or has begun, the profiles wait for it.
+ADR-0016 has the rules and the contract for the caller;
+`/usr/lib/flockos/network-profiles check FILE` tells whether a file would be
+taken.
+
+Enrollment writes the `.flock`'s Wi-Fi as `ironflock-wifi.nmconnection` after
+NetworkManager has started.
+
 ## Factory reset
 
 A factory reset returns a device to the state of a freshly flashed one that
@@ -284,7 +331,10 @@ keys, `/data` laid out anew, a `proxy.conf` and a `.flock` on the FLOCKOS
 partition taken in, enrollment with that `.flock`, or none. Until then, while
 `factory-reset.conf` or `factory-reset.keep` is on the partition, enroll and
 `flockos-proxy` leave the `.flock` and `proxy.conf` there alone; after a refused
-request they take them as without one.
+request they take them as without one. Network profiles on the partition
+([Network profiles](#network-profiles)) wait the same way and are taken at
+that first boot: with `keep-network=yes` into the kept profiles, replacing
+those of the same name or uuid; with `keep-network=no` they are the only ones.
 
 A request the device does not understand (another key or value) is refused
 and renamed to `factory-reset.conf.refused`, and the device boots as before. A
