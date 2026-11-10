@@ -52,6 +52,11 @@ type Image struct {
 	// payload= picks one). Only the installer has them; a release up to
 	// 0.10.0 has none, and readers take that as the target's base image.
 	Payloads []string `json:"payloads,omitempty"`
+	// ModulesAlias is the image's hardware list, <image-id>-<version>.modules.alias.gz:
+	// the modules.alias and modules.builtin.alias of its kernels (build/lib.sh
+	// hardware_list), which `ironflock os install` matches a machine's disk
+	// controller and network card against. Releases up to 0.14.0 have none.
+	ModulesAlias *Artifact `json:"modules_alias,omitempty"`
 }
 
 type Release struct {
@@ -175,9 +180,10 @@ func targetArch(repo, target string) (string, error) {
 
 // buildRelease reads one release from dir: one directory per image as the
 // release pipeline leaves them (flockos-<id>/ with <id>-<version>.img.gz, its
-// raw size and minimum disk size in <id>-<version>.sizes, the .raucb but for
-// the installer, <id>-<version>.os-release, and for the installer
-// <id>-<version>.payloads, the image ids it carries one per line).
+// raw size and minimum disk size in <id>-<version>.sizes, its hardware list
+// <id>-<version>.modules.alias.gz, the .raucb but for the installer,
+// <id>-<version>.os-release, and for the installer <id>-<version>.payloads,
+// the image ids it carries one per line).
 // Files are published below baseURL.
 func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error) {
 	entries, err := os.ReadDir(dir)
@@ -229,6 +235,11 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 		if err != nil {
 			return Release{}, fmt.Errorf("%s: %w", id, err)
 		}
+		aliases, err := artifact(filepath.Join(dir, id, name+".modules.alias.gz"), baseURL+"/"+name+".modules.alias.gz")
+		if err != nil {
+			return Release{}, fmt.Errorf("%s: its hardware list: %w", id, err)
+		}
+		img.ModulesAlias = &aliases
 		bundlePath := filepath.Join(dir, id, name+".raucb")
 		switch _, err := os.Stat(bundlePath); {
 		case err == nil && variant == "installer":
@@ -432,7 +443,7 @@ func (c Catalog) Validate() error {
 			if !imageIDRe.MatchString(id) {
 				errs = append(errs, fmt.Errorf("%s: not an image id", id))
 			}
-			for _, a := range []*Artifact{&img.Image.Artifact, bundleArtifact(img.Bundle)} {
+			for _, a := range []*Artifact{&img.Image.Artifact, bundleArtifact(img.Bundle), img.ModulesAlias} {
 				if a == nil {
 					continue
 				}
@@ -452,6 +463,9 @@ func (c Catalog) Validate() error {
 			}
 			if img.Bundle != nil && (img.Bundle.Compatible != id || !strings.HasSuffix(img.Bundle.URL, "/"+id+"-"+v+".raucb")) {
 				errs = append(errs, fmt.Errorf("%s %s: the bundle is not %s-%s.raucb, compatible %s", v, id, id, v, id))
+			}
+			if img.ModulesAlias != nil && !strings.HasSuffix(img.ModulesAlias.URL, "/"+id+"-"+v+".modules.alias.gz") {
+				errs = append(errs, fmt.Errorf("%s %s: the hardware list is not %s-%s.modules.alias.gz", v, id, id, v))
 			}
 			if err := checkPayloads(id, img, r.Images); err != nil {
 				errs = append(errs, fmt.Errorf("%s %w", v, err))

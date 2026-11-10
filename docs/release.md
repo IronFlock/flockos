@@ -16,7 +16,7 @@ or published from a laptop.
 | `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)) | `flockos-release` |
 | `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code; `stage` waits for it | the harness workflow (Sigstore) |
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
-| `stage` | The signed files and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
+| `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
 | `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |
 | `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `flockos/release-notes.json`. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
 | `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates IronFlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
@@ -103,10 +103,26 @@ Releases up to 0.14.0 have none of them.
 |-------|------|
 | `image.raw_size` | The image decompressed, in bytes: what is written from the disk's first byte. |
 | `image.min_disk_size` | The smallest disk, in bytes, on which the image becomes a working device: every partition of the device's layout, `/data` at 1 GiB, 2 MiB for the GPT ([build.md](build.md#the-smallest-disk)). At least `raw_size`; the installer's is its `raw_size`. |
+| `modules_alias` | The image's hardware list, `url`, `sha256` and `size` of `<image-id>-<version>.modules.alias.gz`, published next to the image. |
 
-Both come from the build's `<image-id>-<version>.sizes`; `tools/catalog`
+Both sizes come from the build's `<image-id>-<version>.sizes`; `tools/catalog`
 refuses a release image without them, and a catalog with only one of them or
 with `min_disk_size` below `raw_size`.
+
+**The hardware list** tells which devices the image's kernels have a driver
+for. The build (`hardware_list` in `build/lib.sh`) takes each kernel's
+`modules.alias`, the drivers built as modules, and `modules.builtin.alias`, the
+drivers built into the kernel, which `modules.alias` leaves out. The file is
+gzip of text lines: `alias <pattern> <module>`, as depmod writes them, and
+before each kernel's lines a comment, `# kernel <version>: ...`. One kernel on
+the EFI targets; the Raspberry Pi image has two. A device has a driver when
+its modalias (`/sys/.../modalias`, such as `pci:v00008086d000015B8sv...`)
+matches a pattern by shell rules (`*`, `?`, `[...]`), as modprobe matches
+them. `os install` matches the disk controller and the network card. A match
+says nothing about a firmware file the driver may need. Every image has one,
+the installer too; it is in `SHA256SUMS`, and the signed catalog carries its
+hash. The SLSA provenance covers the images and bundles, not it, as it does
+not cover the SBOMs either.
 
 ## Release notes
 

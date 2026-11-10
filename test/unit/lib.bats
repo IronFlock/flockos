@@ -150,3 +150,43 @@ repart() {
   write_sizes "$tmp/disk.img" "" "$tmp/y.sizes"
   [ "$(cat "$tmp/y.sizes")" = "$(printf 'raw_size=3000\nmin_disk_size=3000')" ]
 }
+
+# kernel ROOT VERSION: a kernel's module lists as depmod writes them.
+kernel() {
+  local d=$1/usr/lib/modules/$2
+  mkdir -p "$d"
+  printf '# Aliases extracted from modules themselves.\nalias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e\nalias virtio:d00000001v* virtio_net\n' >"$d/modules.alias"
+  printf '# Aliases extracted from modules themselves.\nalias pci:v*d*sv*sd*bc01sc08i02* nvme\n' >"$d/modules.builtin.alias"
+}
+
+@test "hardware_list: each kernel's module and built-in aliases, under a comment line" {
+  kernel "$tmp/root" 6.12.48+deb13-amd64
+  run hardware_list "$tmp/root" 6.12.48+deb13-amd64
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '# kernel 6.12.48+deb13-amd64: modules.alias and modules.builtin.alias' \
+    'alias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e' 'alias virtio:d00000001v* virtio_net' \
+    'alias pci:v*d*sv*sd*bc01sc08i02* nvme')" ]
+  # The Raspberry Pi's two kernels.
+  kernel "$tmp/root" 6.12.47+rpt-rpi-2712
+  run hardware_list "$tmp/root" 6.12.48+deb13-amd64 6.12.47+rpt-rpi-2712
+  [ "$(grep -c '^# kernel ' <<<"$output")" = 2 ]
+  [ "$(grep -c '^alias ' <<<"$output")" = 6 ]
+}
+
+@test "hardware_list: a kernel without modules.alias stops the build; without built-in aliases it warns" {
+  run hardware_list "$tmp/root" 6.12.48+deb13-amd64
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.alias"* ]]
+  kernel "$tmp/root" 6.12.48+deb13-amd64
+  rm "$tmp/root/usr/lib/modules/6.12.48+deb13-amd64/modules.builtin.alias"
+  run hardware_list "$tmp/root" 6.12.48+deb13-amd64
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: kernel 6.12.48+deb13-amd64 has no modules.builtin.alias"* ]]
+  [[ "$output" == *"alias virtio:d00000001v* virtio_net"* ]]
+}
+
+@test "the build publishes each image's hardware list, gzip without a name or time" {
+  grep -qx 'hardware_list "$ROOT" "${kernel_versions\[@\]}" | gzip -9n >"$OUT/$NAME.modules.alias.gz"' \
+    "$BATS_TEST_DIRNAME/../../build/customize.sh"
+  grep -q "\-o -name '\*.modules.alias.gz'" "$BATS_TEST_DIRNAME/../../build/publish.sh"
+}

@@ -155,6 +155,29 @@ min_disk_size() {
   echo "$total"
 }
 
+# hardware_list ROOT KERNEL...: the devices the kernels of the tree ROOT have a
+# driver for, which `ironflock os install` matches a machine's disk controller
+# and network card against: the "alias <pattern> <module>" lines of each
+# kernel's modules.alias (drivers built as modules) and modules.builtin.alias
+# (drivers built into the kernel, which modules.alias leaves out), each
+# kernel's after a comment line. Fails when a kernel has no modules.alias.
+hardware_list() {
+  local root=$1 v dir f
+  shift
+  for v in "$@"; do
+    dir=$root/usr/lib/modules/$v
+    [ -s "$dir/modules.alias" ] || die "kernel $v has no modules.alias in ${dir#"$root"} (depmod)"
+    echo "# kernel $v: modules.alias and modules.builtin.alias"
+    for f in modules.alias modules.builtin.alias; do
+      if [ -f "$dir/$f" ]; then
+        grep '^alias ' "$dir/$f" || true
+      else
+        warn "kernel $v has no $f: its built-in drivers are not in the hardware list"
+      fi
+    done
+  done
+}
+
 # write_sizes DISK REPART_DIR FILE: the raw size of the disk image DISK and
 # min_disk_size, as the KEY=value lines raw_size= and min_disk_size= of FILE
 # (<image-id>-<version>.sizes, which tools/catalog puts into the catalog).

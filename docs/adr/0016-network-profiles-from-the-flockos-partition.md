@@ -176,6 +176,10 @@ by these rules:
   not a key name`, `it has no type= in a [connection] group`, `type= is not a
   NetworkManager connection type`, `uuid= is not a UUID`.
 
+What else `os install` reads from a release, each image's raw size, its smallest disk and
+its hardware list (`image.raw_size`, `image.min_disk_size`, `modules_alias`), is in
+[release.md](../release.md#what-ironflock-os-install-reads).
+
 ## Consequences
 
 - `os install` gives a machine with a static address or a Wi-Fi network its network on

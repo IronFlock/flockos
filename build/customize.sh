@@ -265,6 +265,11 @@ dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${Package}\t${Version}\t${Arch
 dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${source:Package}\t${source:Version}\t${Built-Using}\n' |
   bash "$here/sources.sh" image >"$OUT/$NAME.sources.tsv"
 cp "$ROOT/usr/lib/os-release" "$OUT/$NAME.os-release"
+# The hardware the image's kernels have drivers for, published with the image:
+# `ironflock os install` matches the machine's disk controller and network
+# card against it (docs/release.md, "What ironflock os install reads").
+read -r -a kernel_versions <<<"$kver"
+hardware_list "$ROOT" "${kernel_versions[@]}" | gzip -9n >"$OUT/$NAME.modules.alias.gz"
 rm -rf "$ROOT"/var/lib/apt/lists/* "$ROOT"/var/cache/apt/*.bin "$ROOT"/var/cache/apt/archives/*.deb
 rm -rf "$ROOT"/tmp/* "$ROOT"/var/tmp/* "$ROOT"/var/log/*.log "$ROOT"/var/log/apt/*
 rm -f "$ROOT/etc/resolv.conf"

@@ -133,7 +133,11 @@
             }
           ]
         },
-        "payloads": { "$ref": "#/$defs/payloads" }
+        "payloads": { "$ref": "#/$defs/payloads" },
+        "modules_alias": {
+          "description": "The image's hardware list, <image-id>-<version>.modules.alias.gz, gzip: the lines 'alias <modalias pattern> <module>' of the modules.alias and modules.builtin.alias of each kernel in the image, each kernel's after a '#' comment line. A device whose modalias matches a pattern (fnmatch, as modprobe matches them) has a driver in the image, built as a module or built in; whether it needs a firmware file the list does not say. ironflock os install matches the disk controller and the network card against it. Releases up to 0.14.0 have none.",
+          "$ref": "#/$defs/artifact"
+        }
       },
       "if": { "properties": { "variant": { "const": "installer" } } },
       "then": { "not": { "required": ["bundle"] } },

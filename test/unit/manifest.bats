@@ -124,3 +124,16 @@ example="$repo/docs/manifest.example.json"
   done
   jq -e '."$defs".image.properties.image."$ref" == "#/$defs/diskImage"' "$schema" >/dev/null
 }
+
+@test "an image's hardware list is <image-id>-<version>.modules.alias.gz next to the image, with its hash and size" {
+  run jq -r '.releases | to_entries[] | .key as $v | .value.images | to_entries[] |
+    .key as $id | .value as $i | select($i.modules_alias != null) | $i.modules_alias as $m |
+    select(($m.url != ($i.image.url | sub("\\.img\\.gz$"; ".modules.alias.gz")))
+      or ($m.url | endswith("/" + $id + "-" + $v + ".modules.alias.gz") | not)
+      or ($m.sha256 | test("^[0-9a-f]{64}$") | not) or $m.size < 1) | "\($v) \($id)"' "$example"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run jq -e '[.releases[].images[] | has("modules_alias")] | all' "$example"
+  [ "$status" -eq 0 ]
+  jq -e '."$defs".image.properties.modules_alias."$ref" == "#/$defs/artifact"' "$schema" >/dev/null
+}
