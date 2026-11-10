@@ -31,9 +31,10 @@ the os-release contract, the target templates (GRUB A/B contract, RAUC
 `system.conf`, slot sizes) and the image's own scripts in
 `overlay/usr/lib/flockos` run against a temporary directory. The factory reset
 (`factory-reset.bats`) runs against folders that stand for the data partition
-and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk` and
-`grub-editenv`, and with a power loss at each of its steps. They need bash and
-bats only:
+and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk`, `blkid`,
+`findmnt`, `grub-editenv` and `sync`, a power loss at each call of them, failed
+steps through folders that take no new files, and, where `mawk` is installed,
+Debian's awk. They need bash and bats only:
 
 ```sh
 just test
@@ -113,13 +114,15 @@ Sequence:
    libraries it links, as the harness has no registry), an app's file is in
    `/apps`, and the site has a network profile and a `proxy.conf`. The test
    writes `factory-reset.conf` with `keep-network=yes` and a new `.flock` (another
-   owner and name) to the FLOCKOS partition, as `ironflock os reset -c` does,
-   and `factory-reset check` accepts the request. The boot after the restart
-   resets the device and restarts it by itself. It comes up on slot B (the
-   reset's restart counted as no failed try), with `factory-reset.log` saying
-   `result=done`, the request gone, a new machine-id and host key, no
-   container, image, app file or old journal, the old SSH user gone and the
-   device enrolled as the new one; the network profile, `proxy.conf` and RAUC's
+   owner and name) to the FLOCKOS partition, each under a temporary name and
+   renamed, as `ironflock os reset -c` does, and `factory-reset check` accepts
+   the request. The boot after the restart resets the device and restarts it by
+   itself. It comes up on slot B (the reset's restart counted as no failed try),
+   with `factory-reset.log` saying `result=done`, the request and the temporary
+   files gone, a new machine-id and host key, neither the container nor its
+   image nor `hello-world`, no app file or old journal, the old SSH user gone
+   and the device enrolled as the new one, the agent's copy of the `.flock` the
+   new one; the network profile, `proxy.conf` and RAUC's
    record of slot B are kept; slot A, read with `debugfs`, has the image's
    hostname, `uninitialized` as machine-id and no `enrolled` mark; slot B,
    proven before, is marked good again by `flockos-slot-keep`. With

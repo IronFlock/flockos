@@ -2,8 +2,9 @@
 # Factory reset (docs/build.md, "Factory reset"; ADR-0015): requested by
 # factory-reset.conf on the FLOCKOS partition, run at boot before /data is
 # mounted, against a fake device: folders stand for the data partition and the
-# root slots, fakes for mount, mkfs.ext4, lsblk and grub-editenv. A fake can
-# kill the reset at its n-th call, as a power loss would.
+# root slots, fakes for mount, mkfs.ext4, lsblk, blkid, findmnt, grub-editenv
+# and sync. A fake can cut the reset short at its n-th call, or at the first
+# call of one command, as a power loss would.
 
 repo="$BATS_TEST_DIRNAME/../.."
 reset="$repo/overlay/usr/lib/flockos/factory-reset"
@@ -12,35 +13,41 @@ units="$repo/overlay/usr/lib/systemd/system"
 setup() {
   tmp=$(mktemp -d)
   export T=$tmp
-  mkdir -p "$tmp/bin" "$tmp/dev"
-  for d in data rootfs-a rootfs-b; do : >"$tmp/dev/$d"; done
+  mkdir -p "$tmp/bin"
   fakes
   device
   export PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_ROOT=$tmp/disk/rootfs-a \
-    FLOCKOS_ROOT_DEV=$tmp/dev/rootfs-a FLOCKOS_SYSTEM_CONF=$tmp/system.conf \
-    FLOCKOS_PROC_CMDLINE=$tmp/cmdline FLOCKOS_DATA_DEV=$tmp/dev/data FLOCKOS_RUN=$tmp/run \
-    FLOCKOS_BOOTLOADER_DT=$tmp/dt FLOCKOS_RESET_WAIT=0
-  slot=$tmp/disk/rootfs-a other=$tmp/disk/rootfs-b data=$tmp/disk/data esp=$tmp/esp
+    FLOCKOS_SYSTEM_CONF=$tmp/system.conf FLOCKOS_PROC_CMDLINE=$tmp/cmdline FLOCKOS_DATA_DEV=$tmp/dev/data \
+    FLOCKOS_RUN=$tmp/run FLOCKOS_BOOTLOADER_DT=$tmp/dt FLOCKOS_RESET_WAIT=0
+  slot=$tmp/disk/rootfs-a other=$tmp/disk/rootfs-b data=$tmp/disk/vda4 esp=$tmp/esp
 }
 
-teardown() { rm -rf "$tmp"; }
+teardown() {
+  chmod -R u+w "$tmp" 2>/dev/null || true
+  rm -rf "$tmp"
+}
 
-# The fakes. hook.sh counts the calls that change something; the
-# FAKE_KILL_AT-th kills the reset after (or, for mkfs.ext4, halfway through)
-# its work.
+# The fakes. hook.sh counts the calls that change something or sync; the
+# FAKE_KILL_AT-th, or the first of the command FAKE_KILL_ON, cuts the reset
+# short after (for mkfs.ext4: halfway through) its work.
 fakes() {
   cat >"$tmp/bin/hook.sh" <<'SH'
 n=$(($(cat "$T/count" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$T/count"
 killing=no
 if [ "${FAKE_KILL_AT:-0}" = "$n" ]; then killing=yes; fi
+if [ -n "${FAKE_KILL_ON:-}" ] && [ "$FAKE_KILL_ON" = "$(basename "$0")" ] && [ ! -e "$T/killed" ]; then
+  killing=yes
+  : >"$T/killed"
+fi
 power_loss() {
   kill -9 "$PPID"
   exit 137
 }
 SH
   # mount [-t TYPE] [-o OPTIONS] DEVICE DIR: DIR becomes a link to the folder
-  # that stands for DEVICE; a "broken-<device>" file makes it fail.
+  # that stands for DEVICE. "broken-<device>" makes every mount of it fail,
+  # "unmountable-<device>" every one but read-only.
   cat >"$tmp/bin/mount" <<'SH'
 #!/bin/bash
 opts="" args=()
@@ -51,6 +58,7 @@ done
 dev=$(basename "${args[0]}") dir=${args[1]}
 echo "mount $opts $dev" >>"$T/calls"
 if [ -e "$T/broken-$dev" ] || [ ! -d "$T/disk/$dev" ]; then exit 32; fi
+if [ -e "$T/unmountable-$dev" ] && [[ "$opts" != ro,* ]]; then exit 32; fi
 . "$T/bin/hook.sh"
 rmdir "$dir" && ln -s "$T/disk/$dev" "$dir"
 [ "$killing" = no ] || power_loss
@@ -67,7 +75,7 @@ SH
   cat >"$tmp/bin/mkfs.ext4" <<'SH'
 #!/bin/bash
 dev=$(basename "${!#}")
-echo "mkfs.ext4 $* " | sed "s|$T/dev/||" >>"$T/calls"
+echo "mkfs.ext4 ${*:1:$#-1} $(basename "${!#}")" >>"$T/calls"
 if [ -e "$T/broken-mkfs" ]; then exit 1; fi
 . "$T/bin/hook.sh"
 if [ "$killing" = yes ]; then
@@ -78,20 +86,36 @@ fi
 rm -rf "$T/disk/$dev" "$T/broken-$dev"
 mkdir -p "$T/disk/$dev/lost+found"
 SH
-  # lsblk -ndo PKNAME -- DEVICE: the disk; "elsewhere-<device>" puts it on another one.
+  # lsblk -ndo PKNAME|PARTLABEL -- DEVICE: from the table "blk" (name, disk,
+  # partition name); a device that is not in it is no block device.
   cat >"$tmp/bin/lsblk" <<'SH'
 #!/bin/bash
-if [ -e "$T/elsewhere-$(basename "${!#}")" ]; then echo sdb; else echo vda; fi
+awk -v n="$(basename "${!#}")" -v c="$2" '$1 == n { print (c == "PKNAME" ? $2 : $3); f = 1 } END { exit !f }' "$T/blk"
 SH
-  # findmnt: nothing is mounted unless "mounted" says so.
+  # blkid -p -s TYPE -o value DEVICE: ext4 where a folder stands for it.
+  cat >"$tmp/bin/blkid" <<'SH'
+#!/bin/bash
+if [ -d "$T/disk/$(basename "${!#}")" ]; then echo ext4; else exit 2; fi
+SH
+  # findmnt -rn --source DEVICE: mounted when "mounted-<device>" exists;
+  # findmnt -nvo SOURCE TARGET: from the table "mounts" (target, device).
   cat >"$tmp/bin/findmnt" <<'SH'
 #!/bin/bash
-[ -e "$T/mounted" ]
+case "$1" in
+  -rn) [ -e "$T/mounted-$(basename "$3")" ] ;;
+  -nvo) [ "$2" = SOURCE ] && awk -v t="$3" '$1 == t { print $2; f = 1 } END { exit !f }' "$T/mounts" ;;
+  *) exit 1 ;;
+esac
 SH
-  # grub-editenv FILE list | set KEY=VALUE | unset KEY, on a plain KEY=VALUE file.
+  # grub-editenv FILE list | set KEY=VALUE | unset KEY, on a plain KEY=VALUE
+  # file; "broken-grubenv" makes it fail.
   cat >"$tmp/bin/grub-editenv" <<'SH'
 #!/bin/bash
 f=$1
+if [ -e "$T/broken-grubenv" ]; then
+  echo "grub-editenv: error: invalid environment block" >&2
+  exit 1
+fi
 case "$2" in
   list) cat "$f" ;;
   set)
@@ -111,6 +135,11 @@ case "$2" in
     ;;
 esac
 SH
+  cat >"$tmp/bin/sync" <<'SH'
+#!/bin/bash
+. "$T/bin/hook.sh"
+[ "$killing" = no ] || power_loss
+SH
   printf '#!/bin/sh\necho "$*" >>"%s/systemctl.log"\n' "$tmp" >"$tmp/bin/systemctl"
   chmod +x "$tmp/bin/"*
 }
@@ -118,7 +147,7 @@ SH
 # enrolled_slot DIR HOSTNAME: a root slot after the enrollment, with what the
 # agent, an app and the SSH user left in it.
 enrolled_slot() {
-  local r=$1
+  local r=$1 f
   mkdir -p "$r/usr/lib" "$r/usr/share/base-files" "$r/etc/sudoers.d" "$r/etc/systemd/system/multi-user.target.wants" \
     "$r/etc/systemd/system/ironflock-device-agent.service.d" "$r/etc/systemd/system/NetworkManager.service.d" \
     "$r/etc/docker" "$r/etc/flockos" "$r/var/lib/flockos" "$r/apps/prod/app1" "$r/var/lib/containerd/io.containerd.metadata.v1.bolt" \
@@ -163,6 +192,8 @@ EOF
   printf 'flockostest:100000:65536\nsecond:165536:65536\n' >"$r/etc/subuid"
   cp "$r/etc/subuid" "$r/etc/subgid"
   chmod 0640 "$r/etc/shadow" "$r/etc/gshadow"
+  # The backups shadow-utils keeps, as passwd --lock left them.
+  for f in passwd shadow group gshadow subuid subgid; do cp -p "$r/etc/$f" "$r/etc/$f-"; done
   printf 'flockostest ALL=(ALL) NOPASSWD:ALL\n' >"$r/etc/sudoers.d/ironflock-flockostest"
   echo '# the package README' >"$r/etc/sudoers.d/README"
   echo '[Unit]' >"$r/etc/systemd/system/ironflock-device-agent.service"
@@ -192,12 +223,21 @@ EOF
 }
 
 # device: an enrolled amd64-efi device booted from slot A, slot B written by an
-# update, the data partition in use, a new .flock and proxy.conf waiting on
-# the FLOCKOS partition.
+# update, the data partition (vda4, which the link FLOCKOS_DATA_DEV stands for
+# /dev/disk/by-partlabel/data points at) in use, a new .flock and proxy.conf
+# waiting on the FLOCKOS partition.
 device() {
+  mkdir -p "$tmp/dev"
+  : >"$tmp/dev/vda4"
+  ln -sfn vda4 "$tmp/dev/data"
+  : >"$tmp/dev/rootfs-a"
+  : >"$tmp/dev/rootfs-b"
+  : >"$tmp/dev/flockos"
+  printf 'vda4 vda data\nrootfs-a vda rootfs-a\nrootfs-b vda rootfs-b\nflockos vda FLOCKOS\n' >"$tmp/blk"
+  printf '/ %s\n%s %s\n' "$tmp/dev/rootfs-a" "$tmp/esp" "$tmp/dev/flockos" >"$tmp/mounts"
   enrolled_slot "$tmp/disk/rootfs-a" owner-device
   enrolled_slot "$tmp/disk/rootfs-b" owner-device-before
-  local d=$tmp/disk/data
+  local d=$tmp/disk/vda4
   mkdir -p "$d/ironflock/device-agent/docker-apps/containers/abc" "$d/ironflock/device-init" "$d/home/flockostest/.ssh" \
     "$d/network/connections" "$d/flockos" "$d/rauc" "$d/etc/ssh" "$d/log/journal/0123" "$d/log/ironflock" \
     "$d/cache" "$d/fwupd" "$d/pstore" "$d/lost+found"
@@ -254,11 +294,19 @@ EOF
 request() { printf '%b' "$1" >"$tmp/esp/factory-reset.conf"; }
 
 # reboot: /run is gone, the fakes start counting again.
-reboot() { rm -rf "$tmp/run" "$tmp/count"; }
+reboot() { rm -rf "$tmp/run" "$tmp/count" "$tmp/killed"; }
+
+# on_disk NAME DISK [LABEL]: moves a device of the table "blk" to a disk, and
+# gives it a partition name.
+on_disk() {
+  awk -v n="$1" -v d="$2" -v l="${3:-}" '$1 == n { $2 = d; if (l != "") $3 = l } { print }' "$tmp/blk" >"$tmp/blk.new"
+  mv "$tmp/blk.new" "$tmp/blk"
+}
 
 mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 value() { sed -n "s/^$1=//p" "$tmp/esp/factory-reset.log"; }
 grubenv() { cat "$tmp/esp/EFI/BOOT/grubenv"; }
+not_root() { if [ "$(id -u)" = 0 ]; then skip "root ignores the folder modes this test relies on"; fi; }
 
 # state: every file, link and folder of the disks and the FLOCKOS partition,
 # with the content of files; the record without its time.
@@ -280,7 +328,7 @@ state() {
 # request and the record, grubenv, and in the root slots the paths of
 # clean_slot.
 outside() {
-  state | grep -vE '^disk/data|^esp/factory-reset\.|^esp/EFI/BOOT/grubenv|^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id) |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/flockos/enrolled '
+  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/grubenv|^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/flockos/enrolled '
 }
 
 @test "plain reset: the data partition holds RAUC's state alone, then the device restarts" {
@@ -292,9 +340,13 @@ outside() {
   grep -qx 'bundle.version=0.15.0' "$data/rauc/central.raucs"
   [ ! -e "$esp/factory-reset.conf" ] && [ ! -e "$esp/factory-reset.keep" ] && [ ! -e "$esp/.factory-reset.keep.part" ]
   [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
-  # The old filesystem was read only, the new one has the name repart gives it.
-  grep -qx 'mount ro,nodev,nosuid,noexec data' "$tmp/calls"
-  grep -q '^mkfs.ext4 -F -q -L data -m 0 data' "$tmp/calls"
+  [ "$(value result)" = done ] && [ -z "$(value failed-steps)" ]
+  # The old filesystem was read only, without following links; the new one is
+  # made on the device the link pointed at when it was checked, with the name
+  # repart gives it.
+  grep -qx 'mount ro,noexec,nodev,nosuid,nosymfollow vda4' "$tmp/calls"
+  grep -qx 'mkfs.ext4 -F -q -L data -m 0 vda4' "$tmp/calls"
+  grep -qx 'mount nodev,nosuid,nosymfollow vda4' "$tmp/calls"
 }
 
 @test "keep-network=yes keeps the network profiles, proxy.conf and ptp.conf with their modes; nothing else of /data" {
@@ -312,16 +364,33 @@ outside() {
   [ "$(value kept)" = "rauc network/connections flockos/proxy.conf flockos/ptp.conf" ]
 }
 
+@test "a kept file that cannot be read is a note, not a reason to stop" {
+  not_root
+  chmod 000 "$data/flockos/ptp.conf"
+  request 'keep-network=yes\n'
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value result)" = done ]
+  [ "$(value kept)" = "rauc network/connections flockos/proxy.conf" ]
+  [ "$(value note)" = "flockos/ptp.conf could not be read and was not kept" ]
+  [ ! -e "$data/flockos/ptp.conf" ] && [ -e "$data/flockos/proxy.conf" ]
+}
+
 @test "the booted slot: the enrollment, the agent's unit and what apps and users left are gone; the system and slot-proven stay" {
   request ''
   run bash "$reset"
   [ "$status" -eq 0 ]
-  [ "$(cut -d: -f1 "$slot/etc/passwd" | tr '\n' ' ')" = "root daemon systemd-network nobody " ]
-  [ "$(cut -d: -f1 "$slot/etc/shadow" | tr '\n' ' ')" = "root daemon systemd-network nobody " ]
-  [ "$(tr '\n' ' ' <"$slot/etc/group")" = "root:x:0: sudo:x:27: users:x:100: docker:x:999: systemd-network:x:998: nogroup:x:65534: " ]
-  [ "$(tr '\n' ' ' <"$slot/etc/gshadow")" = "root:*:: sudo:*:: users:*:: docker:!:: systemd-network:!*:: nogroup:*:: " ]
-  [ ! -s "$slot/etc/subuid" ] && [ ! -s "$slot/etc/subgid" ]
-  [ "$(mode "$slot/etc/shadow")" = 640 ] && [ "$(mode "$slot/etc/gshadow")" = 640 ]
+  for f in passwd shadow passwd- shadow-; do
+    [ "$(cut -d: -f1 "$slot/etc/$f" | tr '\n' ' ')" = "root daemon systemd-network nobody " ] || { echo "$f"; return 1; }
+  done
+  for f in group group-; do
+    [ "$(tr '\n' ' ' <"$slot/etc/$f")" = "root:x:0: sudo:x:27: users:x:100: docker:x:999: systemd-network:x:998: nogroup:x:65534: " ]
+  done
+  for f in gshadow gshadow-; do
+    [ "$(tr '\n' ' ' <"$slot/etc/$f")" = "root:*:: sudo:*:: users:*:: docker:!:: systemd-network:!*:: nogroup:*:: " ]
+  done
+  for f in subuid subgid subuid- subgid-; do [ ! -s "$slot/etc/$f" ]; done
+  [ "$(mode "$slot/etc/shadow")" = 640 ] && [ "$(mode "$slot/etc/gshadow-")" = 640 ]
   [ ! -e "$slot/etc/sudoers.d/ironflock-flockostest" ] && [ -e "$slot/etc/sudoers.d/README" ]
   [ ! -e "$slot/etc/systemd/system/ironflock-device-agent.service" ]
   [ ! -L "$slot/etc/systemd/system/multi-user.target.wants/ironflock-device-agent.service" ]
@@ -341,7 +410,19 @@ outside() {
   [ -e "$slot/etc/docker/daemon.json" ] && [ -L "$slot/etc/flockos/proxy.conf" ] && [ -e "$slot/var/lib/chrony/chrony.drift" ]
 }
 
-@test "the other slot is cleared the same way; the booted one is never mounted" {
+@test "the account clean-up under mawk, as Debian's awk" {
+  command -v mawk >/dev/null || skip "mawk is not installed"
+  ln -s "$(command -v mawk)" "$tmp/bin/awk"
+  request ''
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(cut -d: -f1 "$slot/etc/passwd" | tr '\n' ' ')" = "root daemon systemd-network nobody " ]
+  [ "$(tr '\n' ' ' <"$slot/etc/group")" = "root:x:0: sudo:x:27: users:x:100: docker:x:999: systemd-network:x:998: nogroup:x:65534: " ]
+  [ "$(tr '\n' ' ' <"$slot/etc/gshadow")" = "root:*:: sudo:*:: users:*:: docker:!:: systemd-network:!*:: nogroup:*:: " ]
+  [ "$(value result)" = done ]
+}
+
+@test "the other slot is cleared the same way, mounted without following links; the booted one is never mounted" {
   request ''
   run bash "$reset"
   [ "$status" -eq 0 ]
@@ -350,12 +431,12 @@ outside() {
   [ "$(cat "$other/etc/machine-id")" = uninitialized ]
   [ ! -e "$other/var/lib/flockos/enrolled" ] && [ -e "$other/var/lib/flockos/slot-proven" ]
   [ ! -e "$other/apps" ] && [ ! -e "$other/etc/systemd/system/ironflock-device-agent.service" ]
-  grep -qx 'mount nodev,nosuid rootfs-b' "$tmp/calls"
+  grep -qx 'mount nodev,nosuid,nosymfollow rootfs-b' "$tmp/calls"
   ! grep -q 'rootfs-a' "$tmp/calls"
   [ "$(value other-slot)" = cleaned ]
 }
 
-@test "an empty slot B, a slot on another disk and a slot without IronFlockOS are left alone" {
+@test "an empty slot B, a slot on another disk and a slot without IronFlockOS are left alone; one that cannot be mounted is a failed step" {
   rm -rf "$other"
   request ''
   run bash "$reset"
@@ -365,29 +446,41 @@ outside() {
 
   reboot
   enrolled_slot "$other" owner-device-before
-  touch "$tmp/elsewhere-rootfs-b"
+  on_disk rootfs-b sdb
   request ''
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ "$(value other-slot)" = "not cleaned (on another disk)" ]
+  [ "$(value result)" = done ]
   [ "$(cat "$other/etc/hostname")" = owner-device-before ]
 
   reboot
-  rm "$tmp/elsewhere-rootfs-b"
+  on_disk rootfs-b vda
   echo 'ID=debian' >"$other/usr/lib/os-release"
   request ''
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ "$(value other-slot)" = "not cleaned (no IronFlockOS)" ]
   [ "$(cat "$other/etc/hostname")" = owner-device-before ]
+
+  reboot
+  touch "$tmp/broken-rootfs-b"
+  request ''
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value other-slot)" = "not cleaned (cannot mount)" ]
+  [ "$(value result)" = incomplete ]
+  [ "$(value failed-steps)" = other-slot ]
+  [ ! -e "$esp/factory-reset.conf" ]
+  [ "$(tail -n 1 "$tmp/systemctl.log")" = "--no-block reboot" ]
 }
 
-@test "GRUB: the booted slot's try flag is cleared before anything else; the real-time tuning goes; the rest of grubenv stays" {
+@test "GRUB: the booted slot's try flag is cleared just before the reset begins; the real-time tuning goes; the rest of grubenv stays" {
   request ''
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ "$(grubenv | LC_ALL=C sort | tr '\n' ' ')" = "A_OK=1 A_TRY=0 B_OK=1 B_TRY=0 FLOCKOS_CMDLINE=systemd.debug_shell=ttyS1 ORDER=A B " ]
-  [ "$(head -n 2 "$tmp/calls" | tr '\n' ' ')" = "grub-editenv set A_TRY=0 mount ro,nodev,nosuid,noexec data " ]
+  [ "$(head -n 4 "$tmp/calls" | tr '\n' '|')" = "mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|grub-editenv set A_TRY=0|mkfs.ext4 -F -q -L data -m 0 vda4|" ]
   [ "$(tail -n 1 "$tmp/calls")" = "grub-editenv unset FLOCKOS_RT_CMDLINE" ]
 }
 
@@ -408,6 +501,33 @@ outside() {
   [ "$(value slot)" = unknown ]
 }
 
+@test "GRUB: a grubenv that cannot be read stops a reset that has not begun, and is a failed step of one that has" {
+  touch "$tmp/broken-grubenv"
+  request ''
+  before=$(state)
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value result)" = failed ] && [ "$(value begun)" = no ]
+  [[ "$(value reason)" == "cannot read or write "*"grubenv" ]]
+  [ ! -e "$esp/factory-reset.keep" ] && [ ! -e "$esp/.factory-reset.keep.part" ] && [ -e "$esp/factory-reset.conf" ]
+  [ "$(state | grep -v '^esp/factory-reset.log')" = "$(printf '%s\n' "$before" | grep -v '^esp/factory-reset.log')" ]
+
+  rm "$tmp/broken-grubenv"
+  reboot
+  FAKE_KILL_ON=mkfs.ext4 run bash "$reset"
+  [ "$status" -eq 137 ]
+  [ -e "$esp/factory-reset.keep" ]
+  reboot
+  touch "$tmp/broken-grubenv"
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value result)" = incomplete ]
+  [ "$(value failed-steps)" = grubenv ]
+  [ ! -e "$esp/factory-reset.conf" ] && [ ! -e "$esp/factory-reset.keep" ]
+  [ -e "$data/rauc/central.raucs" ] && [ "$(cat "$slot/etc/hostname")" = flockos ]
+  [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
+}
+
 @test "the request's forms: empty, comments, CRLF, a byte order mark, quotes and capitals" {
   for form in '' '# reset\n\n' 'keep-network=no\n' 'keep-network=yes' 'keep-network = "yes"  # keep WiFi\r\n' \
     '\xef\xbb\xbfkeep-network=yes\r\n' 'KEEP-NETWORK=Yes\n' 'keep-network=yes\nkeep-network=yes\n'; do
@@ -425,43 +545,64 @@ outside() {
   [ -e "$data/flockos/proxy.conf" ]
 }
 
-@test "a request the device does not understand is refused: nothing changes, it is renamed and the record says why" {
+@test "the same answer in every locale: a no-break space is no space" {
+  printf 'keep-network=yes\xc2\xa0\n' >"$tmp/request"
+  for locale in C C.UTF-8 en_US.UTF-8; do
+    LC_ALL=$locale run bash "$reset" check "$tmp/request"
+    [ "$status" -eq 1 ] || { echo "accepted in $locale"; return 1; }
+  done
+}
+
+@test "a request the device does not understand is refused: nothing changes, it is renamed, part files go, the record says why" {
   before=$(outside)
   for bad in 'keep-network=maybe\n' 'keep-apps=yes\n' 'keep-netwrk=yes\n' 'keep-network=yes\nkeep-apps=yes\n' \
-    'reset now\n' 'keep-network="yes\n' 'keep-network=yes\nkeep-network=no\n' 'keep network=yes\n'; do
-    data_before=$(state | grep '^disk/data')
+    'reset now\n' 'keep-network="yes\n' 'keep-network=yes\nkeep-network=no\n' 'keep network=yes\n' \
+    'keep-\0network=yes\n' '\0\0\0\0'; do
+    data_before=$(state | grep '^disk/vda4')
     request "$bad"
+    : >"$esp/.factory-reset.flock.part"
     run bash "$reset"
     [ "$status" -eq 0 ] || { echo "status $status for: $bad"; return 1; }
     [[ "$output" == *"refused"* ]]
     [ ! -e "$esp/factory-reset.conf" ]
-    [ "$(cat "$esp/factory-reset.conf.refused")" = "$(printf '%b' "$bad")" ]
+    cmp -s "$esp/factory-reset.conf.refused" <(printf '%b' "$bad")
     [ "$(value result)" = refused ]
     [ -n "$(value reason)" ]
-    [ "$(state | grep '^disk/data')" = "$data_before" ]
+    [ ! -e "$esp/.factory-reset.flock.part" ]
+    [ "$(state | grep '^disk/vda4')" = "$data_before" ]
     [ "$(outside | grep -v '^esp/factory-reset')" = "$(printf '%s\n' "$before" | grep -v '^esp/factory-reset')" ]
     grubenv | grep -qx A_TRY=1
     [ ! -e "$tmp/systemctl.log" ] && [ ! -e "$tmp/calls" ]
   done
-  [ "$(value reason)" = "line 1 is not a key=value line" ]
-  # Neither a folder nor a request on trial runs.
+  [ "$(value reason)" = "the request holds a NUL byte" ]
+  # A folder is no request either.
   mkdir "$esp/factory-reset.conf"
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ -d "$esp/factory-reset.conf.refused" ]
-  [ "$(value reason)" = "factory-reset.conf is not a file" ]
+  [ "$(value reason)" = "the request is not a file" ]
 }
 
-@test "check: says what a request asks for, or why it is refused, and changes nothing" {
+@test "check: prints keep-network=yes or no, or the reason without the file's name, and changes nothing" {
   before=$(state)
-  printf 'keep-network=yes\n' >"$tmp/request"
-  run bash "$reset" check "$tmp/request"
+  printf 'keep-network=yes\n' >"$tmp/.factory-reset.conf.part"
+  run bash "$reset" check "$tmp/.factory-reset.conf.part"
   [ "$status" -eq 0 ] && [ "$output" = keep-network=yes ]
-  printf 'keep-apps=yes\n' >"$tmp/request"
-  run bash "$reset" check "$tmp/request"
+  printf 'keep-apps=yes\n' >"$tmp/.factory-reset.conf.part"
+  run bash "$reset" check "$tmp/.factory-reset.conf.part"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"line 1: unknown key keep-apps"* ]]
+  [ "$output" = "factory-reset: line 1: unknown key keep-apps" ]
+  printf 'keep-\0network=yes\n' >"$tmp/.factory-reset.conf.part"
+  run bash "$reset" check "$tmp/.factory-reset.conf.part"
+  [ "$status" -eq 1 ] && [ "$output" = "factory-reset: the request holds a NUL byte" ]
+  head -c 5000 /dev/zero | tr '\0' '#' >"$tmp/.factory-reset.conf.part"
+  run bash "$reset" check "$tmp/.factory-reset.conf.part"
+  [ "$status" -eq 1 ] && [ "$output" = "factory-reset: the request is larger than 4 KiB" ]
+  run bash "$reset" check "$tmp/missing"
+  [ "$status" -eq 1 ] && [ "$output" = "factory-reset: the request is not a file" ]
   run bash "$reset" check
+  [ "$status" -eq 2 ]
+  run bash "$reset" now
   [ "$status" -eq 2 ]
   [ "$(state)" = "$before" ]
 }
@@ -482,14 +623,16 @@ outside() {
   ! grep -q -e owner-device -e flockostest -e OwnerWiFi <<<"$output"
 }
 
-@test "nothing outside the data partition and the paths of the reset changes; a new .flock and proxy.conf wait for the next boot" {
+@test "nothing outside the data partition and the paths of the reset changes; a new .flock and proxy.conf wait for the next boot; part files go" {
   before=$(outside)
+  echo '{"secret": "half written"}' >"$esp/.factory-reset.flock.part"
   request 'keep-network=yes\n'
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ "$(outside)" = "$before" ]
   [ "$(cat "$esp/new-device.flock")" = '{"name": "new-device", "secret": "new"}' ]
   grep -qx 'http_proxy=http://new-proxy:3128' "$esp/proxy.conf"
+  [ ! -e "$esp/.factory-reset.flock.part" ]
 }
 
 @test "a Raspberry Pi running an update on trial (tryboot) leaves the reset to its next normal boot" {
@@ -520,7 +663,7 @@ outside() {
   [ "$status" -eq 0 ]
   want=$(state)
   steps=$(cat "$tmp/count")
-  [ "$steps" -ge 9 ]
+  [ "$steps" -ge 16 ]
   for ((k = 1; k <= steps; k++)); do
     rm -rf "$tmp/disk" "$tmp/esp" "$tmp/calls" "$tmp/systemctl.log"
     reboot
@@ -528,7 +671,6 @@ outside() {
     request 'keep-network=yes\n'
     FAKE_KILL_AT=$k run bash "$reset"
     [ "$status" -eq 137 ] || { echo "step $k: status $status: $output"; return 1; }
-    [ -e "$esp/factory-reset.conf" ] || { echo "step $k: the request is gone"; return 1; }
     reboot
     run bash "$reset"
     [ "$status" -eq 0 ] || { echo "after a power loss at step $k: $output"; return 1; }
@@ -538,6 +680,39 @@ outside() {
       return 1
     }
   done
+}
+
+@test "a power loss right before and right after factory-reset.keep takes its name" {
+  # Cut at the try flag: factory-reset.keep is complete under its temporary
+  # name. The next boot starts over from the untouched /data.
+  request 'keep-network=yes\n'
+  FAKE_KILL_ON=grub-editenv run bash "$reset"
+  [ "$status" -eq 137 ]
+  [ -e "$esp/.factory-reset.keep.part" ] && [ ! -e "$esp/factory-reset.keep" ]
+  [ -e "$data/owner-notes.txt" ]
+  reboot
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value result)" = done ] && [ -e "$data/flockos/proxy.conf" ]
+
+  # Cut right after the rename, at its sync (mount, umount, sync, the try
+  # flag, sync): the reset has begun, and the next boot goes on with it even
+  # when the request was taken back.
+  rm -rf "$tmp/disk" "$tmp/esp" "$tmp/calls" "$tmp/systemctl.log"
+  reboot
+  device
+  request 'keep-network=yes\n'
+  FAKE_KILL_AT=5 run bash "$reset"
+  [ "$status" -eq 137 ]
+  [ "$(tail -n 1 "$tmp/calls")" = "grub-editenv set A_TRY=0" ]
+  [ -e "$esp/factory-reset.keep" ] && [ ! -e "$esp/.factory-reset.keep.part" ]
+  [ -e "$data/owner-notes.txt" ]
+  reboot
+  rm "$esp/factory-reset.conf"
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"going on with the reset begun before (keep network: yes)"* ]]
+  [ ! -e "$data/owner-notes.txt" ] && [ -e "$data/flockos/proxy.conf" ]
 }
 
 @test "a power loss after factory-reset.keep is gone and before the request is: the next boot ends the same" {
@@ -552,11 +727,30 @@ outside() {
   [ "$(state)" = "$want" ]
 }
 
+@test "a slot cleared halfway is finished the same at the next boot" {
+  request 'keep-network=yes\n'
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  want=$(state)
+  # What a power loss in the middle of clean_slot can leave: some parts done,
+  # some not, a temporary file of a rewrite.
+  reboot
+  mkdir -p "$slot/apps/prod/app1"
+  echo 'the app data of the owner' >"$slot/apps/prod/app1/data.txt"
+  echo owner-device >"$slot/etc/hostname"
+  echo 'flockostest:x:1000:1000::/home/flockostest:/bin/bash' >>"$slot/etc/passwd"
+  : >"$slot/etc/passwd.flockos-new"
+  request 'keep-network=yes\n'
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value result)" = done ]
+  [ "$(state)" = "$want" ]
+}
+
 @test "factory-reset.keep alone finishes a reset that has begun, whatever the request says now" {
   request 'keep-network=yes\n'
-  FAKE_KILL_AT=4 run bash "$reset"
+  FAKE_KILL_ON=mkfs.ext4 run bash "$reset"
   [ "$status" -eq 137 ]
-  grep -q '^mkfs.ext4' "$tmp/calls"
   [ -e "$esp/factory-reset.keep" ]
   reboot
   rm "$esp/factory-reset.conf"
@@ -571,40 +765,46 @@ outside() {
 @test "before the reset has begun, a failure clears nothing: the device boots as before and tries again" {
   before=$(outside)
   data_before=$(cd "$data" && find . | LC_ALL=C sort)
-  touch "$tmp/elsewhere-data"
+  on_disk vda4 sdb
   request 'keep-network=yes\n'
   run bash "$reset"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"not on the disk of the root slot; nothing was cleared"* ]]
+  [[ "$output" == *"not the partition named data on the disk of the root slot; nothing was cleared"* ]]
   [ "$(value result)" = failed ] && [ "$(value begun)" = no ]
   [ -e "$esp/factory-reset.conf" ] && [ ! -e "$esp/factory-reset.keep" ]
   [ "$(cd "$data" && find . | LC_ALL=C sort)" = "$data_before" ]
   [ "$(outside)" = "$before" ]
   [ ! -e "$tmp/systemctl.log" ]
-  rm "$tmp/elsewhere-data"
 
-  # /data is mounted: not at boot.
-  touch "$tmp/mounted"
+  # A partition on the right disk under another name.
+  on_disk vda4 vda other
   run bash "$reset"
   [ "$status" -eq 0 ]
-  [[ "$(value reason)" == "the data partition is mounted"* ]]
-  rm "$tmp/mounted"
+  [ "$(value reason)" = "the data partition is not the partition named data on the disk of the root slot" ]
+  on_disk vda4 vda data
+
+  # A FLOCKOS partition at /boot/efi on another disk (a stick) cannot ask.
+  on_disk flockos sdb
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [[ "$(value reason)" == "the FLOCKOS partition at "*" is not on the disk of the root slot" ]]
+  on_disk flockos vda
 
   # No data partition.
-  rm "$tmp/dev/data"
+  rm "$tmp/dev/vda4"
   run bash "$reset"
   [ "$status" -eq 0 ]
   [[ "$(value reason)" == "the data partition ("*") is missing" ]]
-  grubenv | grep -qx A_TRY=1
-  : >"$tmp/dev/data"
+  : >"$tmp/dev/vda4"
 
-  # A FLOCKOS partition without room for factory-reset.keep: the try flag
-  # this boot cleared is set again, so the boot counts as before.
+  # A FLOCKOS partition without room for factory-reset.keep: grubenv is not
+  # touched, as the try flag is cleared only just before the reset begins.
   mkdir "$esp/.factory-reset.keep.part"
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ "$(value reason)" = "cannot write factory-reset.keep to the FLOCKOS partition" ]
   grubenv | grep -qx A_TRY=1
+  ! grep -q grub-editenv "$tmp/calls"
   [ ! -L "$tmp/run/old" ]
   [ "$(cd "$data" && find . | LC_ALL=C sort)" = "$data_before" ]
   rmdir "$esp/.factory-reset.keep.part"
@@ -614,7 +814,42 @@ outside() {
   [ "$(value result)" = done ]
 }
 
-@test "once the reset has begun, a failure keeps /data unmounted; the next boot finishes it" {
+@test "a read-only FLOCKOS partition: no reset, no record, and the device boots as before" {
+  not_root
+  request 'keep-network=yes\n'
+  : >"$esp/factory-reset.conf.refused"
+  before=$(state)
+  chmod 555 "$esp"
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cannot write factory-reset.keep"*"nothing was cleared"* ]]
+  [ "$(state)" = "$before" ]
+  grubenv | grep -qx A_TRY=1
+
+  # A refusal on it does not stop the boot either.
+  chmod 755 "$esp"
+  request 'keep-apps=yes\n'
+  before=$(state)
+  chmod 555 "$esp"
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"refused"* ]]
+  [ "$(state)" = "$before" ]
+}
+
+@test "started while /data is mounted (a unit that needs /data was started): nothing happens, nothing is recorded" {
+  request 'keep-network=yes\n'
+  before=$(state)
+  touch "$tmp/mounted-vda4"
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/data is mounted: the reset runs at the next boot"* ]]
+  [ "$(state)" = "$before" ]
+  [ ! -e "$esp/factory-reset.log" ]
+  grep -qx 'ConditionPathIsMountPoint=!/data' "$units/flockos-factory-reset.service"
+}
+
+@test "once the reset has begun, only a new filesystem that cannot be made or mounted stops the boot; the next boot finishes it" {
   touch "$tmp/broken-mkfs"
   request 'keep-network=yes\n'
   run bash "$reset"
@@ -625,14 +860,40 @@ outside() {
   [ ! -e "$tmp/systemctl.log" ]
   reboot
   rm "$tmp/broken-mkfs"
+  touch "$tmp/unmountable-vda4"
+  run bash "$reset"
+  [ "$status" -eq 1 ]
+  [ "$(value reason)" = "cannot mount the new filesystem" ] && [ "$(value begun)" = yes ]
+  reboot
+  rm "$tmp/unmountable-vda4"
   run bash "$reset"
   [ "$status" -eq 0 ]
   [ "$(value result)" = done ]
   [ -e "$data/network/connections/site-lan.nmconnection" ]
 }
 
+@test "a clean-up step that fails after /data is new ends the reset as incomplete: the request goes, the device restarts" {
+  not_root
+  # The slot's /etc takes no new files (as a full slot would not): the
+  # accounts cannot be rewritten. What is deleted goes first, and still goes.
+  chmod 555 "$slot/etc"
+  request 'keep-network=yes\n'
+  run bash "$reset"
+  [ "$status" -eq 0 ]
+  [ "$(value result)" = incomplete ]
+  [ "$(value failed-steps)" = booted-slot ]
+  [ "$(value kept)" = "rauc network/connections flockos/proxy.conf flockos/ptp.conf" ]
+  [ ! -e "$esp/factory-reset.conf" ] && [ ! -e "$esp/factory-reset.keep" ]
+  [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
+  [ ! -e "$slot/apps" ] && [ ! -e "$slot/etc/sudoers.d/ironflock-flockostest" ] && [ ! -e "$slot/var/lib/flockos/enrolled" ]
+  [ "$(cat "$slot/etc/machine-id")" = uninitialized ]
+  [ -e "$data/flockos/proxy.conf" ] && [ ! -e "$data/owner-notes.txt" ]
+  # The other slot was cleared all the same.
+  [ "$(value other-slot)" = cleaned ]
+}
+
 @test "a data partition that cannot be mounted is reset all the same, keeping nothing of it" {
-  touch "$tmp/broken-data"
+  touch "$tmp/broken-vda4"
   request 'keep-network=yes\n'
   run bash "$reset"
   [ "$status" -eq 0 ]
@@ -641,11 +902,59 @@ outside() {
   [ "$(value note)" = "the data partition could not be mounted: nothing of it was kept" ]
 }
 
+@test "a pending or begun reset holds back the FLOCKOS partition's .flock and proxy.conf; a refused one does not" {
+  lib=$repo/overlay/usr/lib/flockos
+  mkdir -p "$tmp/agent" "$tmp/state" "$tmp/pdata"
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
+  chmod +x "$tmp/ironflock-init"
+  echo '{"appliance_domain": "old.example"}' >"$tmp/agent/device-config.flock"
+  printf 'http_proxy=http://old:3128\n' >"$tmp/pdata/proxy.conf"
+  echo '{"appliance_domain": "new.example"}' >"$esp/new-device.flock"
+  enroll_env=(FLOCKOS_AGENT_DIR="$tmp/agent" FLOCKOS_STATE="$tmp/state" FLOCKOS_INIT="$tmp/ironflock-init"
+    FLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
+  proxy_env=(FLOCKOS_PROXY_CONF="$tmp/pdata/proxy.conf" FLOCKOS_RUN="$tmp/prun" FLOCKOS_AGENT_FLOCK="$tmp/agent/device-config.flock")
+  for marker in factory-reset.conf factory-reset.keep; do
+    : >"$esp/$marker"
+    # An enrolled slot: enroll has nothing to do.
+    : >"$tmp/state/enrolled"
+    run env "${enroll_env[@]}" bash "$lib/enroll"
+    [ "$status" -eq 0 ] && [[ "$output" == *"no .flock is taken from the FLOCKOS partition before it"* ]]
+    [ ! -e "$tmp/init-calls" ] && [ -e "$esp/new-device.flock" ]
+    # A new slot (an update on trial): enrolled from the agent's copy, as the
+    # device it still is.
+    rm "$tmp/state/enrolled"
+    run env "${enroll_env[@]}" bash "$lib/enroll"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/agent/device-config.flock --shred-source --hostname-from-flock" ]
+    [ -e "$esp/new-device.flock" ]
+    rm "$tmp/init-calls"
+    # The proxy: the device's own, with the agent's .flock off the proxy.
+    run env "${proxy_env[@]}" bash "$lib/proxy"
+    [ "$status" -eq 0 ] && [[ "$output" == *"proxy.conf waits for it"* ]]
+    grep -qx 'http_proxy=http://old:3128' "$tmp/pdata/proxy.conf"
+    [ -e "$esp/proxy.conf" ]
+    grep -qx 'NO_PROXY=localhost,127.0.0.1,::1,old.example,.old.example' "$tmp/prun/proxy.env"
+    rm "$esp/$marker"
+  done
+  # A refused request: both take their files as without a request.
+  request 'keep-apps=yes\n'
+  run bash "$reset"
+  [ "$(value result)" = refused ]
+  run env "${proxy_env[@]}" bash "$lib/proxy"
+  [ "$status" -eq 0 ]
+  grep -qx 'http_proxy=http://new-proxy:3128' "$tmp/pdata/proxy.conf"
+  [ ! -e "$esp/proxy.conf" ]
+  run env "${enroll_env[@]}" bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $esp/new-device.flock --shred-source --hostname-from-flock" ]
+}
+
 @test "the unit runs before /data, its fsck and its users; /etc/fstab requires it; the installer has no /data and does not pull it in" {
   u=$units/flockos-factory-reset.service
   grep -qx 'DefaultDependencies=no' "$u"
   grep -qx 'ConditionPathExists=|/boot/efi/factory-reset.conf' "$u"
   grep -qx 'ConditionPathExists=|/boot/efi/factory-reset.keep' "$u"
+  grep -qx 'ConditionPathIsMountPoint=!/data' "$u"
   grep -qx 'ExecStart=/usr/lib/flockos/factory-reset' "$u"
   grep -q '^After=boot-efi.mount .*systemd-repart.service' "$u"
   grep -qx 'Before=systemd-fsck@dev-disk-by\\x2dpartlabel-data.service data.mount local-fs.target' "$u"

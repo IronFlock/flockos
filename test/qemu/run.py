@@ -817,18 +817,21 @@ class Runner:
         installed = self.slot_installed("rootfs.1")
         if not installed:
             raise TestFailure("RAUC has no record of the installation into slot B")
-        # The request, written as the contract says: a whole file under its
-        # name, before the .flock.
-        self.vm.run("printf 'keep-network=yes\\n' > /boot/efi/.factory-reset.conf.part"
-                    " && mv /boot/efi/.factory-reset.conf.part /boot/efi/factory-reset.conf && sync")
-        out = self.vm.run("/usr/lib/flockos/factory-reset check /boot/efi/factory-reset.conf").strip()
+        # The request as the contract says (docs/build.md) and `ironflock os
+        # reset` writes it: the whole file under a temporary name, checked,
+        # renamed; then the .flock the same way, the only one on the partition.
+        self.vm.run("printf 'keep-network=yes\\n' > /boot/efi/.factory-reset.conf.part && sync")
+        out = self.vm.run("/usr/lib/flockos/factory-reset check /boot/efi/.factory-reset.conf.part").strip()
         if out != "keep-network=yes":
             raise TestFailure(f"factory-reset check says {out!r}")
+        self.vm.run("mv /boot/efi/.factory-reset.conf.part /boot/efi/factory-reset.conf && sync")
         new_flock = None
         if self.flock:
             new_flock = "flockos-ci-reset.flock"
             data = base64.b64encode(json.dumps(test_flock(RESET_FLOCK_NAME, RESET_OWNER, "4712")).encode()).decode()
-            self.vm.run(f"echo {data} | base64 -d > /boot/efi/{new_flock} && sync")
+            self.vm.run("test -z \"$(ls /boot/efi/*.flock 2>/dev/null)\"")
+            self.vm.run(f"echo {data} | base64 -d > /boot/efi/.factory-reset.flock.part && sync"
+                        f" && mv /boot/efi/.factory-reset.flock.part /boot/efi/{new_flock} && sync")
 
         self.reset_reboot()
         self.wait_running()
@@ -843,7 +846,8 @@ class Runner:
         for want in ("rauc", "network/connections", "flockos/proxy.conf"):
             if want not in kept:
                 raise TestFailure(f"the record does not list {want} as kept:\n{record}")
-        self.vm.run("test ! -e /boot/efi/factory-reset.conf && test ! -e /boot/efi/factory-reset.keep")
+        self.vm.run("test ! -e /boot/efi/factory-reset.conf && test ! -e /boot/efi/factory-reset.keep"
+                    " && test -z \"$(ls -A /boot/efi | grep '^\\.factory-reset.*\\.part$')\"")
 
         # Nothing of the old device: its identity, containers, app files, data
         # and logs.
@@ -856,7 +860,11 @@ class Runner:
         host_key = self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip()
         if host_key == self.host_key:
             raise TestFailure("the SSH host key survived the reset")
-        self.vm.run("test -z \"$(docker ps -aq)\" && test -z \"$(docker images -q)\"")
+        # The old containers and images are gone; the newly enrolled agent
+        # may have made its own, so they are checked by name.
+        for kind, name in (("container", "flockos-reset-test"), ("image", "flockos-reset-test"),
+                           ("image", "hello-world")):
+            self.vm.run(f"! docker {kind} inspect {name} >/dev/null 2>&1")
         self.vm.run("test ! -e /apps/prod/flockos-reset-test && test ! -e /data/flockos-test-marker")
         boots = self.vm.run("journalctl --list-boots --no-pager | grep -cE '^ *-?[0-9]+ '").strip()
         if boots != "1":
@@ -864,7 +872,9 @@ class Runner:
         if self.flock:
             self.vm.run(f"! id {TEST_OWNER} && test ! -e /etc/sudoers.d/ironflock-{TEST_OWNER} && test ! -e /home/{TEST_OWNER}")
             self.enrolled(first=True, owner=RESET_OWNER, name=RESET_FLOCK_NAME, flock=new_flock)
-            self.vm.run("grep -q '\"device_key\": \"4712\"' /opt/ironflock/device-agent/device-config.flock")
+            copy = json.loads(self.vm.run("cat /opt/ironflock/device-agent/device-config.flock"))
+            if copy.get("device_key") != "4712" or copy.get("name") != RESET_FLOCK_NAME:
+                raise TestFailure(f"the agent's .flock is not the new one: device_key {copy.get('device_key')!r}")
         else:
             hostname = self.vm.run("hostname").strip()
             if hostname != "flockos":
