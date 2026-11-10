@@ -76,7 +76,7 @@ keyfile_awk='
   END {
     if (bad) exit 1
     if (type == "") { print "it has no type= in a [connection] group"; exit 1 }
-    print type " " uuid
+    print type " " tolower(uuid)
   }'
 
 # normalized FILE: FILE's text without a byte order mark, with LF line ends.
@@ -136,17 +136,109 @@ check() {
   fi
 }
 
-# uuid_of FILE: the uuid in the [connection] group of a device's profile, in
-# lower case; nothing when it has none or is no keyfile.
-uuid_of() {
-  local out
-  out=$(normalized "$1" 2>/dev/null | awk "$keyfile_awk" 2>/dev/null) || return 0
-  printf '%s' "${out#* }" | tr '[:upper:]' '[:lower:]'
-}
+# The uuids of the device's profiles, "<uuid><TAB><name>" lines, all files
+# in one awk: only the [connection] group's uuid=, in lower case.
+# shellcheck disable=SC2016 # an awk program
+uuids_awk='
+  FNR == 1 { group = "" }
+  {
+    line = $0
+    sub(/\r$/, "", line)
+    sub(/^[ \t]+/, "", line)
+    if (substr(line, 1, 1) == "[") {
+      sub(/[ \t]+$/, "", line)
+      group = substr(line, 2, length(line) - 2)
+      next
+    }
+    eq = index(line, "=")
+    if (group != "connection" || eq < 2) next
+    key = substr(line, 1, eq - 1)
+    sub(/[ \t]+$/, "", key)
+    if (key != "uuid") next
+    value = substr(line, eq + 1)
+    sub(/^[ \t]+/, "", value)
+    sub(/[ \t]+$/, "", value)
+    name = FILENAME
+    sub(/.*\//, "", name)
+    if (value != "") print tolower(value) "\t" name
+  }'
 
 # remove FILE: overwritten first where that is possible, then removed.
 remove() {
   shred -u "$1" 2>/dev/null || rm -f "$1"
+}
+
+# known_uuid[i], known_name[i]: the device's profiles that have a uuid, read
+# once before the first file (a pair of arrays: bash 3 has no others).
+known_uuid=() known_name=()
+read_known() {
+  local files=() f u n
+  for f in "$dest"/*; do
+    if [ -f "$f" ] && [ ! -L "$f" ]; then files+=("$f"); fi
+  done
+  [ "${#files[@]}" -gt 0 ] || return 0
+  while IFS=$'\t' read -r u n; do
+    known_uuid+=("$u") known_name+=("$n")
+  done < <(awk "$uuids_awk" "${files[@]}" 2>/dev/null || true)
+}
+
+# take FILE: FILE becomes the device's profile and leaves the partition; or
+# it is refused and renamed; or it stays for the next boot. Fails in the
+# last two cases, and never stops the run: one file's trouble keeps none of
+# the others back. Runs without errexit (it is called in a condition), so
+# every step is checked.
+take() {
+  local f=$1 name target part i
+  name=$(basename -- "$f")
+  if ! check "$f"; then
+    say "refused $name: $reason; renamed to $name.refused" >&2
+    rm -rf "$f.refused" 2>/dev/null
+    if [ -e "$f.refused" ] || [ -L "$f.refused" ] || ! mv -f "$f" "$f.refused" 2>/dev/null; then
+      say "could not rename $name: it is refused again at the next boot" >&2
+    fi
+    return 1
+  fi
+  target=$dest/$name
+  # rename(2) puts a file into a folder of that name, and replaces a link:
+  # only a profile, or nothing, may be there.
+  if [ -L "$target" ] || { [ -e "$target" ] && [ ! -f "$target" ]; }; then
+    say "$name: $target is no profile file; $name stays on the FLOCKOS partition" >&2
+    return 1
+  fi
+  part=$dest/.flockos-profile-$name.part
+  if ! normalized "$f" >"$part" || ! chmod 0600 "$part" || ! sync "$part"; then
+    rm -f "$part"
+    say "$name: could not write it to $dest; it stays on the FLOCKOS partition" >&2
+    return 1
+  fi
+  if [ -e "$target" ]; then
+    say "$name replaces the device's profile of that name"
+  fi
+  if ! mv -f "$part" "$target" || [ -L "$target" ] || [ ! -f "$target" ] || [ -e "$part" ] || ! sync "$dest"; then
+    rm -f "$part"
+    say "$name: could not put it into $dest; it stays on the FLOCKOS partition" >&2
+    return 1
+  fi
+  # NetworkManager keeps one profile per uuid: the one that came last wins.
+  # The replaced file's own uuid goes with it.
+  for ((i = 0; i < ${#known_uuid[@]}; i++)); do
+    if [ "${known_name[i]}" = "$name" ]; then
+      known_uuid[i]=""
+    elif [ -n "$uuid" ] && [ "${known_uuid[i]}" = "$uuid" ]; then
+      known_uuid[i]=""
+      if [ -f "$dest/${known_name[i]}" ] && [ ! -L "$dest/${known_name[i]}" ] && rm -f "$dest/${known_name[i]}"; then
+        say "$name replaces ${known_name[i]}, which has the same uuid"
+      fi
+    fi
+  done
+  if [ -n "$uuid" ]; then known_uuid+=("$uuid") known_name+=("$name"); fi
+  say "took $name ($type) from the FLOCKOS partition"
+  # On /data, synced: now it may leave the partition. A power loss before
+  # that takes it again at the next boot, with the same result.
+  if ! remove "$f"; then
+    say "could not remove $name from the FLOCKOS partition: the next boot takes it again" >&2
+    return 1
+  fi
 }
 
 if [ "${1:-}" = check ]; then
@@ -176,50 +268,14 @@ fi
 
 umask 077
 mkdir -p "$dest"
-# What a power loss left of an earlier run; NetworkManager ignores names
-# that begin with a dot.
+# What a power loss or the unit's time limit left of an earlier run;
+# NetworkManager ignores names that begin with a dot.
 rm -f "$dest"/.flockos-profile-*.part
+read_known
 
-rc=0 taken=()
+rc=0
 for f in "$src"/*.nmconnection; do
-  name=$(basename -- "$f")
-  if ! check "$f"; then
-    say "refused $name: $reason; renamed to $name.refused" >&2
-    rm -rf "$f.refused"
-    mv -f "$f" "$f.refused" || say "could not rename $name" >&2
-    rc=1
-    continue
-  fi
-  part=$dest/.flockos-profile-$name.part
-  normalized "$f" >"$part"
-  chmod 0600 "$part"
-  if [ -e "$dest/$name" ]; then
-    say "$name replaces the device's profile of that name"
-  fi
-  mv -f "$part" "$dest/$name"
-  # NetworkManager keeps one profile per uuid: the new one wins.
-  if [ -n "$uuid" ]; then
-    want=$(printf '%s' "$uuid" | tr '[:upper:]' '[:lower:]')
-    for other in "$dest"/*; do
-      [ -f "$other" ] && [ "$other" != "$dest/$name" ] || continue
-      case "$(basename -- "$other")" in .*) continue ;; esac
-      if [ "$(uuid_of "$other")" = "$want" ]; then
-        rm -f "$other"
-        say "$name replaces $(basename -- "$other"), which has the same uuid"
-      fi
-    done
-  fi
-  taken+=("$f")
-  say "took $name ($type) from the FLOCKOS partition"
-done
-# On /data before they leave the FLOCKOS partition: a power loss in between
-# takes them again at the next boot.
-sync
-for f in ${taken[@]+"${taken[@]}"}; do
-  if ! remove "$f"; then
-    say "could not remove $(basename -- "$f") from the FLOCKOS partition: the next boot takes it again" >&2
-    rc=1
-  fi
+  take "$f" || rc=1
 done
 rmdir "$src" 2>/dev/null || true
 sync

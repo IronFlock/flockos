@@ -16,6 +16,10 @@ ConditionPathExistsGlob=/boot/efi/network/*.nmconnection
 [Service]
 Type=oneshot
 ExecStart=/usr/lib/flockos/network-profiles
+# NetworkManager waits for it. A profile takes well under a second, and each
+# leaves the partition once it is on /data: what a run cut short by the limit
+# did not take is taken at the next boot (ADR-0016).
+TimeoutStartSec=2min
 # A refused profile on the screen and the serial console too: a device
 # without its network is reached there.
 StandardError=journal+console

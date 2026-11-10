@@ -80,20 +80,34 @@ The new profile replaces the device's file of the same name, and every other pro
 `/data/network/connections` whose `[connection]` holds the same `uuid` (compared without
 regard to case): NetworkManager keeps one profile per uuid, and the one that came last is
 the one meant. Profiles of other names and uuids stay. Several files in one boot are taken
-in the order of their names.
+in the order of their names. The device's uuids are read once, before the first file.
+
+Where the device has a folder or a link under the profile's name, the profile is not taken:
+renaming onto them would put it into the folder or follow the link. The file stays on the
+partition, the reason goes to the journal and the console, and the unit fails.
 
 Enrollment writes the `.flock`'s Wi-Fi as `ironflock-wifi.nmconnection` after
 NetworkManager has started, so a profile of that name from the partition is replaced at the
 same boot when the `.flock` has a Wi-Fi network.
 
-### 5. A power loss takes the profile again
+### 5. One file at a time; a run cut short goes on at the next boot
 
-The profile is written under `.flockos-profile-<name>.part` in the same folder, renamed to
-its name, and synced to `/data` before anything leaves the partition. A power loss before
-the rename leaves a part file, which the next run removes; after it, the file is still on
-the partition, and the next boot takes it again, with the same result. So does a file the
-partition does not let go (read-only after an error): it is taken at every boot, and the
-unit fails until it can be removed.
+Each file is done before the next: its profile is written under
+`.flockos-profile-<name>.part` in the same folder, synced, renamed to its name, the folder
+synced, and only then the file leaves the partition. A power loss before the rename leaves
+a part file, which the next run removes; after it, the file is still on the partition, and
+the next boot takes it again, with the same result. So does a file the partition does not
+let go (read-only after an error): it is taken at every boot, and the unit fails until it
+can be removed. A file that cannot be taken, renamed or removed is reported and keeps none
+of the others back; the unit fails at the end.
+
+NetworkManager waits for the unit, so its start is limited to two minutes
+(`TimeoutStartSec=2min`). A profile takes well under a second (200 profiles against 200 of
+the device took 14 seconds on a laptop), so the limit only ends a run with an unusual
+number of files or a disk that hangs. There is no limit on the number of files per run: a
+run the limit ends has taken, and removed from the partition, every file it finished; the
+unit fails, NetworkManager starts with the profiles there are, and the next boot takes the
+rest.
 
 ### 6. The secret on FAT
 
@@ -163,7 +177,8 @@ by these rules:
 - **The result.** At the next boot the file is gone from the partition and the profile is
   in `/etc/NetworkManager/system-connections/<name>.nmconnection`, the line
   `took <name>.nmconnection (<type>) from the FLOCKOS partition` in
-  `journalctl -u flockos-network-profiles`. A refused file is
+  `journalctl -u flockos-network-profiles`, within two minutes for any reasonable number
+  of files (section 5). A refused file is
   `network/<name>.nmconnection.refused`, with
   `network-profiles: refused <name>.nmconnection: <reason>; renamed to ...` in the journal
   and on the console, and the unit has failed. While a factory reset is pending or has

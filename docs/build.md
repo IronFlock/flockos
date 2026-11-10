@@ -312,7 +312,9 @@ boot where one lies there, the first included, after `/data` is mounted and
 before NetworkManager starts. It writes each profile to
 `/data/network/connections/<name>.nmconnection` with mode 0600, where it
 replaces the device's profile of that name and any other with the same `uuid`,
-then overwrites the file on the partition and removes it. A file that is not a
+then overwrites the file on the partition and removes it, one file after the
+other. NetworkManager waits for it at most two minutes; what a run cut short
+did not take is taken at the next boot. A file that is not a
 keyfile NetworkManager can read (a name of other characters, over 64 KiB, no
 `type=` in `[connection]`, ...) is renamed to `<name>.nmconnection.refused`, the
 reason goes to the journal and the console, and the unit fails; the others are

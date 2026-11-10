@@ -13,7 +13,12 @@ setup() {
   mkdir -p "$tmp/bin" "$tmp/esp/network" "$tmp/data/network/connections"
   # shred as the device has it, with a record of what it overwrote.
   printf '#!/bin/sh\necho "$*" >>"%s/shred.log"\n[ "$1" = -u ] && rm -f "$2"\n' "$tmp" >"$tmp/bin/shred"
-  chmod +x "$tmp/bin/shred"
+  # sync FILE... as coreutils has it (fsync of those files), recorded; with
+  # sync.kill holding N, the Nth call stops the script as a power loss or the
+  # unit's time limit would.
+  printf '#!/bin/sh\necho "$*" >>"%s/sync.log"\nn=$(wc -l <"%s/sync.log")\nif [ -f "%s/sync.kill" ] && [ "$n" -eq "$(cat "%s/sync.kill")" ]; then kill -9 "$PPID"; fi\nexit 0\n' \
+    "$tmp" "$tmp" "$tmp" "$tmp" >"$tmp/bin/sync"
+  chmod +x "$tmp/bin/shred" "$tmp/bin/sync"
   export PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_CONNECTIONS=$tmp/data/network/connections
   src=$tmp/esp/network dest=$tmp/data/network/connections
 }
@@ -96,7 +101,9 @@ method=auto
   [[ "$output" == *"office.nmconnection replaces old-name.nmconnection, which has the same uuid"* ]]
   grep -qx 'id=office' "$dest/office.nmconnection"
   [ ! -e "$dest/old-name.nmconnection" ]
-  [ -e "$dest/other.nmconnection" ] && [ -e "$dest/ironflock-wifi.nmconnection" ] && [ -e "$dest/notes" ]
+  [ -e "$dest/other.nmconnection" ]
+  [ -e "$dest/ironflock-wifi.nmconnection" ]
+  [ -e "$dest/notes" ]
 }
 
 @test "several profiles are taken in one boot" {
@@ -104,14 +111,16 @@ method=auto
   printf '%s' "$wifi" >"$src/b_wifi-2.nmconnection"
   run bash "$script"
   [ "$status" -eq 0 ]
-  [ -e "$dest/a.nmconnection" ] && [ -e "$dest/b_wifi-2.nmconnection" ]
+  [ -e "$dest/a.nmconnection" ]
+  [ -e "$dest/b_wifi-2.nmconnection" ]
   [ ! -e "$src" ]
 }
 
 @test "check: exit 0 for a profile it takes, the reason without the file's name for one it refuses, exit 2 for wrong arguments" {
   static office.nmconnection >"$tmp/office.nmconnection"
   run bash "$script" check "$tmp/office.nmconnection"
-  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   printf '[connection]\nid=x\n' >"$tmp/office.nmconnection"
   run bash "$script" check "$tmp/office.nmconnection"
   [ "$status" -eq 1 ]
@@ -191,7 +200,8 @@ refused() {
   [ ! -e "$src/bad.nmconnection" ]
   grep -qx 'id=x' "$src/bad.nmconnection.refused"
   [ ! -e "$dest/bad.nmconnection" ]
-  [ -e "$dest/good.nmconnection" ] && [ ! -e "$src/good.nmconnection" ]
+  [ -e "$dest/good.nmconnection" ]
+  [ ! -e "$src/good.nmconnection" ]
   # The next boot has nothing to take and nothing to refuse.
   run bash "$script"
   [ "$status" -eq 0 ]
@@ -210,13 +220,15 @@ refused() {
     run bash "$script"
     [ "$status" -eq 0 ]
     [[ "$output" == *"a factory reset is pending: the profiles on the FLOCKOS partition wait for it"* ]]
-    [ -e "$src/office.nmconnection" ] && [ ! -e "$dest/office.nmconnection" ]
+    [ -e "$src/office.nmconnection" ]
+    [ ! -e "$dest/office.nmconnection" ]
     rm "$tmp/esp/$marker"
   done
   : >"$tmp/esp/factory-reset.conf.refused"
   run bash "$script"
   [ "$status" -eq 0 ]
-  [ -e "$dest/office.nmconnection" ] && [ ! -e "$src/office.nmconnection" ]
+  [ -e "$dest/office.nmconnection" ]
+  [ ! -e "$src/office.nmconnection" ]
 }
 
 @test "a power loss: a part file of /data is cleared, and a profile still on the partition is taken again" {
@@ -238,12 +250,88 @@ refused() {
   run bash "$script"
   [ "$status" -eq 1 ]
   [[ "$output" == *"could not remove office.nmconnection from the FLOCKOS partition: the next boot takes it again"* ]]
-  [ -e "$dest/office.nmconnection" ] && [ -e "$src/office.nmconnection" ]
+  [ -e "$dest/office.nmconnection" ]
+  [ -e "$src/office.nmconnection" ]
   chmod 755 "$src"
   run bash "$script"
   [ "$status" -eq 0 ]
   [ ! -e "$src" ]
   cmp "$dest/office.nmconnection" <(static office.nmconnection)
+}
+
+@test "a folder or a link of the profile's name on /data takes nothing and loses nothing; the unit fails" {
+  static office.nmconnection >"$src/office.nmconnection"
+  mkdir "$dest/office.nmconnection"
+  run bash "$script"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"office.nmconnection: $dest/office.nmconnection is no profile file; office.nmconnection stays on the FLOCKOS partition"* ]]
+  [[ "$output" != *"took office.nmconnection"* ]]
+  [ -z "$(ls -A "$dest/office.nmconnection")" ]
+  cmp "$src/office.nmconnection" <(static office.nmconnection)
+  [ -z "$(ls -A "$dest" | grep -v '^office.nmconnection$')" ]
+  # A link to a folder the same.
+  rmdir "$dest/office.nmconnection"
+  mkdir "$tmp/elsewhere"
+  ln -s "$tmp/elsewhere" "$dest/office.nmconnection"
+  run bash "$script"
+  [ "$status" -eq 1 ]
+  [ -z "$(ls -A "$tmp/elsewhere")" ]
+  [ -e "$src/office.nmconnection" ]
+}
+
+@test "a FLOCKOS partition that turned read-only: an old .refused that cannot go keeps back none of the profiles after it" {
+  if [ "$(id -u)" = 0 ]; then skip "root ignores the folder modes this test relies on"; fi
+  printf '[connection]\nid=x\n' >"$src/a-bad.nmconnection"
+  printf 'old refusal\n' >"$src/a-bad.nmconnection.refused"
+  static b-good.nmconnection >"$src/b-good.nmconnection"
+  chmod 555 "$src"
+  run bash "$script"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refused a-bad.nmconnection"* ]]
+  [[ "$output" == *"could not rename a-bad.nmconnection: it is refused again at the next boot"* ]]
+  [[ "$output" == *"took b-good.nmconnection (ethernet)"* ]]
+  [ -e "$dest/b-good.nmconnection" ]
+  [ "$(cat "$src/a-bad.nmconnection.refused")" = "old refusal" ]
+}
+
+@test "a run cut short (the time limit, a power loss) has removed every profile it finished from the partition; the next boot takes the rest" {
+  for n in a b c; do static "$n.nmconnection" "$n$n$n$n$n$n$n$n-2222-4333-8444-555555555555" >"$src/$n.nmconnection"; done
+  # Two syncs per profile (the file, then the folder of the rename): the
+  # third stops the run while it writes b.
+  echo 3 >"$tmp/sync.kill"
+  run bash "$script"
+  [ "$status" -ne 0 ]
+  [ -e "$dest/a.nmconnection" ]
+  [ ! -e "$src/a.nmconnection" ]
+  [ -e "$src/b.nmconnection" ]
+  [ -e "$src/c.nmconnection" ]
+  [ ! -e "$dest/c.nmconnection" ]
+  rm "$tmp/sync.kill"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [ -z "$(ls -A "$dest" | grep -vxE '[abc]\.nmconnection')" ]
+  [ "$(ls "$dest" | wc -l | tr -d ' ')" = 3 ]
+  [ ! -e "$src" ]
+}
+
+@test "the device's uuids are read once, not once per profile and file" {
+  real=$(command -v awk)
+  printf '#!/bin/sh\necho x >>"%s/awk.log"\nexec "%s" "$@"\n' "$tmp" "$real" >"$tmp/bin/awk"
+  chmod +x "$tmp/bin/awk"
+  for i in $(seq 20); do
+    static "dev$i.nmconnection" "$(printf '%08d-0000-4000-8000-%012d' "$i" "$i")" >"$dest/dev$i.nmconnection"
+    static "new$i.nmconnection" "$(printf '%08d-0000-4000-8000-%012d' $((i + 10)) $((i + 10)))" >"$src/new$i.nmconnection"
+  done
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  # new1 to new10 have the uuids of dev11 to dev20, which they replace.
+  [ "$(ls "$dest" | wc -l | tr -d ' ')" = 30 ]
+  for i in $(seq 11 20); do [ ! -e "$dest/dev$i.nmconnection" ]; done
+  [ -e "$dest/dev10.nmconnection" ]
+  [ -e "$dest/new20.nmconnection" ]
+  # One awk per profile for its check, one for the device's uuids; once per
+  # pair it would be 420.
+  [ "$(wc -l <"$tmp/awk.log" | tr -d ' ')" -le 22 ]
 }
 
 @test "a missing profile folder on /data is made, readable by root only" {
@@ -274,6 +362,8 @@ refused() {
   grep -qx 'Before=NetworkManager.service' "$u"
   grep -qx 'ConditionPathExistsGlob=/boot/efi/network/\*.nmconnection' "$u"
   grep -qx 'StandardError=journal+console' "$u"
+  # NetworkManager waits for it, at most this long.
+  grep -qx 'TimeoutStartSec=2min' "$u"
   grep -qx 'WantedBy=multi-user.target' "$u"
   # Where it puts them is what NetworkManager reads, readable by root only.
   grep -q '^/data/network/connections  */etc/NetworkManager/system-connections ' "$repo/overlay/etc/fstab"
