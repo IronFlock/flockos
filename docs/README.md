@@ -4,7 +4,7 @@
 |----------|---------|
 | [master-plan.md](master-plan.md) | The plan of record: goals, target architecture, phased roadmap, cross-repo changes, risks |
 | [implementation-plan.md](implementation-plan.md) | The work packages: status board, milestones, dependencies, per-WP scope, deliverables and acceptance; one GitHub issue per WP |
-| [build.md](build.md) | How an image is built: stages, artefacts, disk layout on a device, boot and A/B, local builds |
+| [build.md](build.md) | How an image is built: stages, artefacts, disk layout on a device, boot and A/B, the device settings, the factory reset and its contract for the CLI, local builds |
 | [testing.md](testing.md) | Unit tests, the QEMU image test, the hardware checklist |
 | [signing.md](signing.md) | The RAUC PKI in Cloud KMS: creating it, how releases sign, renewal |
 | [jetson-licence-review.md](jetson-licence-review.md) | What the Jetson images redistribute from NVIDIA, under which terms, what IronFlockOS does to meet them, and the questions for IronFlock's legal check |
@@ -32,5 +32,6 @@
 | [0012](adr/0012-the-os-is-named-ironflockos.md) | The OS is named IronFlockOS; identifiers that software matches or that are in the field keep `flockos` | accepted |
 | [0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md) | chrony replaces systemd-timesyncd; PTP through linuxptp per device, as chrony's source (client) or served from the system clock (server) | accepted |
 | [0014](adr/0014-proxy-per-device-from-the-flockos-partition.md) | The proxy is a device setting on `/data`, taken from the FLOCKOS partition, for the agent, Docker and containerd; `ntp` for networks that block NTP | accepted |
+| [0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md) | A factory reset is requested by `factory-reset.conf` on the FLOCKOS partition and runs at the next boot: a new filesystem on `/data`, RAUC's state and on request the network settings kept, both root slots cleared of the old owner; unknown requests are refused | accepted |
 
 Planned: `migration.md`, how devices of the previous OS move to IronFlockOS (a reflash).

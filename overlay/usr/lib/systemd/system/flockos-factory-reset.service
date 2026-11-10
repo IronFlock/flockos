@@ -1,0 +1,30 @@
+# Factory reset (ADR-0015, docs/build.md "Factory reset"): runs when the
+# FLOCKOS partition holds factory-reset.conf, or a reset that has begun left
+# factory-reset.keep there, before /data and everything that uses it, and
+# restarts the device when it is done. /etc/fstab makes /data's mount require
+# this unit, so it needs no [Install]: a reset that fails once it has begun
+# keeps /data unmounted. On a boot without a request the conditions skip it.
+[Unit]
+Description=IronFlockOS: factory reset, when the FLOCKOS partition asks for one
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0015-factory-reset-requested-on-the-flockos-partition.md
+DefaultDependencies=no
+ConditionPathExists=|/boot/efi/factory-reset.conf
+ConditionPathExists=|/boot/efi/factory-reset.keep
+Wants=boot-efi.mount
+After=boot-efi.mount systemd-remount-fs.service systemd-repart.service dev-disk-by\x2dpartlabel-data.device
+# Before /data is checked and mounted, and before anything that reads the
+# settings on it: Docker, containerd and the agent come after local-fs.target.
+Before=systemd-fsck@dev-disk-by\x2dpartlabel-data.service data.mount local-fs.target
+Before=flockos-data-layout.service flockos-proxy.service flockos-ptp.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/flockos/factory-reset
+# The steps on the screen and the serial console: the journal of this boot is
+# lost with the restart.
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=infinity

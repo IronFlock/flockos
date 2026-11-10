@@ -20,6 +20,9 @@ state, partitions grown, /data layout, identity, SSH policy, RAUC slot A good,
 Docker, fwupd); for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
 (state persists); update into slot B with the bundle of the same build;
+factory reset (ADR-0015): the device in slot B, with a running container,
+resets, keeps its network settings and RAUC's state, enrolls with a new
+.flock, and slot A is cleared too;
 fallback: an update into slot A that is never marked good falls back to B;
 a kernel crash without a connection: the device restarts by itself on a slot
 that has proven itself, and the crash is on record on /data.
@@ -30,6 +33,7 @@ mtools (mcopy). Standard library only; run with `python3 -I`.
 """
 
 import argparse
+import base64
 import gzip
 import http.server
 import json
@@ -150,17 +154,25 @@ def esp_offset(disk):
 
 TEST_OWNER = "flockostest"
 TEST_FLOCK_NAME = "flockos-ci"
+# The device the factory reset enrolls it as.
+RESET_OWNER = "flockosreset"
+RESET_FLOCK_NAME = "flockos-ci-reset"
+
+
+def test_flock(name, owner, device_key):
+    """A .flock with a throwaway key: enough for ironflock-init enroll (SSH
+    user, agent unit), useless to the platform."""
+    key = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519"], check=True,
+                         capture_output=True, text=True).stdout
+    return {"name": name, "swarm_owner_name": owner, "device_key": device_key,
+            "secret": "not-a-real-secret", "wlanssid": "", "password": "",
+            "authentication": {"key": key}}
 
 
 def put_test_flock(disk, workdir):
-    """A .flock with a throwaway key on the test copy's FLOCKOS partition:
-    enough for ironflock-init enroll (SSH user, agent unit), useless to the
-    platform. Returns its file name."""
-    key = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519"], check=True,
-                         capture_output=True, text=True).stdout
-    flock = {"name": TEST_FLOCK_NAME, "swarm_owner_name": TEST_OWNER, "device_key": "4711",
-             "secret": "not-a-real-secret", "wlanssid": "", "password": "",
-             "authentication": {"key": key}}
+    """The test .flock on the test copy's FLOCKOS partition. Returns its file
+    name."""
+    flock = test_flock(TEST_FLOCK_NAME, TEST_OWNER, "4711")
     path = os.path.join(workdir, "flockos-ci.flock")
     with open(path, "w") as fh:
         json.dump(flock, fh)
@@ -636,24 +648,24 @@ class Runner:
         self.vm.run("printf 'http_proxy=http://10.0.2.2:3129\\n' > /boot/efi/proxy.conf")
         self.proxy_seeded = True
 
-    def enrolled(self, first):
+    def enrolled(self, first, owner=TEST_OWNER, name=TEST_FLOCK_NAME, flock=None):
         """The slot is enrolled from the test .flock: SSH user, sudo rule,
         the agent's unit; on the first boot the .flock left the FLOCKOS
         partition for the agent's 0600 copy."""
-        self.vm.run(f"id {TEST_OWNER}")
-        self.vm.run(f"test -f /etc/sudoers.d/ironflock-{TEST_OWNER}")
-        self.vm.run(f"grep -q ironflock-device- /home/{TEST_OWNER}/.ssh/authorized_keys")
+        self.vm.run(f"id {owner}")
+        self.vm.run(f"test -f /etc/sudoers.d/ironflock-{owner}")
+        self.vm.run(f"grep -q ironflock-device- /home/{owner}/.ssh/authorized_keys")
         self.vm.run("systemctl is-enabled ironflock-device-agent.service")
         self.vm.run("test -s /var/lib/flockos/enrolled")
         hostname = self.vm.run("hostname").strip()
-        if hostname != TEST_FLOCK_NAME:
-            raise TestFailure(f"the hostname is {hostname!r}, not the .flock's name {TEST_FLOCK_NAME!r}")
+        if hostname != name:
+            raise TestFailure(f"the hostname is {hostname!r}, not the .flock's name {name!r}")
         self.vm.run("test -L /etc/flockos/enroll.conf")
         mode = self.vm.run("stat -c %a /opt/ironflock/device-agent/device-config.flock").strip()
         if mode != "600":
             raise TestFailure(f"the agent's .flock copy has mode {mode}")
         if first:
-            self.vm.run(f"test ! -e /boot/efi/{self.flock}")
+            self.vm.run(f"test ! -e /boot/efi/{flock or self.flock}")
 
     def nvidia(self):
         """An nvidia image (WP-4.1) on a VM without a GPU: the driver and the
@@ -743,6 +755,146 @@ class Runner:
             raise TestFailure("the SSH host key changed with the update")
         self.mark_good("B", "rootfs.1")
         self.wait_for("test -e /var/lib/flockos/slot-proven", 60, "slot B to remember it was marked good")
+
+    def slot_installed(self, slot):
+        """When RAUC recorded the installation of a slot (its state on /data)."""
+        out = json.loads(self.vm.run("rauc status --detailed --output-format=json 2>/dev/null"))
+        for entry in out.get("slots", []):
+            if slot in entry:
+                return (entry[slot].get("slot_status") or {}).get("installed", {}).get("timestamp")
+        return None
+
+    def reset_reboot(self):
+        """Restart into a factory reset: the reset boot restarts by itself once
+        it is done, so the shell is the one of the second kernel after this."""
+        starts = self.vm.kernel_starts()
+        self.vm._send("systemctl reboot\r")
+        try:
+            self.vm.wait_shell(self.boot_timeout * 2, starts + 1)
+        except TestFailure as e:
+            info = ""
+            if self.vm.kernel_starts() == starts + 1:
+                # The reset boot did not restart: its shell says why.
+                try:
+                    self.vm.wait_shell(60, starts)
+                    info = self.vm.run("journalctl -b --no-pager -o cat -u flockos-factory-reset; "
+                                       "cat /boot/efi/factory-reset.log; systemctl --failed --no-pager", check=False)
+                except TestFailure:
+                    pass
+            raise TestFailure(f"{e}; the factory reset did not restart the device by itself\n{info}") from None
+
+    def factory_reset(self):
+        """Factory reset (ADR-0015, docs/build.md "Factory reset") of the
+        device in slot B, with the system it was updated from in slot A. Before
+        it: an app's container runs (an image made in the VM from its own
+        sleep and libc, with a restart policy), an app's files are in /apps, the
+        site has a network profile and a proxy.conf. A request with
+        keep-network=yes and a new .flock go onto the FLOCKOS partition, as
+        `ironflock os reset -c` puts them there. The boot after it resets and
+        restarts by itself; the device then comes up on slot B without the old
+        identity, containers, logs and data, with its network settings and
+        RAUC's state, enrolled as the new device; slot A is cleared too, and B,
+        which had proven itself, is kept good. With --no-flock the device
+        stays unenrolled."""
+        if self.booted() != "B":
+            raise TestFailure(f"the factory reset starts on slot {self.booted()}, expected B")
+        self.vm.run("test -x /usr/lib/flockos/factory-reset")
+        # No registry and no image with a process that keeps running: sleep and
+        # what it links become one.
+        self.vm.run("d=$(mktemp -d) && for f in /usr/bin/sleep $(ldd /usr/bin/sleep | grep -o '/[^ ]*'); do "
+                    "mkdir -p \"$d$(dirname \"$f\")\" && cp -L \"$f\" \"$d$f\" || exit 1; done && "
+                    "tar -C \"$d\" -c . | docker import - flockos-reset-test && rm -rf \"$d\"", timeout=300)
+        self.vm.run("docker run -d --name flockos-reset-test --restart always flockos-reset-test /usr/bin/sleep infinity",
+                    timeout=120)
+        self.wait_for("[ \"$(docker inspect -f '{{.State.Running}}' flockos-reset-test)\" = true ]", 60,
+                      "the test container to run")
+        self.vm.run("mkdir -p /apps/prod/flockos-reset-test && echo app > /apps/prod/flockos-reset-test/data.txt")
+        profile = "/etc/NetworkManager/system-connections/flockos-reset-test.nmconnection"
+        self.vm.run(f"printf '[connection]\\nid=flockos-reset-test\\ntype=dummy\\ninterface-name=frt0\\n"
+                    f"autoconnect=false\\n\\n[ipv4]\\nmethod=disabled\\n\\n[ipv6]\\nmethod=ignore\\n' > {profile}"
+                    f" && chmod 600 {profile}")
+        self.vm.run("printf 'ntp=10.0.2.2\\n' > /data/flockos/proxy.conf")
+        installed = self.slot_installed("rootfs.1")
+        if not installed:
+            raise TestFailure("RAUC has no record of the installation into slot B")
+        # The request, written as the contract says: a whole file under its
+        # name, before the .flock.
+        self.vm.run("printf 'keep-network=yes\\n' > /boot/efi/.factory-reset.conf.part"
+                    " && mv /boot/efi/.factory-reset.conf.part /boot/efi/factory-reset.conf && sync")
+        out = self.vm.run("/usr/lib/flockos/factory-reset check /boot/efi/factory-reset.conf").strip()
+        if out != "keep-network=yes":
+            raise TestFailure(f"factory-reset check says {out!r}")
+        new_flock = None
+        if self.flock:
+            new_flock = "flockos-ci-reset.flock"
+            data = base64.b64encode(json.dumps(test_flock(RESET_FLOCK_NAME, RESET_OWNER, "4712")).encode()).decode()
+            self.vm.run(f"echo {data} | base64 -d > /boot/efi/{new_flock} && sync")
+
+        self.reset_reboot()
+        self.wait_running()
+        if self.booted() != "B":
+            raise TestFailure(f"booted {self.booted()} after the factory reset, expected B: the reset's restart "
+                              "must not count as a failed try")
+        record = self.vm.run("cat /boot/efi/factory-reset.log")
+        for want in ("result=done", "keep-network=yes", "slot=B", "other-slot=cleaned"):
+            if want not in record.splitlines():
+                raise TestFailure(f"the record lacks {want!r}:\n{record}")
+        kept = next((line for line in record.splitlines() if line.startswith("kept=")), "").split("=", 1)[-1].split()
+        for want in ("rauc", "network/connections", "flockos/proxy.conf"):
+            if want not in kept:
+                raise TestFailure(f"the record does not list {want} as kept:\n{record}")
+        self.vm.run("test ! -e /boot/efi/factory-reset.conf && test ! -e /boot/efi/factory-reset.keep")
+
+        # Nothing of the old device: its identity, containers, app files, data
+        # and logs.
+        # systemd makes the machine-id anew; from a VM's UUID it would be the
+        # same as on the first boot, but QEMU without -uuid gives none.
+        mid = self.vm.run("cat /etc/machine-id").strip()
+        made = self.vm.run("journalctl -b --no-pager -o cat | grep 'Initializing machine ID'", check=False)
+        if not re.fullmatch(r"[0-9a-f]{32}", mid) or (mid == self.machine_id and "VM UUID" not in made):
+            raise TestFailure(f"the machine-id after the reset is {mid!r} (before: {self.machine_id}; {made.strip()!r})")
+        host_key = self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip()
+        if host_key == self.host_key:
+            raise TestFailure("the SSH host key survived the reset")
+        self.vm.run("test -z \"$(docker ps -aq)\" && test -z \"$(docker images -q)\"")
+        self.vm.run("test ! -e /apps/prod/flockos-reset-test && test ! -e /data/flockos-test-marker")
+        boots = self.vm.run("journalctl --list-boots --no-pager | grep -cE '^ *-?[0-9]+ '").strip()
+        if boots != "1":
+            raise TestFailure(f"the journal holds {boots} boots after the reset, expected only this one")
+        if self.flock:
+            self.vm.run(f"! id {TEST_OWNER} && test ! -e /etc/sudoers.d/ironflock-{TEST_OWNER} && test ! -e /home/{TEST_OWNER}")
+            self.enrolled(first=True, owner=RESET_OWNER, name=RESET_FLOCK_NAME, flock=new_flock)
+            self.vm.run("grep -q '\"device_key\": \"4712\"' /opt/ironflock/device-agent/device-config.flock")
+        else:
+            hostname = self.vm.run("hostname").strip()
+            if hostname != "flockos":
+                raise TestFailure(f"the hostname of an unenrolled device is {hostname!r}, not the image's")
+            self.vm.run("! awk -F: '$3 >= 1000 && $3 < 60000' /etc/passwd | grep -q .")
+            self.vm.run("test ! -e /var/lib/flockos/enrolled && test ! -e /etc/systemd/system/ironflock-device-agent.service")
+
+        # What was kept: the network settings and RAUC's state.
+        self.vm.run(f"grep -qx id=flockos-reset-test {profile} && test \"$(stat -c %a {profile})\" = 600")
+        self.vm.run("grep -qx ntp=10.0.2.2 /data/flockos/proxy.conf")
+        if self.slot_installed("rootfs.1") != installed:
+            raise TestFailure(f"RAUC's record of slot B changed with the reset: {installed} before")
+
+        # Slot A, the system B was updated from, is cleared as well.
+        dev = "/dev/disk/by-partlabel/rootfs-a"
+        for path, want in (("/etc/hostname", "flockos"), ("/etc/machine-id", "uninitialized")):
+            got = self.vm.run(f"debugfs -c -R 'cat {path}' {dev} 2>/dev/null").strip()
+            if got != want:
+                raise TestFailure(f"slot A's {path} is {got!r} after the reset, expected {want!r}")
+        self.vm.run(f"debugfs -c -R 'stat /var/lib/flockos/enrolled' {dev} 2>&1 | grep -q 'File not found'")
+        if self.flock:
+            self.vm.run(f"! debugfs -c -R 'cat /etc/passwd' {dev} 2>/dev/null | grep -q '^{TEST_OWNER}:'")
+
+        # B had proven itself before the reset, so it is kept good once it has
+        # stayed up, without the agent; the rest of the test needs it good.
+        self.vm.run("test -e /var/lib/flockos/slot-proven")
+        self.wait_for("grub-editenv /boot/efi/EFI/BOOT/grubenv list | grep -qx B_TRY=0", 300,
+                      "slot B, proven before the reset, to be marked good again")
+        self.machine_id, self.host_key = mid, host_key
+        self.vm.run("rm /data/flockos/proxy.conf")
 
     def _slots(self):
         out = {}
@@ -982,6 +1134,8 @@ def main():
         if args.only != "boot":
             runner.step("update into slot B", runner.update_to_b)
             if args.only != "update":
+                runner.step("factory reset: identity, containers and data gone, network kept, "
+                            + ("enrolled anew" if flock else "unenrolled") + ", slot A cleared", runner.factory_reset)
                 runner.step("fallback: an untested slot A falls back to B", runner.fallback)
                 runner.step("crash: restarts by itself on a proven slot, on record on /data", runner.crash_offline)
         ok = True

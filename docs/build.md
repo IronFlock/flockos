@@ -249,6 +249,101 @@ NTP does not pass an HTTP proxy, and without the right time TLS through the
 proxy fails. chrony already uses the NTP servers DHCP hands out; `ntp=` adds
 servers for networks that hand out none (`chronyc sources` lists them).
 
+## Factory reset
+
+A factory reset returns a device to the state of a freshly flashed one that
+waits for a `.flock` ([ADR-0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md)).
+It is requested by the file `factory-reset.conf` on the FLOCKOS partition and
+runs at the next boot, before `/data` is mounted:
+
+```ini
+keep-network=yes   # keep the network profiles, proxy.conf and ptp.conf (default no)
+```
+
+`flockos-factory-reset` (`/usr/lib/flockos/factory-reset`) copies what is kept
+into `factory-reset.keep` on the FLOCKOS partition, makes a new filesystem on
+the data partition, puts the kept files back, clears what the enrollment, the
+agent, apps and users left in both root slots, writes `factory-reset.log`,
+removes the request and restarts. What is kept: RAUC's state (`/data/rauc`)
+always; with `keep-network=yes` also `/data/network/connections`,
+`/data/flockos/proxy.conf` and `/data/flockos/ptp.conf`. Everything else on
+`/data` goes: the agent and its `.flock` copy, Docker's images and containers,
+the homes, the logs, the host keys, `enroll.conf`, `rt.conf`. In the root slots
+the reset removes the accounts the enrollment made, their sudo rule, the
+agent's unit, `/apps` (the apps' files), `/var/lib/flockos/enrolled`,
+containerd's and NetworkManager's state and root's files, and sets the hostname
+back to `flockos` and the machine-id to `uninitialized`; `slot-proven`, `ORDER`
+and the `_OK` flags of `grubenv` stay, so updates and fallback work as before.
+ADR-0015 lists every path.
+
+The boot after the reset is a first boot: a new machine-id and new SSH host
+keys, `/data` laid out anew, a `proxy.conf` and a `.flock` on the FLOCKOS
+partition taken in, enrollment with that `.flock`, or none. A request it does
+not understand (another key or value) is refused and renamed to
+`factory-reset.conf.refused`, and the device boots as before. A power loss
+during the reset continues it at the next boot; on GRUB the reset first clears
+the booted slot's `_TRY` flag, so that boot is the same slot. On a Raspberry Pi
+that runs an update on trial, the reset waits for the next boot that is not a
+trial. A failure before anything is cleared lets the device boot as before; a
+failure afterwards keeps `/data` unmounted (emergency mode, the reason on the
+console), and the next boot goes on. The steps are on the console;
+`factory-reset.log` keeps the result.
+
+### The contract for the CLI
+
+`ironflock os reset [-c new.flock] [--keep-network]` (device-init) is written
+from this section.
+
+- **Support.** The device can reset when `/usr/lib/flockos/factory-reset`
+  exists. `/usr/lib/flockos/factory-reset check FILE` exits 0 and prints
+  `keep-network=yes` or `keep-network=no` for a request it accepts; it exits 1
+  with the reason on stderr for one it refuses. It changes nothing.
+- **The request.** `/boot/efi/factory-reset.conf`: the FLOCKOS partition (on
+  Jetson NVIDIA's ESP), FAT, mounted for root only, so the file's mode is the
+  mount's (0600, root). Text, UTF-8, at most 4 KiB, `KEY=value` lines; `#`
+  starts a comment, also after a value; LF or CRLF. One key:
+  `keep-network=yes|no`, default `no`. Write `keep-network=yes\n` or
+  `keep-network=no\n`; an empty file is a reset with `keep-network=no`. The
+  device refuses any other key or value; a new key comes with a release of
+  IronFlockOS, and `check` tells whether a device knows it.
+- **Writing it.** As root: the whole content to
+  `/boot/efi/.factory-reset.conf.part`, fsync, rename to `factory-reset.conf`,
+  fsync the folder. A request cut short by a power loss could otherwise keep
+  less than asked for.
+- **A new device (`-c`).** After the request, copy the new `.flock` to
+  `/boot/efi/<name>.flock` the same way (enroll takes the newest `*.flock`
+  there; a name ending in `.flock` that no file has yet). If it cannot be
+  written, remove the request again. A `proxy.conf` for the new site goes to
+  `/boot/efi/proxy.conf`. A power loss between the request and the `.flock`
+  leaves a reset device that waits for a `.flock`, never the new identity on
+  the old data.
+- **Cancel** before the restart: remove `/boot/efi/factory-reset.conf`.
+- **Then restart** (`systemctl reboot`). Nothing happens before the restart.
+  A request is pending while `factory-reset.conf` is there; a reset has begun
+  while `factory-reset.keep` is there.
+- **At the next boot** the device resets as described above, restarts by
+  itself, and comes up as a first boot: enrolled with the new `.flock` and
+  reachable over SSH as its owner, or unenrolled and reachable on the console
+  only. Two restarts in all; the reset itself takes seconds, a few minutes on a
+  slow SD card.
+- **The record.** `/boot/efi/factory-reset.log`, replaced by every reset and
+  every refusal, `KEY=value` lines after a comment line:
+
+  | Key | Value |
+  |-----|-------|
+  | `result` | `done`, `refused` or `failed` |
+  | `time` | when it was written, UTC, by the device's clock (`2026-11-10T18:00:00Z`) |
+  | `image`, `version` | `IMAGE_ID` and `IMAGE_VERSION` of the system that ran it |
+  | `slot` | the booted slot, `A`, `B` or `unknown` |
+  | `keep-network` | `done`: what the request said |
+  | `kept` | `done`: what was kept, of `rauc network/connections flockos/proxy.conf flockos/ptp.conf`, space-separated |
+  | `other-slot` | `done`: `cleaned`, `none (...)` (no partition or filesystem) or `not cleaned (...)` |
+  | `note` | `done`, when something could not be kept: why |
+  | `reason` | `refused`, `failed`: why |
+  | `begun` | `failed`: `no`, nothing was cleared, the device booted as before and tries again at every boot while the request is there; `yes`, `/data` stays unmounted and the next boot goes on |
+
+  It names nothing of the old owner.
+
 ## The nvidia variant
 
 `nvidia` is `base` plus NVIDIA's driver for containers on amd64 (WP-4.1;

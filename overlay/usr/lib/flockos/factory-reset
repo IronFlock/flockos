@@ -1,0 +1,512 @@
+#!/bin/bash
+# Factory reset of an IronFlockOS device (docs/build.md, "Factory reset";
+# ADR-0015).
+#
+# The request is the file factory-reset.conf on the FLOCKOS partition
+# (/boot/efi), KEY=value lines; # starts a comment, also after a value:
+#   keep-network=yes|no   keep the network profiles, proxy.conf and ptp.conf
+#                         (default no)
+# An empty file asks for a reset that keeps no network settings. A file with
+# anything else (another key or value, a line that is not KEY=value) is
+# refused: nothing is cleared, the file is renamed to
+# factory-reset.conf.refused, and the device boots as before.
+#
+# Without an argument (flockos-factory-reset.service, which /data's mount in
+# /etc/fstab requires), at boot before /data is mounted:
+#   1. RAUC's state (/data/rauc) and, with keep-network=yes, the network
+#      settings go into factory-reset.keep on the FLOCKOS partition;
+#   2. the data partition gets a new filesystem, and they are put back;
+#   3. what the enrollment, the device-agent, apps and users left in the root
+#      slots goes (clean_slot), in the other slot too;
+#   4. factory-reset.log on the FLOCKOS partition records the result, the
+#      request is removed, and the device restarts into a first boot.
+# Every step can run again, and the request is removed last: a reset cut short
+# by a power loss goes on at the next boot. From step 1's factory-reset.keep
+# on, the reset has begun: it goes on at every boot until it is done, and a
+# failure keeps /data unmounted, and with it everything that uses it. On GRUB
+# the booted slot's try flag is cleared first, so that boot is the
+# bootloader's next choice again; a Raspberry Pi that runs an update on trial
+# leaves the reset to its next normal boot.
+#
+# "check FILE" says whether FILE is a request this device accepts and what it
+# asks for (exit 0), or why not (exit 1), and changes nothing.
+set -euo pipefail
+
+# FLOCKOS_ESP, FLOCKOS_ROOT, FLOCKOS_ROOT_DEV, FLOCKOS_SYSTEM_CONF,
+# FLOCKOS_PROC_CMDLINE, FLOCKOS_DATA_DEV, FLOCKOS_RUN, FLOCKOS_BOOTLOADER_DT,
+# FLOCKOS_RESET_WAIT: for the unit tests only.
+esp=${FLOCKOS_ESP:-/boot/efi}
+root=${FLOCKOS_ROOT:-}
+system_conf=${FLOCKOS_SYSTEM_CONF:-/etc/rauc/system.conf}
+cmdline=${FLOCKOS_PROC_CMDLINE:-/proc/cmdline}
+data_dev=${FLOCKOS_DATA_DEV:-/dev/disk/by-partlabel/data}
+run=${FLOCKOS_RUN:-/run/flockos/factory-reset}
+dt=${FLOCKOS_BOOTLOADER_DT:-/proc/device-tree/chosen/bootloader}
+wait_secs=${FLOCKOS_RESET_WAIT:-30}
+
+request=$esp/factory-reset.conf
+record=$esp/factory-reset.log
+keep=$esp/factory-reset.keep
+keep_part=$esp/.factory-reset.keep.part
+# The hostname of a flashed image (overlay/etc/hostname).
+image_hostname=flockos
+# What is kept of /data: RAUC's state always, the network on request.
+keep_always="rauc"
+keep_network_items="network/connections flockos/proxy.conf flockos/ptp.conf"
+
+say() { echo "factory-reset: $*"; }
+
+# parse FILE: sets keep_network, or sets reason and fails.
+parse() {
+  keep_network=no reason=""
+  local n=0 line key value seen=""
+  if [ -L "$1" ] || [ ! -f "$1" ]; then
+    reason="$(basename "$1") is not a file"
+    return 1
+  fi
+  if [ "$(wc -c <"$1")" -gt 4096 ]; then
+    reason="$(basename "$1") is too large for a request"
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line=${line%$'\r'}
+    # The byte order mark some editors write.
+    [ "$n" -gt 1 ] || line=${line#$'\xef\xbb\xbf'}
+    [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
+    if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*=[[:space:]]*(\"?)([^\"[:space:]#]*)(\"?)[[:space:]]*(#.*)?$ ]] ||
+      [ "${BASH_REMATCH[2]}" != "${BASH_REMATCH[4]}" ]; then
+      reason="line $n is not a key=value line"
+      return 1
+    fi
+    key=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    value=$(printf '%s' "${BASH_REMATCH[3]}" | tr '[:upper:]' '[:lower:]')
+    case "$key" in
+      keep-network)
+        if [[ ! "$value" =~ ^(yes|no)$ ]]; then
+          reason="line $n: keep-network must be yes or no"
+          return 1
+        fi
+        if [ -n "$seen" ] && [ "$seen" != "$value" ]; then
+          reason="line $n: keep-network is given twice, with different values"
+          return 1
+        fi
+        seen=$value keep_network=$value
+        ;;
+      *)
+        reason="line $n: unknown key $key"
+        return 1
+        ;;
+    esac
+  done <"$1"
+}
+
+# os_release KEY: a value of the booted slot's os-release.
+os_release() {
+  sed -n "s/^$1=//p" "$root/usr/lib/os-release" 2>/dev/null | tr -d '"' | head -n 1 || true
+}
+
+# write_record RESULT [KEY=VALUE...]: factory-reset.log on the FLOCKOS
+# partition. Nothing of the device's owner goes into it.
+write_record() {
+  local result=$1
+  shift
+  {
+    echo "# IronFlockOS factory reset (docs/build.md, \"Factory reset\")"
+    echo "result=$result"
+    echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "image=$(os_release IMAGE_ID)"
+    echo "version=$(os_release IMAGE_VERSION)"
+    echo "slot=${slot:-unknown}"
+    if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; fi
+  } >"$record.part" && mv -f "$record.part" "$record" && sync
+}
+
+# conf_value SECTION KEY: a value of RAUC's system.conf.
+conf_value() {
+  awk -v want="[$1]" -v key="$2" '
+    /^[ \t]*\[/ { section = $0; gsub(/[ \t]/, "", section); next }
+    section == want {
+      line = $0; sub(/^[ \t]*/, "", line)
+      if (index(line, key) != 1) next
+      rest = substr(line, length(key) + 1); sub(/^[ \t]*/, "", rest)
+      if (substr(rest, 1, 1) != "=") next
+      rest = substr(rest, 2); sub(/^[ \t]*/, "", rest); sub(/[ \t]*$/, "", rest)
+      print rest; exit
+    }' "$system_conf" 2>/dev/null || true
+}
+
+# rootfs_devices: the device of every root slot in system.conf.
+rootfs_devices() {
+  awk '
+    /^[ \t]*\[/ { rootfs = ($0 ~ /^[ \t]*\[slot\.rootfs\.[0-9]+\][ \t]*$/); next }
+    rootfs && /^[ \t]*device[ \t]*=/ { sub(/^[^=]*=[ \t]*/, ""); sub(/[ \t]*$/, ""); print }
+  ' "$system_conf" 2>/dev/null || true
+}
+
+# root_device: the partition of the booted root slot, by its device number
+# (the kernel may call it /dev/root).
+root_device() {
+  local majmin
+  majmin=$(findmnt -nvo MAJ:MIN / 2>/dev/null || true)
+  if [ -n "$majmin" ] && [ -e "/dev/block/$majmin" ]; then
+    readlink -f "/dev/block/$majmin"
+  else
+    findmnt -nvo SOURCE / 2>/dev/null || true
+  fi
+}
+
+# disk_of DEVICE: the disk a partition is on; nothing when it is none.
+disk_of() {
+  local dev
+  dev=$(readlink -f -- "$1" 2>/dev/null) || return 0
+  lsblk -ndo PKNAME -- "$dev" 2>/dev/null | head -n 1 || true
+}
+
+# wait_dev DEVICE SECONDS: whether DEVICE is there, waiting for udev.
+wait_dev() {
+  local i
+  for ((i = 0; i < $2; i++)); do
+    if [ -e "$1" ]; then return 0; fi
+    sleep 1
+  done
+  [ -e "$1" ]
+}
+
+# in_tryboot: the Raspberry Pi firmware started this system on trial.
+in_tryboot() {
+  [ -r "$dt/tryboot" ] && [ "$(od -An -tx1 -N4 "$dt/tryboot" | tr -d ' \n')" = 00000001 ]
+}
+
+# rewrite FILE AWK-ARGUMENTS...: FILE through awk, replaced only when that
+# changes it, with its mode and owner.
+rewrite() {
+  local f=$1
+  shift
+  [ -f "$f" ] || return 0
+  cp -p "$f" "$f.flockos-new"
+  awk "$@" "$f" >"$f.flockos-new"
+  if cmp -s "$f" "$f.flockos-new"; then
+    rm -f "$f.flockos-new"
+  else
+    mv -f "$f.flockos-new" "$f"
+  fi
+}
+
+# replace FILE LINE: FILE holds LINE, written to a new file and renamed.
+replace() {
+  if [ -f "$1" ] && [ "$(cat "$1")" = "$2" ]; then return 0; fi
+  if [ -f "$1" ]; then cp -p "$1" "$1.flockos-new"; fi
+  printf '%s\n' "$2" >"$1.flockos-new"
+  mv -f "$1.flockos-new" "$1"
+}
+
+# Drops the lines whose first field is in "drop", and the names in "strip"
+# from the member lists in "fields" (passwd, shadow, group, gshadow, subuid).
+# shellcheck disable=SC2016 # an awk program
+accounts_awk='
+  function set(list, s,   n, i, a) { n = split(list, a, " "); for (i = 1; i <= n; i++) s[a[i]] = 1 }
+  function clean(members,   n, i, a, out) {
+    n = split(members, a, ","); out = ""
+    for (i = 1; i <= n; i++) if (!(a[i] in stripped)) out = out (out == "" ? "" : ",") a[i]
+    return out
+  }
+  BEGIN { FS = OFS = ":"; set(drop, dropped); set(strip, stripped); nf = split(fields, f, " ") }
+  $1 in dropped { next }
+  { for (i = 1; i <= nf; i++) if (f[i] + 0 <= NF) $(f[i]) = clean($(f[i])); print }'
+
+# remove_accounts ROOT: the accounts of people, uid and gid 1000 to 59999. The
+# image has none (build/customize.sh); the enrollment makes the .flock's SSH
+# user with a group of its own.
+remove_accounts() {
+  local r=$1 users user_groups
+  [ -f "$r/etc/passwd" ] || return 0
+  users=$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1 }' "$r/etc/passwd" | tr '\n' ' ')
+  user_groups=$(awk -F: '$3 >= 1000 && $3 < 60000 { print $1 }' "$r/etc/group" 2>/dev/null | tr '\n' ' ' || true)
+  [ -n "${users// /}${user_groups// /}" ] || return 0
+  rewrite "$r/etc/passwd" -v drop="$users" -v strip="" -v fields="" "$accounts_awk"
+  rewrite "$r/etc/shadow" -v drop="$users" -v strip="" -v fields="" "$accounts_awk"
+  rewrite "$r/etc/group" -v drop="$user_groups" -v strip="$users" -v fields="4" "$accounts_awk"
+  rewrite "$r/etc/gshadow" -v drop="$user_groups" -v strip="$users" -v fields="3 4" "$accounts_awk"
+  rewrite "$r/etc/subuid" -v drop="$users" -v strip="" -v fields="" "$accounts_awk"
+  rewrite "$r/etc/subgid" -v drop="$users" -v strip="" -v fields="" "$accounts_awk"
+}
+
+# clean_slot ROOT: what the enrollment, the device-agent, apps and the device's
+# users leave in a root slot mounted at ROOT ("" is the booted one). The
+# system itself, and whether it has proven itself (slot-proven), stay.
+clean_slot() {
+  local r=$1 d
+  # The enrollment: the .flock's SSH user and sudo rule, the agent's unit, the
+  # hostname, and the mark that the slot is enrolled.
+  remove_accounts "$r"
+  rm -f "$r"/etc/sudoers.d/ironflock-*
+  rm -rf "$r/etc/systemd/system/ironflock-device-agent.service" \
+    "$r/etc/systemd/system/ironflock-device-agent.service.d" "$r/etc/systemd/system/ironflock.slice" \
+    "$r"/etc/systemd/system/*.wants/ironflock-device-agent.service
+  rm -f "$r/var/lib/flockos/enrolled"
+  replace "$r/etc/hostname" "$image_hostname"
+  # shellcheck disable=SC2016 # an awk program
+  rewrite "$r/etc/hosts" -v name="$image_hostname" '$1 == "127.0.1.1" { print "127.0.1.1\t" name; next } { print }'
+  # A new machine-id at the slot's next boot, as on a first boot. Written in
+  # place: during a first boot systemd keeps a mount on it until it commits it.
+  printf 'uninitialized\n' >"$r/etc/machine-id"
+  # Apps' files (the agent's -appsDir), containerd's state, NetworkManager's
+  # leases and secret key, sudo's records of the users, temporary files and
+  # root's home, which gets the image's skeleton back.
+  rm -rf "$r/apps"
+  for d in var/lib/containerd var/lib/NetworkManager var/lib/sudo/lectured var/tmp root; do
+    if [ -d "$r/$d" ]; then
+      find "$r/$d" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    fi
+  done
+  for d in bashrc profile; do
+    if [ -d "$r/root" ] && [ -f "$r/usr/share/base-files/dot.$d" ]; then
+      cp "$r/usr/share/base-files/dot.$d" "$r/root/.$d"
+    fi
+  done
+}
+
+# clean_other_slots: clean_slot on the root slots that are not booted; sets
+# other_slot to what happened, for the record. A slot that cannot be cleaned
+# does not stop the reset.
+clean_other_slots() {
+  local dev root_real booted="" others=() result mnt=$run/slot rc
+  other_slot=""
+  root_real=$(readlink -f -- "$rootdev" 2>/dev/null || true)
+  while IFS= read -r dev; do
+    [ -n "$dev" ] || continue
+    if [ "$(readlink -f -- "$dev" 2>/dev/null || true)" = "$root_real" ]; then
+      booted=$dev
+    else
+      others+=("$dev")
+    fi
+  done < <(rootfs_devices)
+  if [ -z "$booted" ]; then
+    other_slot="not cleaned (the booted slot is none of system.conf)"
+    say "the other slot: $other_slot"
+    return 0
+  fi
+  for dev in "${others[@]}"; do
+    if ! wait_dev "$dev" "$((wait_secs < 10 ? wait_secs : 10))"; then
+      result="none (no partition)"
+    elif [ "$(disk_of "$dev")" != "$root_disk" ]; then
+      result="not cleaned (on another disk)"
+    else
+      mkdir -p "$mnt"
+      if ! mount -t ext4 -o nodev,nosuid "$dev" "$mnt" 2>/dev/null; then
+        # Slot B before the first update, or an installation that broke off.
+        result="none (no filesystem)"
+      else
+        if grep -qx 'ID=flockos' "$mnt/usr/lib/os-release" 2>/dev/null; then
+          set +e
+          (
+            set -e
+            clean_slot "$mnt"
+          )
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then result=cleaned; else result="not cleaned (error $rc)"; fi
+        else
+          result="not cleaned (no IronFlockOS)"
+        fi
+        sync
+        umount "$mnt" || say "could not unmount $dev"
+      fi
+      rmdir "$mnt" 2>/dev/null || true
+    fi
+    say "the other slot ($dev): $result"
+    other_slot+=${other_slot:+, }$result
+  done
+  [ -n "$other_slot" ] || other_slot=none
+}
+
+# fail MESSAGE: before the reset has begun nothing is cleared, and the device
+# boots as before (exit 0); afterwards /data stays unmounted (exit 1). Both
+# times the next boot tries again.
+fail() {
+  local m
+  trap - EXIT
+  for m in old new slot; do
+    if [ -d "$run/$m" ]; then umount "$run/$m" 2>/dev/null || true; fi
+  done
+  if [ "$begun" = yes ]; then
+    say "$1; /data stays unmounted, and the reset goes on at the next boot"
+    write_record failed "reason=$1" "begun=yes" || say "could not write $record"
+    exit 1
+  fi
+  if [ "$try_cleared" = yes ]; then
+    grub-editenv "$grubenv" set "${slot}_TRY=1" || true
+  fi
+  rm -f "$keep_part" 2>/dev/null || true
+  say "$1; nothing was cleared, the device boots as before and tries again at the next boot"
+  write_record failed "reason=$1" "begun=no" || say "could not write $record"
+  exit 0
+}
+
+if [ "${1:-}" = check ]; then
+  if [ "$#" -ne 2 ]; then
+    echo "usage: factory-reset check FILE" >&2
+    exit 2
+  fi
+  if parse "$2"; then
+    echo "keep-network=$keep_network"
+    exit 0
+  fi
+  echo "factory-reset: $2: $reason" >&2
+  exit 1
+fi
+if [ "$#" -ne 0 ]; then
+  echo "usage: factory-reset [check FILE]" >&2
+  exit 2
+fi
+
+umask 022
+slot=$(tr ' ' '\n' <"$cmdline" 2>/dev/null | sed -n 's/^rauc\.slot=//p' | head -n 1 || true)
+begun=no try_cleared=no grubenv=""
+if [ -e "$keep" ]; then
+  # Begun before: what it keeps is in factory-reset.keep, whatever the
+  # request says now.
+  begun=yes
+  keep_network=$(tar -xOf "$keep" .factory-reset 2>/dev/null | sed -n 's/^keep-network=//p' || true)
+  keep_network=${keep_network:-unknown}
+elif [ ! -e "$request" ]; then
+  say "no request ($request)"
+  exit 0
+elif ! parse "$request"; then
+  say "refused $request: $reason; nothing was cleared, the device boots as before"
+  rm -rf "$request.refused"
+  mv -f "$request" "$request.refused" || say "could not rename $request"
+  write_record refused "reason=$reason" || say "could not write $record"
+  exit 0
+elif in_tryboot; then
+  say "this system runs on trial (tryboot): the reset waits for the next boot that is not a trial"
+  exit 0
+fi
+
+step="checking the disk"
+trap 'rc=$?; [ "$rc" -eq 0 ] || fail "stopped while $step (exit $rc)"' EXIT
+if [ "$begun" = yes ]; then
+  say "going on with the reset begun before (keep network: $keep_network)"
+else
+  say "resetting the device (keep network: $keep_network)"
+fi
+if ! wait_dev "$data_dev" "$wait_secs"; then fail "the data partition ($data_dev) is missing"; fi
+if findmnt -rn --source "$(readlink -f -- "$data_dev")" >/dev/null 2>&1; then
+  fail "the data partition is mounted: the reset runs at boot, before /data is mounted"
+fi
+rootdev=${FLOCKOS_ROOT_DEV:-$(root_device)}
+root_disk=$(disk_of "$rootdev")
+if [ -z "$root_disk" ]; then fail "the disk of the root slot (${rootdev:-unknown}) is unknown"; fi
+if [ "$(disk_of "$data_dev")" != "$root_disk" ]; then
+  fail "the data partition is not on the disk of the root slot"
+fi
+
+# GRUB counts every boot as a try of its slot until it is marked good. This
+# boot is not one: a power loss or the restart at the end must bring back this
+# slot, whose system goes on with the reset, never the other slot's, which may
+# not know it.
+step="keeping the booted slot for the next boot"
+if [ "$(conf_value system bootloader)" = grub ]; then
+  grubenv=$(conf_value system grubenv)
+  if [ -n "$slot" ]; then
+    env=$(grub-editenv "$grubenv" list) || fail "cannot read $grubenv"
+    if grep -qx "${slot}_OK=1" <<<"$env" && ! grep -qx "${slot}_TRY=0" <<<"$env"; then
+      grub-editenv "$grubenv" set "${slot}_TRY=0" || fail "cannot write $grubenv"
+      try_cleared=yes
+    fi
+  fi
+fi
+
+if [ "$begun" = no ]; then
+  step="keeping RAUC's state and the settings to keep"
+  stage=$run/keep old=$run/old
+  # A mount point is only ever removed with rmdir, never with what is in it.
+  rm -rf "$stage"
+  mkdir -p "$stage" "$old"
+  kept="" note=""
+  items=$keep_always
+  if [ "$keep_network" = yes ]; then items+=" $keep_network_items"; fi
+  if mount -t ext4 -o ro,nodev,nosuid,noexec "$data_dev" "$old" 2>/dev/null; then
+    for item in $items; do
+      if [ -e "$old/$item" ]; then
+        mkdir -p "$stage/$(dirname "$item")"
+        cp -a "$old/$item" "$stage/$item" || fail "cannot copy $item from the data partition"
+        kept+=${kept:+ }$item
+      fi
+    done
+    umount "$old" || fail "cannot unmount the data partition"
+  else
+    note="the data partition could not be mounted: nothing of it was kept"
+    say "$note"
+  fi
+  printf 'keep-network=%s\nkept=%s\nnote=%s\n' "$keep_network" "$kept" "$note" >"$stage/.factory-reset"
+  names=(.factory-reset)
+  for item in $kept; do
+    case " ${names[*]} " in *" ${item%%/*} "*) ;; *) names+=("${item%%/*}") ;; esac
+  done
+  # Readable by root only; the FLOCKOS partition is anyway (/etc/fstab).
+  (umask 077 && tar -C "$stage" --numeric-owner -cpf "$keep_part" "${names[@]}") ||
+    fail "cannot write factory-reset.keep to the FLOCKOS partition"
+  tar -tf "$keep_part" >/dev/null || fail "cannot read back factory-reset.keep"
+  sync
+  mv -f "$keep_part" "$keep"
+  sync
+  rm -rf "$stage"
+  rmdir "$old" 2>/dev/null || true
+  # From here on the reset goes on at every boot until it is done.
+  begun=yes
+fi
+
+step="making a new filesystem on the data partition"
+say "$step"
+mkfs.ext4 -F -q -L data -m 0 "$data_dev" || fail "mkfs.ext4 failed on $data_dev"
+
+step="putting back what is kept"
+new=$run/new
+mkdir -p "$new"
+mount -t ext4 -o nodev,nosuid "$data_dev" "$new" || fail "cannot mount the new filesystem"
+if tar -tf "$keep" >/dev/null 2>&1; then
+  tar -C "$new" --numeric-owner -xpf "$keep"
+  kept=$(sed -n 's/^kept=//p' "$new/.factory-reset")
+  note=$(sed -n 's/^note=//p' "$new/.factory-reset")
+  rm -f "$new/.factory-reset"
+else
+  kept="" note="factory-reset.keep could not be read: nothing of the data partition was kept"
+  say "$note"
+fi
+sync
+umount "$new" || fail "cannot unmount the new filesystem"
+rmdir "$new" 2>/dev/null || true
+say "kept: ${kept:-nothing}"
+
+step="clearing the booted slot"
+say "$step"
+clean_slot "$root"
+step="clearing the other slot"
+clean_other_slots
+
+step="clearing the real-time tuning in grubenv"
+if [ -n "$grubenv" ]; then
+  env=$(grub-editenv "$grubenv" list) || fail "cannot read $grubenv"
+  if grep -q '^FLOCKOS_RT_CMDLINE=' <<<"$env"; then
+    grub-editenv "$grubenv" unset FLOCKOS_RT_CMDLINE || fail "cannot write $grubenv"
+  fi
+fi
+
+step="finishing"
+record_lines=("keep-network=$keep_network" "kept=$kept" "other-slot=$other_slot")
+if [ -n "$note" ]; then record_lines+=("note=$note"); fi
+write_record "done" "${record_lines[@]}" || say "could not write $record"
+shred -u "$keep" 2>/dev/null || rm -f "$keep"
+sync
+rm -f "$request" "$keep_part"
+sync
+trap - EXIT
+say "done; restarting into a first boot"
+# Without the restart this boot would go on with the old machine-id in memory
+# and "uninitialized" in the file: better stop here, the next boot is fine.
+systemctl --no-block reboot || {
+  say "could not restart; the reset is done, restart the device"
+  exit 1
+}

@@ -1,8 +1,10 @@
 # IronFlockOS mounts (master plan, section 3.2). The root slot is mounted by the
 # kernel (root=PARTUUID=… from GRUB). Partition names are GPT names.
 PARTLABEL=FLOCKOS  /boot/efi  vfat  umask=0077,shortname=winnt  0  2
-# /data is created by systemd-repart on the first boot.
-PARTLABEL=data     /data      ext4  defaults,x-systemd.requires=systemd-repart.service,x-systemd.after=systemd-repart.service  0  2
+# /data is created by systemd-repart on the first boot. A factory reset
+# (flockos-factory-reset.service, ADR-0015) runs before it is mounted; one
+# that fails after it has begun keeps it unmounted.
+PARTLABEL=data     /data      ext4  defaults,x-systemd.requires=systemd-repart.service,x-systemd.after=systemd-repart.service,x-systemd.requires=flockos-factory-reset.service  0  2
 
 # State that survives an A/B switch: bind mounts from /data, after
 # flockos-data-layout.service has created the directories.

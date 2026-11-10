@@ -29,7 +29,10 @@ with a reason and an expiry date.
 parsing that never runs code, templates without holes, sizes, the matrix axes),
 the os-release contract, the target templates (GRUB A/B contract, RAUC
 `system.conf`, slot sizes) and the image's own scripts in
-`overlay/usr/lib/flockos` run against a temporary directory. They need bash and
+`overlay/usr/lib/flockos` run against a temporary directory. The factory reset
+(`factory-reset.bats`) runs against folders that stand for the data partition
+and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk` and
+`grub-editenv`, and with a power loss at each of its steps. They need bash and
 bats only:
 
 ```sh
@@ -104,10 +107,27 @@ Sequence:
    machine-id, host key and `/data`, and is enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
    the agent's place.
-4. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
+4. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md)).
+   On slot B, with slot A holding the system it was updated from: a container
+   runs with a restart policy (its image is made in the VM from `sleep` and the
+   libraries it links, as the harness has no registry), an app's file is in
+   `/apps`, and the site has a network profile and a `proxy.conf`. The test
+   writes `factory-reset.conf` with `keep-network=yes` and a new `.flock` (another
+   owner and name) to the FLOCKOS partition, as `ironflock os reset -c` does,
+   and `factory-reset check` accepts the request. The boot after the restart
+   resets the device and restarts it by itself. It comes up on slot B (the
+   reset's restart counted as no failed try), with `factory-reset.log` saying
+   `result=done`, the request gone, a new machine-id and host key, no
+   container, image, app file or old journal, the old SSH user gone and the
+   device enrolled as the new one; the network profile, `proxy.conf` and RAUC's
+   record of slot B are kept; slot A, read with `debugfs`, has the image's
+   hostname, `uninitialized` as machine-id and no `enrolled` mark; slot B,
+   proven before, is marked good again by `flockos-slot-keep`. With
+   `--no-flock` the device stays unenrolled, with the hostname `flockos`.
+5. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
    and nobody marks it good (as when the agent cannot reach the platform after
    an update); the next boot falls back to B.
-5. **Crash without a connection.** With a proven system in slot B and a good one
+6. **Crash without a connection.** With a proven system in slot B and a good one
    in slot A, slot B stays up until it has marked itself good, and the kernel
    is crashed on purpose (`/proc/sysrq-trigger`). The device restarts by itself
    on slot B and the kernel's record of the crash is under `/data/pstore`,
@@ -201,4 +221,11 @@ WP-4b.2, WP-5.4, WP-6.6):
    enrolls and the agent reaches the platform; an app's image pulls; an OS
    update downloads and installs; remote access works; `chronyc sources` uses
    the `ntp=` servers.
-10. Target-specific items in `docs/targets/<target>.md`.
+10. Factory reset (`docs/build.md`, "Factory reset"), on a device on WiFi
+    with apps running: `factory-reset.conf` with `keep-network=yes` and a new
+    `.flock` on the FLOCKOS partition, restart. The screen shows the reset's
+    steps, the device restarts by itself, comes back on the same slot and WiFi,
+    enrolls as the new device and runs no app of the old one;
+    `factory-reset.log` says `result=done`. Then with an empty
+    `factory-reset.conf` and no `.flock`: the device comes up unenrolled.
+11. Target-specific items in `docs/targets/<target>.md`.
