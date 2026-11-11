@@ -340,7 +340,9 @@ did not take is taken at the next boot. A file that is not a
 keyfile NetworkManager can read (a name of other characters, over 64 KiB, no
 `type=` in `[connection]`, ...) is renamed to `<name>.nmconnection.refused`, the
 reason goes to the journal and the console, and the unit fails; the others are
-taken. While a factory reset is pending or has begun, the profiles wait for it.
+taken. During a factory reset they follow `/run/flockos/factory-reset-hold` as the
+`.flock` and `proxy.conf` do, and without `/data` they go to the root slot's own
+folder (ADR-0016, section 8).
 ADR-0016 has the rules and the contract for the caller;
 `/usr/lib/flockos/network-profiles check FILE` tells whether a file would be
 taken.
@@ -396,7 +398,10 @@ is never done twice. Where the count cannot be written there is no attempt.
 While a request is open, `/run/flockos/factory-reset-hold` tells enroll and
 `flockos-proxy` to leave the FLOCKOS partition's `.flock` and `proxy.conf`
 alone (`wait`, while the old owner's data may still be on `/data`) or to take
-them and leave them there (`copy`, once the erase has begun). A request the
+them and leave them there (`copy`, once the erase has begun); network profiles
+there follow it the same way ([Network profiles](#network-profiles)). A reset
+ends a trial of network profiles: with `keep-network=yes` the profiles in use
+are kept, with `keep-network=no` none of the old ones comes back. A request the
 device does not understand is refused, not counted, and renamed to
 `factory-reset.conf.refused`. On a Raspberry Pi that runs an update on trial,
 the reset waits for the next boot that is not a trial. The steps are on the

@@ -138,21 +138,33 @@ the time limit delay NetworkManager by at most the limit (two minutes, and syste
 
 ### 8. A factory reset
 
-While a factory reset is pending or has begun (`factory-reset.conf` or
-`factory-reset.keep` on the partition), the profiles there are for the device after it
-and wait, as the `.flock` and `proxy.conf` do (ADR-0015). The reset runs before `/data` is
-mounted and leaves them on the partition. At the first boot after it they are taken into
-the new `/data`:
+The reset runs before `/data` is mounted and says in `/run/flockos/factory-reset-hold`
+what to do with the FLOCKOS partition's files meanwhile (ADR-0015, section 5); the
+profiles follow it as the `.flock` and `proxy.conf` do:
+
+- **`wait`**, while the old owner's data may still be on `/data`: the profiles are for the
+  device after the reset and stay on the partition.
+- **`copy`**, once the erase has begun: they are taken (on trial, against what the new
+  `/data` holds) and left on the partition for the attempt still to come.
+- **No hold file**: as without a reset, also when a request that was given up or cannot
+  be removed stays on the partition for good.
+- **Without `/data`** (`/run/flockos/data-missing`, and no `wait`): they go into the root
+  slot's own `/etc/NetworkManager/system-connections`, which NetworkManager reads then,
+  without a trial, and stay on the partition: what the device keeps then is lost with the
+  next update. The unit therefore does not require `/data`; it is ordered after
+  `local-fs.target`, before which `/data` is mounted or found missing.
+
+At the first boot after a reset they are taken into the new `/data`:
 
 - **keep-network=yes**: the device's profiles were kept, and the waiting ones are taken
   into them, replacing kept ones of the same name or uuid.
 - **keep-network=no**: the device's profiles are gone, and the waiting ones are all the
   device has, besides the `.flock`'s Wi-Fi.
 
-A refused request is renamed before this unit runs; the profiles are then taken as
-without one. A reset that failed before it began keeps the request, and the profiles wait
-on. The reset does not keep a running trial (section 10): its earlier profiles are on
-`/data/network/trial`, which a reset clears, and the profiles in use at the reset stay.
+A reset ends a running trial (section 10): the trial lies in `/data/network/trial`, which
+no reset keeps. With `keep-network=no` nothing of it, and none of the earlier owner's
+profiles, comes back; with `keep-network=yes` the profiles in use at the reset are the
+ones kept, as the request promised.
 
 ### 9. The contract for the caller
 
@@ -191,8 +203,9 @@ by these rules:
   of files (section 5). A refused file is
   `network/<name>.nmconnection.refused`, with
   `network-profiles: refused <name>.nmconnection: <reason>; renamed to ...` in the journal
-  and on the console, and the unit has failed. While a factory reset is pending or has
-  begun, the files stay where they are.
+  and on the console, and the unit has failed. While a factory reset says `wait`, the
+  files stay where they are; with `copy`, and without `/data`, they are taken and stay
+  (section 8).
 - **The trial.** A profile taken stays only once the device-agent has connected with it.
   Without a connection within 15 minutes of an enrolled device's uptime the device's
   earlier profiles come back (section 10); `journalctl -u flockos-network-profiles-trial`

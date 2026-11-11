@@ -19,7 +19,8 @@ setup() {
   printf '#!/bin/sh\necho "$*" >>"%s/sync.log"\nn=$(wc -l <"%s/sync.log")\nif [ -f "%s/sync.kill" ] && [ "$n" -eq "$(cat "%s/sync.kill")" ]; then kill -9 "$PPID"; fi\nexit 0\n' \
     "$tmp" "$tmp" "$tmp" "$tmp" >"$tmp/bin/sync"
   chmod +x "$tmp/bin/shred" "$tmp/bin/sync"
-  export PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_CONNECTIONS=$tmp/data/network/connections
+  export PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_CONNECTIONS=$tmp/data/network/connections \
+    FLOCKOS_RUN=$tmp/frun FLOCKOS_SLOT_CONNECTIONS=$tmp/slot-nm
   src=$tmp/esp/network dest=$tmp/data/network/connections
 }
 
@@ -213,22 +214,64 @@ refused() {
   grep -q 'refused bad2.nmconnection: it holds a NUL byte' "$tmp/stderr"
 }
 
-@test "while a factory reset is pending or has begun the profiles wait; a refused request holds nothing back" {
+@test "a factory reset's hold: wait leaves the profiles on the partition; without one they are taken, whatever lies there" {
   static office.nmconnection >"$src/office.nmconnection"
-  for marker in factory-reset.conf factory-reset.keep; do
-    : >"$tmp/esp/$marker"
-    run bash "$script"
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"a factory reset is pending: the profiles on the FLOCKOS partition wait for it"* ]]
-    [ -e "$src/office.nmconnection" ]
-    [ ! -e "$dest/office.nmconnection" ]
-    rm "$tmp/esp/$marker"
-  done
-  : >"$tmp/esp/factory-reset.conf.refused"
+  mkdir -p "$tmp/frun"
+  echo wait >"$tmp/frun/factory-reset-hold"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"a factory reset waits: the profiles on the FLOCKOS partition wait for it"* ]]
+  [ -e "$src/office.nmconnection" ]
+  [ ! -e "$dest/office.nmconnection" ]
+  # wait wins over a missing /data, as for enroll and flockos-proxy.
+  : >"$tmp/frun/data-missing"
+  run bash "$script"
+  [ ! -e "$dest/office.nmconnection" ]
+  [ ! -e "$tmp/slot-nm/office.nmconnection" ]
+  rm "$tmp/frun/data-missing" "$tmp/frun/factory-reset-hold"
+  # A request given up, or one that cannot be removed, may stay for good:
+  # without a hold the profiles are taken as without a reset.
+  : >"$tmp/esp/factory-reset.conf"
+  : >"$tmp/esp/factory-reset.keep"
   run bash "$script"
   [ "$status" -eq 0 ]
   [ -e "$dest/office.nmconnection" ]
   [ ! -e "$src/office.nmconnection" ]
+}
+
+@test "a factory reset's hold copy: the profiles are taken, on trial, and stay on the partition for the attempt to come" {
+  trial_env
+  static office.nmconnection >"$src/office.nmconnection"
+  mkdir -p "$tmp/frun"
+  echo copy >"$tmp/frun/factory-reset-hold"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"took office.nmconnection (ethernet) from the FLOCKOS partition and left it there"* ]]
+  cmp "$dest/office.nmconnection" <(static office.nmconnection)
+  [ -e "$src/office.nmconnection" ]
+  [ ! -e "$tmp/shred.log" ]
+  [ -e "$trial/new/office.nmconnection" ]
+  # The next boot, still in copy: nothing changes, the trial goes on.
+  at 1300
+  run bash "$script"
+  [[ "$output" == *"office.nmconnection is the device's profile already"* ]]
+  [ "$(tstate elapsed)" = 0 ]
+}
+
+@test "without /data the profiles go to the slot's own folder, stay on the partition, and have no trial" {
+  static office.nmconnection >"$src/office.nmconnection"
+  mkdir -p "$tmp/frun"
+  : >"$tmp/frun/data-missing"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"and left it there"* ]]
+  cmp "$tmp/slot-nm/office.nmconnection" <(static office.nmconnection)
+  [ "$(mode "$tmp/slot-nm/office.nmconnection")" = 600 ]
+  [ ! -e "$dest/office.nmconnection" ]
+  [ -e "$src/office.nmconnection" ]
+  [ ! -e "$tmp/data/network/trial" ]
+  [ ! -e "$tmp/slot-trial" ]
+  [ -z "$(ls -A "$tmp" | grep -x trial)" ]
 }
 
 @test "a power loss: a part file of /data is cleared, and a profile still on the partition is taken again" {
@@ -376,8 +419,10 @@ refused() {
 @test "the unit runs before NetworkManager, after /data and its folders, whenever a profile lies there" {
   u=$units/flockos-network-profiles.service
   grep -qx 'ExecStart=/usr/lib/flockos/network-profiles' "$u"
-  grep -qx 'RequiresMountsFor=/data /boot/efi' "$u"
-  grep -qx 'After=local-fs.target flockos-data-layout.service' "$u"
+  # Not /data: without it (flockos-data-missing) the profiles still come.
+  grep -qx 'RequiresMountsFor=/boot/efi' "$u"
+  grep -qx 'After=local-fs.target flockos-data-layout.service flockos-data-missing.service' "$u"
+  grep -q '^PARTLABEL=data .*nofail,x-systemd.before=local-fs.target' "$repo/overlay/etc/fstab"
   grep -qx 'Before=NetworkManager.service' "$u"
   grep -qx 'ConditionPathExistsGlob=/boot/efi/network/\*.nmconnection' "$u"
   grep -qx 'StandardError=journal+console' "$u"
@@ -600,4 +645,18 @@ method=auto
   # The marks it judges by: the agent's unit and its connection.
   grep -q 'agent_run=${FLOCKOS_AGENT_RUN:-/run/ironflock-device-agent}' "$script"
   grep -q 'agent_dir=${FLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}' "$script"
+}
+
+@test "a factory reset ends a trial: it keeps network/connections at most, never the trial's earlier profiles" {
+  # keep-network=no: /data is new, and nothing of the trial (whose old/ holds
+  # the earlier owner's profiles) can come back. keep-network=yes: the
+  # profiles in use, the ones the request promised, are kept, and the trial
+  # with its way back ends with the reset.
+  grep -qx 'keep_always="rauc"' "$repo/overlay/usr/lib/flockos/factory-reset"
+  grep -qx 'keep_network_items="network/connections flockos/proxy.conf flockos/ptp.conf"' \
+    "$repo/overlay/usr/lib/flockos/factory-reset"
+  # The trial lives beside the profiles, not in what a reset keeps.
+  grep -q 'trial=$(dirname -- "$dest")/trial' "$script"
+  # The watch has nothing to judge on the new /data.
+  grep -qx 'ConditionPathExists=/data/network/trial/state' "$units/flockos-network-profiles-trial.service"
 }

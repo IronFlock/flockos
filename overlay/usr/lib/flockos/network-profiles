@@ -26,9 +26,14 @@
 # reason goes to the journal and the console, the others are taken, and the
 # unit fails.
 #
-# While a factory reset is pending or has begun (factory-reset.conf or
-# factory-reset.keep on the partition, ADR-0015), the profiles are for the
-# device after it and wait.
+# A factory reset (ADR-0015) says in /run/flockos/factory-reset-hold what to
+# do meanwhile, as for enroll and flockos-proxy: "wait" while the old owner's
+# data may still be on /data (the profiles are for the device after it and
+# stay on the partition), "copy" once it is being erased (they are taken and
+# left on the partition for the attempt still to come). Without /data
+# (/run/flockos/data-missing) they are taken into the root slot's own
+# NetworkManager folder and left on the partition, without a trial: what the
+# device keeps now is lost with the next update.
 #
 # A way back (ADR-0016, section 10): the profiles a boot takes are on trial.
 # The device's profiles they replaced or removed are kept in
@@ -50,10 +55,20 @@ export LC_ALL=C
 # partition shows the execute bits, which cp would keep.
 umask 077
 
-# FLOCKOS_ESP, FLOCKOS_CONNECTIONS, FLOCKOS_AGENT_RUN, FLOCKOS_AGENT_DIR,
-# FLOCKOS_UPTIME, FLOCKOS_BOOT_ID: for the unit tests only.
+# FLOCKOS_ESP, FLOCKOS_CONNECTIONS, FLOCKOS_SLOT_CONNECTIONS, FLOCKOS_RUN,
+# FLOCKOS_AGENT_RUN, FLOCKOS_AGENT_DIR, FLOCKOS_UPTIME, FLOCKOS_BOOT_ID: for
+# the unit tests only.
 esp=${FLOCKOS_ESP:-/boot/efi}
+run=${FLOCKOS_RUN:-/run/flockos}
 dest=${FLOCKOS_CONNECTIONS:-/data/network/connections}
+# What the factory reset says (wait, copy or nothing); without /data the
+# profiles go to the slot's own folder, which NetworkManager reads then.
+hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
+on_trial=yes
+if [ "$hold" != wait ] && [ -e "$run/data-missing" ]; then
+  hold=copy on_trial=no
+  dest=${FLOCKOS_SLOT_CONNECTIONS:-/etc/NetworkManager/system-connections}
+fi
 agent_run=${FLOCKOS_AGENT_RUN:-/run/ironflock-device-agent}
 agent_dir=${FLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}
 uptime_file=${FLOCKOS_UPTIME:-/proc/uptime}
@@ -291,19 +306,19 @@ take() {
         victims+=("${known_name[i]}")
       fi
     done
-    if [ -z "$trial_begun" ] && ! begin_trial; then
+    if [ "$on_trial" = yes ] && [ -z "$trial_begun" ] && ! begin_trial; then
       rm -f "${part:?}"
       say "$name: could not begin a trial in $trial; it stays on the FLOCKOS partition" >&2
       return 1
     fi
     for old in "$name" ${victims[@]+"${victims[@]}"}; do
-      if [ -f "$dest/$old" ] && ! keep_old "$old"; then
+      if [ "$on_trial" = yes ] && [ -f "$dest/$old" ] && ! keep_old "$old"; then
         rm -f "${part:?}"
         say "$name: could not keep the device's $old for the trial; it stays on the FLOCKOS partition" >&2
         return 1
       fi
     done
-    if ! cp -- "$part" "$trial/new/$name"; then
+    if [ "$on_trial" = yes ] && ! cp -- "$part" "$trial/new/$name"; then
       rm -f "${part:?}"
       say "$name: could not keep it for the trial; it stays on the FLOCKOS partition" >&2
       return 1
@@ -330,6 +345,12 @@ take() {
     if [ -n "$uuid" ] && [ "${known_uuid[i]}" = "$uuid" ]; then known_uuid[i]=""; fi
   done
   if [ -n "$uuid" ]; then known_uuid+=("$uuid") known_name+=("$name"); fi
+  if [ "$hold" = copy ]; then
+    # A factory reset's attempt to come, or the next update, loses what the
+    # device keeps now: the file stays for then.
+    say "took $name ($type) from the FLOCKOS partition and left it there, as what the device keeps now does not last"
+    return 0
+  fi
   say "took $name ($type) from the FLOCKOS partition"
   # On /data, synced: now it may leave the partition. A power loss before
   # that takes it again at the next boot, with the same result.
@@ -448,9 +469,9 @@ if [ "$#" -ne 0 ]; then
   exit 2
 fi
 
-if [ -e "$esp/factory-reset.conf" ] || [ -e "$esp/factory-reset.keep" ]; then
+if [ "$hold" = wait ]; then
   if compgen -G "$src/*.nmconnection" >/dev/null; then
-    say "a factory reset is pending: the profiles on the FLOCKOS partition wait for it"
+    say "a factory reset waits: the profiles on the FLOCKOS partition wait for it"
   fi
   exit 0
 fi
@@ -469,6 +490,6 @@ rc=0 trial_begun=""
 for f in "$src"/*.nmconnection; do
   take "$f" || rc=1
 done
-rmdir "$src" 2>/dev/null || true
+if [ "$hold" != copy ]; then rmdir "$src" 2>/dev/null || true; fi
 sync
 exit "$rc"
