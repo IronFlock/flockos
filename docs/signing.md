@@ -59,7 +59,13 @@ runs the build's packages never holds the release identity:
    `build/signing.sh release` puts the root CA into the image as
    `/etc/rauc/keyring.pem` and seals each bundle with a throwaway key made for
    that build. The sealing CA travels next to the bundle as
-   `<name>.seal-ca.pem`.
+   `<name>.seal-ca.pem`. A release reuses this build from its pull request's
+   dry run when it can prove that run built the release commit's tree, and
+   builds otherwise ([ADR-0018](adr/0018-the-release-reuses-the-dry-runs-images.md),
+   [release.md](release.md#reused-images)). The signer then signs a build of
+   a `pull_request` run, bound to the release commit by the harness's
+   attestation of the build's manifest and by the trees; each `sign` job
+   checks every file of its image against that manifest before it signs.
 2. **`sign`** (one job per image) is the only job that authenticates as
    `ironflockos-release`, and only on a release. `build/sign-in-builder.sh` runs
    `build/sign-bundles.sh` in the build container. The script fetches Google's PKCS#11 library at the version
@@ -100,7 +106,9 @@ expiry stops the release (see renewal below).
 
 **Dry runs** (`release.yml` on release pull requests through `ci.yml`, and
 manual runs) build exactly like a release. The sign step then uses a
-throwaway stand-in for the bundle signer, and attests nothing. Each dry-run
+throwaway stand-in for the bundle signer, and the release's provenance is not
+attested. On a release pull request the harness attests the manifest of the
+build, which the release run checks before it reuses the images. Each dry-run
 bundle is checked to verify against the stand-in and not against the root CA.
 The workload identity is not available to them: the pool grants
 `release=<repo id>:release` only to a push of `release.yml` on `main` and to

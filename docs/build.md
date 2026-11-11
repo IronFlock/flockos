@@ -654,12 +654,16 @@ The scratch space is a Docker volume (`ironflockos-work`) by default, because a
 macOS bind mount cannot hold a Linux root filesystem; set `IRONFLOCKOS_WORK` to a
 directory on a native Linux filesystem instead where there is one (CI uses
 `/mnt/ironflockos-work`). A build from a working tree with uncommitted changes gets
-`-dirty` in its `BUILD_ID`. Local builds always sign with throwaway keys: such
+`-dirty` in its `BUILD_ID`. The commit in `BUILD_ID` is `HEAD`; on a pull
+request CI names the pull request's head instead, when it has the same tree
+(`IRONFLOCKOS_BUILD_COMMIT`, `build_commit` in `build/lib.sh`): `HEAD` there is
+GitHub's test merge, which GitHub drops, and a release may reuse those images
+([ADR-0018](adr/0018-the-release-reuses-the-dry-runs-images.md)). Local builds always sign with throwaway keys: such
 an image installs only bundles from the same build.
 
 ## Reproducibility
 
-`SOURCE_DATE_EPOCH` is the commit time; file times, filesystem UUIDs, the ext4
+`SOURCE_DATE_EPOCH` is the time of the commit the image names; file times, filesystem UUIDs, the ext4
 hash seed and the FAT volume id are derived from it or from the image id. The
 distribution's archive is not pinned to a snapshot, so two builds of one commit
 on different days can differ in package versions; `packages.tsv` records what

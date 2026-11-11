@@ -300,13 +300,17 @@ jobs:
       version-file: VERSION
 
   # Release pull requests only: release.yml as a dry run, so a broken release
-  # workflow never reaches main.
+  # workflow never reaches main. Its build is the one the release reuses
+  # (ADR-0018): it attests the build's manifest and checks its own images as
+  # the release will. The permissions are the most any of its jobs asks for.
   release-build:
     needs: [intent]
     if: needs.intent.outputs.kind == 'release'
     uses: ./.github/workflows/release.yml
     permissions:
       contents: read
+      actions: read
+      pull-requests: read
       id-token: write
       attestations: write
 

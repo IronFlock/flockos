@@ -4,8 +4,8 @@
 #
 # Runs on the host (a GitHub runner, or a developer machine with Docker for
 # debugging; CI is the build of record). Takes version, commit and time from
-# git, runs build/in-builder.sh in a privileged container (mmdebstrap needs
-# mounts), and leaves the artefacts in out/<image-id>/.
+# git (build_commit), runs build/in-builder.sh in a privileged container
+# (mmdebstrap needs mounts), and leaves the artefacts in out/<image-id>/.
 #
 # Env:
 #   IRONFLOCKOS_WORK  scratch for the rootfs and images: a host directory on a
@@ -16,6 +16,9 @@
 #   IRONFLOCKOS_SIGNING  dev (default: throwaway keys) or release (WP-1.6)
 #   IRONFLOCKOS_STAGES   all (default) or rootfs: stop after the customisation
 #                    and leave the root tree in IRONFLOCKOS_WORK/<image-id>/rootfs
+#   IRONFLOCKOS_BUILD_COMMIT  the commit the image names, when it has HEAD's
+#                    tree (build_commit in build/lib.sh; CI on a pull request:
+#                    its head); default HEAD
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -34,8 +37,9 @@ load_conf "$here/builder.conf"
 load_conf "$repo/targets/$target/target.conf"
 
 version=$(tr -d '[:space:]' <"$repo/VERSION")
-commit=$(git -C "$repo" rev-parse HEAD)
-epoch=$(git -C "$repo" log -1 --format=%ct)
+commit="" epoch=""
+read -r commit epoch < <(build_commit "$repo" "${IRONFLOCKOS_BUILD_COMMIT:-}") || true
+[ -n "$epoch" ] || die "no commit to name"
 dirty=""
 if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no)" ]; then
   dirty="-dirty"

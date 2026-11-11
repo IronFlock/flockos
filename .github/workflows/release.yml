@@ -5,6 +5,13 @@
 # devices, and sets the tag last (a tag means "devices can get it"). Nothing
 # is built, signed or published from a laptop.
 #
+# `source` decides where the images come from (ADR-0018): a release takes
+# the images its pull request's dry run built, when build/reuse.sh proves
+# that run built the release commit's tree, and `build` builds them only
+# when it cannot; the job summary says which and why. A dry run builds, has
+# the harness attest the manifest of its build (`attest-build`) and checks
+# its own images as a release would take them (`would-reuse`).
+#
 # `build` builds every image as a release build (build.yml), `sign` gives
 # the bundles their release signature (WP-1.6), one job per image, each
 # uploading its image's files as the artifact signed-<mode>-<image>. The
@@ -101,18 +108,211 @@ jobs:
           # The installer has no bundle.
           echo "attest=$(jq -Rnc '{include: [inputs | {image: ., subjects: (if endswith("-installer") then "*.img.gz" else "*.img.gz\n*.raucb" end)}]}' <<<"$images")" >> "$GITHUB_OUTPUT"
 
-  # Every image as a release build (build.yml): the images trust the IronFlockOS
-  # root CA, and each bundle is sealed with a throwaway key of its build. No
-  # job of the build holds the release identity.
-  build:
+  # Where the images come from (ADR-0018, docs/release.md "Reused images").
+  # A release looks for the dry run of its pull request (build/reuse.sh
+  # find): the pull request merged as this commit, its newest successful ci
+  # run, that run's manifest of its build with the harness's attestation of
+  # it, made in that run for that pull request at a merge commit whose tree
+  # is this commit's, and every image's artifact, which it downloads and
+  # checks file by file against the manifest. Anything it cannot prove, or
+  # any error, and the release builds as before. A dry run always builds.
+  source:
     needs: [verify]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.decide.outputs.reuse }}
+      run-id: ${{ steps.decide.outputs.run-id }}
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the pull request's dry run (release only)
+        id: lookup
+        if: env.MODE == 'release'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: build/reuse.sh find "$COMMIT" "$RUNNER_TEMP/reuse"
+      - name: its images
+        id: download
+        if: steps.lookup.outcome == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-image-*
+          path: dl
+          run-id: ${{ steps.lookup.outputs.run-id }}
+          github-token: ${{ github.token }}
+      - name: every file as the manifest lists it
+        id: files
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        run: |
+          mkdir images
+          for d in dl/release-image-*; do mv "$d" "images/ironflockos-${d#dl/release-image-}"; done
+          build/reuse.sh files "$RUNNER_TEMP/reuse/build.tsv" images
+          cp "$RUNNER_TEMP/reuse/build.tsv" build.tsv
+      - name: reuse or build
+        id: decide
+        if: always()
+        env:
+          LOOKUP: ${{ steps.lookup.outcome }}
+          DOWNLOAD: ${{ steps.download.outcome }}
+          FILES: ${{ steps.files.outcome }}
+          WHY: ${{ steps.lookup.outputs.why }}
+          RUN: ${{ steps.lookup.outputs.run-id }}
+          PR: ${{ steps.lookup.outputs.pr }}
+          BUILT: ${{ steps.lookup.outputs.commit }}
+          THIS_RUN: ${{ github.run_id }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$MODE" != release ]; then
+            why="a dry run builds its images"
+          elif [ "$LOOKUP" != success ]; then
+            why=${WHY:-the lookup failed (see its log)}
+          elif [ "$DOWNLOAD" != success ]; then
+            why="the images of run $RUN did not download"
+          elif [ "$FILES" != success ]; then
+            why="the images of run $RUN are not the files its manifest lists"
+          else
+            why=""
+          fi
+          if [ -z "$why" ]; then
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "run-id=$RUN" >> "$GITHUB_OUTPUT"
+            echo "**Images: reused** from [run $RUN]($SERVER/$REPO/actions/runs/$RUN) of pull request #$PR, which built $BUILT, the tree of this commit (ADR-0018)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            echo "run-id=$THIS_RUN" >> "$GITHUB_OUTPUT"
+            echo "**Images: built** in this run: $why." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: the verified manifest, for the sign jobs
+        if: steps.decide.outputs.reuse == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-build-manifest
+          path: build.tsv
+          if-no-files-found: error
+          retention-days: 7
+
+  # Every image as a release build (build.yml): the images trust the IronFlockOS
+  # root CA, and each bundle is sealed with a throwaway key of its build. No
+  # job of the build holds the release identity. Skipped when the release
+  # reuses its pull request's images.
+  build:
+    needs: [verify, source]
+    if: (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.outputs.reuse != 'true'
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
     with:
       signing: release
       prefix: release-image
+
+  # The manifest of the build (build/reuse.sh manifest): every file of every
+  # image as built, by sha256 and size, from the build's lists.
+  manifest:
+    needs: [verify, source, build]
+    if: (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.outputs.reuse != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: files-release-image-*
+          path: lists
+          merge-multiple: true
+      - name: the manifest
+        run: |
+          build/reuse.sh manifest lists > build.tsv
+          wc -l build.tsv
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-build-manifest
+          path: build.tsv
+          if-no-files-found: error
+          retention-days: 3
+
+  # Release pull requests only: the harness attests the manifest, in this
+  # run, for this pull request, at its merge commit. That attestation is what
+  # the release run checks before it reuses these images.
+  attest-build:
+    needs: [verify, manifest]
+    if: needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
+    uses: IronFlock/workflows/.github/workflows/attest-provenance.yml@v1
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      artifact: release-build-manifest
+      subject-path: build.tsv
+      dry-run: false
+
+  # Release pull requests only: the check the release run makes, on this run
+  # (build/reuse.sh check, then every file against the manifest). It fails
+  # the dry run when this run's images would not verify.
+  would-reuse:
+    needs: [verify, attest-build]
+    if: needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: this run, as the release run checks the run it reuses
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+          PR: ${{ github.event.pull_request.number }}
+          COMMIT: ${{ github.sha }}
+        run: build/reuse.sh check "$RUN" "$PR" "$COMMIT" "$RUNNER_TEMP/reuse"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-image-*
+          path: dl
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: every file as the manifest lists it
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          mkdir images
+          for d in dl/release-image-*; do mv "$d" "images/ironflockos-${d#dl/release-image-}"; done
+          build/reuse.sh files "$RUNNER_TEMP/reuse/build.tsv" images
+          # The release commit will have the head's tree when the pull
+          # request is up to date with main, as the ruleset requires.
+          if [ "$(git -C . cat-file -t "$HEAD_SHA" 2>/dev/null)" = commit ] || git fetch -q --depth=1 origin "$HEAD_SHA"; then
+            if [ "$(git rev-parse "$HEAD_SHA^{tree}")" = "$(git rev-parse "$COMMIT^{tree}")" ]; then
+              echo "**Images: a release of this pull request would reuse them.**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "**Images: a release would build them anew**: the pull request is not up to date with main." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
 
   # The release signature (docs/signing.md). Only a release run gets the
   # workload identity ironflockos-release: the pool grants it to a push of
@@ -125,12 +325,15 @@ jobs:
   # throwaway stand-in for the signer.
   sign:
     name: sign (${{ matrix.image }})
-    needs: [verify, build]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    needs: [verify, source, manifest]
+    # After the manifest of this run's build, or without it when the
+    # release reuses its pull request's images (no build, no manifest job).
+    if: ${{ !cancelled() && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && (needs.manifest.result == 'success' || (needs.manifest.result == 'skipped' && needs.source.outputs.reuse == 'true')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
+      actions: read
       id-token: write
     strategy:
       fail-fast: false
@@ -144,10 +347,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The manifest of this run (its build's, or the reused one source
+      # verified), and the image as built: by this run, or by the pull
+      # request's run that source verified.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-build-manifest
+          path: manifest
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-image-${{ matrix.image }}
           path: out/ironflockos-${{ matrix.image }}
+          run-id: ${{ needs.source.outputs.run-id }}
+          github-token: ${{ github.token }}
+      - name: every file as the manifest lists it
+        run: build/reuse.sh files manifest/build.tsv out "$IMAGE"
       - name: authenticate the bundle signer (release only)
         if: env.MODE == 'release' && env.BUNDLE == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3

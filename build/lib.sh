@@ -42,6 +42,25 @@ load_conf() {
   done <"$file"
 }
 
+# build_commit REPO [COMMIT]: "<commit> <epoch>", the commit a build names
+# (BUILD_ID) and its time (SOURCE_DATE_EPOCH): COMMIT when it is given and has
+# the tree of REPO's HEAD, else HEAD. CI on a pull request passes the pull
+# request's head: GitHub keeps it (refs/pull/<n>/head), while HEAD there is a
+# test merge that GitHub drops, and a release may reuse those images.
+build_commit() {
+  local repo=$1 want=${2:-} commit
+  commit=$(git -C "$repo" rev-parse HEAD)
+  if [ -n "$want" ] && [ "$want" != "$commit" ]; then
+    if [[ "$want" =~ ^[0-9a-f]{40}$ ]] && git -C "$repo" cat-file -e "$want^{commit}" 2>/dev/null &&
+      [ "$(git -C "$repo" rev-parse "$want^{tree}")" = "$(git -C "$repo" rev-parse "HEAD^{tree}")" ]; then
+      commit=$want
+    else
+      warn "$want is no commit here with the tree of HEAD: the build names HEAD, $commit"
+    fi
+  fi
+  printf '%s %s\n' "$commit" "$(git -C "$repo" log -1 --format=%ct "$commit")"
+}
+
 # slot_fill EXT4_IMAGE: how full a root slot's filesystem is, as
 # "<used percent> <used bytes> <size bytes>" from its superblock (ext4's own
 # overhead included).

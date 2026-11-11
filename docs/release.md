@@ -3,8 +3,9 @@
 An IronFlockOS release is the merge of a release pull request (`just release-patch`,
 `just release-minor`, `just release-major`: a `VERSION` bump with the title
 `release ironflockos v<version>`). Its push to `main` runs `release.yml`, which
-builds every image, signs the bundles, tests the release image, publishes the
-images and the signed catalog, and sets the tag last. Nothing is built, signed
+takes the images its pull request's dry run built (or builds them), signs the
+bundles, tests the release image, publishes the images and the signed
+catalog, and sets the tag last. Nothing is built, signed
 or published from a laptop.
 
 ## The release run
@@ -12,7 +13,9 @@ or published from a laptop.
 | Job | What it does | Identity |
 |-----|--------------|----------|
 | `verify` | Decides what the run is: a release, a re-run after the tag, or a dry run (harness `release.sh mode`) | none |
-| `build` | Every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM | none |
+| `source` | Where the images come from: a release reuses those of its pull request's dry run when it can prove they are the build of the release commit's tree, and builds them otherwise ([below](#reused-images)). The job summary says which and why | none |
+| `build` | Only when the release does not reuse: every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM. Each image's build also lists its files | none |
+| `manifest` | With a build: the manifest `build.tsv`, every file of every image with sha256 and size (`build/reuse.sh manifest`) | none |
 | `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
 | `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code, one call per image; `stage` waits for it | the harness workflow (Sigstore) |
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
@@ -83,6 +86,11 @@ keeps an image made from the same file.
 **Dry runs** run every job on release pull requests (`ci.yml` calls
 `release.yml`) and on manual runs:
 
+- `source` does not look for another run: a dry run builds.
+- On a release pull request, `attest-build` has the harness attest the
+  manifest of the build, and `would-reuse` checks this run as the release run
+  will check it: a failure there fails the dry run. A manual run does neither:
+  it has no pull request.
 - `sign` uses a throwaway stand-in for the bundle signer.
 - `e2e` boots and reboots only: no release image accepts a stand-in bundle.
 - `stage` and `promote` print their storage calls (`DRY_RUN=1`).
@@ -91,6 +99,37 @@ keeps an image made from the same file.
 - `vm-images` makes each VM image's tarball and prints the cloud calls.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
+
+## Reused images
+
+A release run takes the images its pull request's dry run built, and builds
+them only when it cannot prove they are the release commit's build
+([ADR-0018](adr/0018-the-release-reuses-the-dry-runs-images.md)). That saves
+the build, about 15 minutes.
+
+1. Each image build of a dry run lists every file it leaves, with sha256 and
+   size (`build/reuse.sh list`); `manifest` joins the lists into `build.tsv`.
+2. On a release pull request the harness attests `build.tsv` (`attest-build`).
+   Its certificate holds GitHub's word on the run: the pull request's ref, the
+   event, the workflow, the run, the runner and the merge commit it built.
+3. The release run's `source` job (`build/reuse.sh find`) finds the pull
+   request merged as the release commit (into `main`, from this repository),
+   its newest successful `ci.yml` run, and that run's manifest and image
+   artifacts (each once, none older than 24 hours or expiring within 6). It
+   verifies the manifest's attestation with every claim pinned, and compares
+   the tree of the merge commit in the certificate with the release commit's
+   tree. Then it downloads every image and checks every file against the
+   manifest.
+4. Only when all of that holds, `build` and `manifest` are skipped and each
+   `sign` job takes its image from that run, checks its files against the
+   manifest once more, and signs. Otherwise the release builds, and the job
+   summary says why.
+
+A reused image names the head commit of its release pull request, which has
+the release commit's tree, and that commit's time (`BUILD_ID`,
+`SOURCE_DATE_EPOCH`). GitHub keeps it as `refs/pull/<n>/head`. A built image
+names the release commit. The dry run checks the same steps on its own run
+(`would-reuse`).
 
 ## What `ironflock os install` reads
 

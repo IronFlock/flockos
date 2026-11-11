@@ -40,10 +40,16 @@ jobs:
     env:
       TARGET: ${{ inputs.target }}
       IRONFLOCKOS_SIGNING: ${{ inputs.signing }}
+      # Empty but on a pull request.
+      IRONFLOCKOS_BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
     steps:
+      # Two commits deep: on a pull request HEAD is GitHub's test merge, and
+      # the image names the pull request's head when it has the same tree
+      # (build_commit in build/lib.sh).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: IronFlock/workflows
@@ -77,6 +83,13 @@ jobs:
         run: |
           sudo mkdir -p /mnt/ironflockos-work
           just build "$TARGET" installer
+      # Every file as built, for the manifest a release may reuse the images
+      # by (build/reuse.sh, ADR-0018).
+      - name: the list of the files as built (release builds)
+        if: inputs.signing == 'release'
+        run: |
+          mkdir -p "$RUNNER_TEMP/files"
+          build/reuse.sh list "out/ironflockos-$TARGET-installer" > "$RUNNER_TEMP/files/ironflockos-$TARGET-installer.tsv"
       - name: upload the installer image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -84,4 +97,12 @@ jobs:
           path: out/ironflockos-${{ env.TARGET }}-installer/
           if-no-files-found: error
           compression-level: 0
+          retention-days: 3
+      - name: upload the list (release builds)
+        if: inputs.signing == 'release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: files-${{ inputs.prefix }}-${{ env.TARGET }}-installer
+          path: ${{ runner.temp }}/files/ironflockos-${{ env.TARGET }}-installer.tsv
+          if-no-files-found: error
           retention-days: 3

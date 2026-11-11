@@ -227,3 +227,15 @@ print(len(entries))
   [[ "$(job promote)" == *'name: release-meta-${{ env.MODE }}'* ]]
   [[ "$(job promote)" == *'-files ../../meta/files.tsv'* ]]
 }
+
+@test "ci.yml grants the dry run every permission a job of release.yml asks for" {
+  wf=$repo/.github/workflows
+  # the scope: level lines of every job's permissions in release.yml
+  asked=$(awk '/^    permissions:$/ { p = 1; next } p && /^      [a-z-]+: (read|write)$/ { print $1, $2; next } { p = 0 }' "$wf/release.yml" | sort -u)
+  granted=$(awk '$0 == "  release-build:" { f = 1; next } f && /^  [a-z]/ { exit } f && /^    permissions:$/ { p = 1; next } p && /^      [a-z-]+: (read|write)$/ { print $1, $2; next } { p = 0 }' "$wf/ci.yml")
+  [ -n "$asked" ] && [ -n "$granted" ]
+  echo "$asked" | while read -r scope level; do
+    g=$(echo "$granted" | awk -v s="$scope" '$1 == s { print $2 }')
+    [ "$g" = write ] || [ "$g" = "$level" ] || { echo "release.yml asks for $scope $level, ci.yml grants ${g:-nothing}"; return 1; }
+  done
+}
