@@ -107,14 +107,19 @@ check() {
   mkdir -p "$work"
   now=$(date -u +%s)
 
-  # The artifacts: the manifest and every image, each once, none expired,
-  # none about to expire, none too old.
+  # The artifacts: the manifest and every image. A re-run of the run's jobs
+  # leaves the earlier attempt's artifacts beside the new ones under the
+  # same names; the newest of each name counts (the highest id, as
+  # actions/download-artifact takes it), and every byte of it is checked
+  # against the attested manifest. None expired, none about to expire, none
+  # too old.
   arts=$(api --paginate "repos/$REPO/actions/runs/$run/artifacts?per_page=100" --jq '.artifacts[]' | jq -s .) ||
     fail "cannot list the artifacts of run $run"
+  arts=$(jq 'group_by(.name) | map(max_by(.id))' <<<"$arts") || fail "cannot read the artifacts of run $run"
   # shellcheck disable=SC2086 # a space-separated list of image names
   for a in release-build-manifest $(printf 'release-image-%s ' $RELEASE_IMAGES); do
-    [ "$(jq --arg n "$a" '[.[] | select(.name == $n)] | length' <<<"$arts")" = 1 ] ||
-      fail "run $run does not have exactly one artifact $a"
+    jq -e --arg n "$a" 'any(.[]; .name == $n)' <<<"$arts" >/dev/null ||
+      fail "run $run has no artifact $a"
     jq -e --arg n "$a" '.[] | select(.name == $n) | .expired == false' <<<"$arts" >/dev/null ||
       fail "the artifact $a of run $run has expired"
     left=$(jq -r --arg n "$a" '.[] | select(.name == $n) | .expires_at | fromdateiso8601' <<<"$arts") ||
@@ -128,7 +133,8 @@ check() {
   done
 
   # The manifest: one file, build.tsv, well-formed, naming exactly the
-  # release's images.
+  # release's images. Its attestation may come from any attempt of the run:
+  # the attempt that made it, or a later one that re-ran attest-build.
   id=$(jq -r '.[] | select(.name == "release-build-manifest") | .id' <<<"$arts")
   api "repos/$REPO/actions/artifacts/$id/zip" >"$work/manifest.zip"
   [ "$(unzip -Z1 "$work/manifest.zip" 2>/dev/null)" = build.tsv ] || fail "the manifest artifact of run $run is not one build.tsv"

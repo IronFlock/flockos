@@ -266,16 +266,15 @@ refused() {
   done
 }
 
-@test "find: refuses missing, doubled, expired, expiring and old artifacts" {
+@test "find: refuses missing, expired, expiring and old artifacts" {
   f=$tmp/api/$(key "repos/$REPO_NAME/actions/runs/900/artifacts?per_page=100")
   cp "$f" "$tmp/arts"
   for change in 'del(.artifacts[] | select(.name == "release-image-rpi-arm64-base"))' \
-    'del(.artifacts[] | select(.name == "release-build-manifest"))' \
-    '.artifacts += [.artifacts[] | select(.name == "release-image-amd64-efi-base")]'; do
+    'del(.artifacts[] | select(.name == "release-build-manifest"))'; do
     jq "$change" "$tmp/arts" >"$f"
     rm -f "$tmp/output"
     find_
-    refused "does not have exactly one artifact" || { echo "$change"; return 1; }
+    refused "has no artifact" || { echo "$change"; return 1; }
   done
   jq '(.artifacts[] | select(.name == "release-image-amd64-efi-nvidia") | .expired) = true' "$tmp/arts" >"$f"
   rm -f "$tmp/output"
@@ -289,6 +288,48 @@ refused() {
   rm -f "$tmp/output"
   find_
   refused "is older than 24 hours"
+}
+
+# rerun: the run's artifacts after "Re-run all jobs": attempt 1's beside
+# attempt 2's, which have the higher ids; the manifest of attempt 2 is 8000.
+rerun() {
+  artifacts '.artifacts += [.artifacts[] | .id += 1000]'
+  cp "$tmp/api/$(key "repos/$REPO_NAME/actions/artifacts/7000/zip")" "$tmp/api/$(key "repos/$REPO_NAME/actions/artifacts/8000/zip")"
+}
+
+@test "find: after a re-run, the newest artifact of each name, attested in any attempt" {
+  rerun
+  find_
+  [ "$status" -eq 0 ]
+  grep -qx 'run-id=900' "$tmp/output"
+  grep -q 'actions/artifacts/8000/zip' "$tmp/gh.log"
+  ! grep -q 'actions/artifacts/7000/zip' "$tmp/gh.log"
+  # the earlier attempt's manifest is broken: it does not count
+  printf 'broken' >"$tmp/broken.tsv"
+  python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w").write(sys.argv[2], "build.tsv")' \
+    "$tmp/api/$(key "repos/$REPO_NAME/actions/artifacts/7000/zip")" "$tmp/broken.tsv"
+  rm -f "$tmp/output"
+  find_
+  [ "$status" -eq 0 ]
+  # an attestation of the second attempt
+  set_cert '.runInvocationURI = "https://github.com/IronFlock/ironflockos/actions/runs/900/attempts/2"'
+  rm -f "$tmp/output"
+  find_
+  [ "$status" -eq 0 ]
+}
+
+@test "find: after a re-run, the newest manifest decides; an expired newest artifact refuses" {
+  rerun
+  grep -v 'ironflockos-rpi-arm64-base/' "$tmp/build.tsv" >"$tmp/short.tsv"
+  python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w").write(sys.argv[2], "build.tsv")' \
+    "$tmp/api/$(key "repos/$REPO_NAME/actions/artifacts/8000/zip")" "$tmp/short.tsv"
+  find_
+  refused "is not a manifest of the images"
+  rerun
+  artifacts '(.artifacts[] | select(.id == 9001) | .expired) = true'
+  rm -f "$tmp/output"
+  find_
+  refused "has expired"
 }
 
 @test "find: refuses a manifest artifact that is not one build.tsv of the release's images" {
