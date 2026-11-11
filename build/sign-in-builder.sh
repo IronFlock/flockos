@@ -15,6 +15,9 @@
 # (gha-creds-*.json, a token for the release identity). IRONFLOCKOS_WORK,
 # when set, is the scratch space of the check, which unpacks each image
 # there. Always linux/amd64: Google's PKCS#11 library exists for amd64 only.
+# Each container installs its packages from deb.debian.org, each apt-get call
+# with its retries limited to 5 minutes: a stalled mirror fails the job
+# instead of using up its time.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -56,8 +59,8 @@ docker run --rm \
   -e DEBIAN_FRONTEND=noninteractive \
   "$BUILDER_IMAGE" \
   bash -c 'set -e
-    apt-get -qq -o Acquire::Retries=5 update
-    apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
+    timeout -k 30s 5m apt-get -qq -o Acquire::Retries=5 update
+    timeout -k 30s 5m apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
       rauc openssl libengine-pkcs11-openssl curl ca-certificates >/dev/null
     exec bash /src/build/sign-bundles.sh "$1" /out' sign "$mode"
 
@@ -73,7 +76,7 @@ docker run --rm \
   -e DEBIAN_FRONTEND=noninteractive \
   "$BUILDER_IMAGE" \
   bash -c 'set -e
-    apt-get -qq -o Acquire::Retries=5 update
-    apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
+    timeout -k 30s 5m apt-get -qq -o Acquire::Retries=5 update
+    timeout -k 30s 5m apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
       rauc openssl e2fsprogs fdisk jq >/dev/null
     exec bash /src/build/verify-bundles.sh "$1" /out' verify "$mode"

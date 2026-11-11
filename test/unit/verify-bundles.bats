@@ -225,6 +225,9 @@ bundle() {
   # ... and the script reads nothing else of it: lib.sh, and pki/ through $src
   [ "$(grep -o '"\$\(src\|here\)"[^ )]*\|\$\(src\|here\)/[^" )]*' "$repo/build/verify-bundles.sh" | sort -u | tr '\n' ' ')" = \
     '"$src"/pki/ironflockos-bundle-signer-*.pem $here/.. $here/lib.sh ' ]
+  # every apt-get of both containers with a time limit
+  [ "$(grep -v '^#' "$sib" | grep -c 'apt-get')" = 4 ]
+  [ "$(grep -c '^    timeout -k 30s 5m apt-get ' "$sib")" = 4 ]
   # with the tools it needs, and its scratch space
   packages=$(grep -A1 'install --no-install-recommends' <<<"$checks" | tail -n 1)
   for pkg in rauc openssl e2fsprogs fdisk jq; do [[ " $packages " == *" $pkg "* ]] || { echo "$pkg: $packages"; return 1; }; done
