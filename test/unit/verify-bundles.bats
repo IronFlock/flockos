@@ -214,6 +214,17 @@ bundle() {
   [[ "$signs" == *'${creds[@]+"${creds[@]}"}'* ]]
   [[ "$checks" != *creds* && "$checks" != *GOOGLE* ]]
   [[ "$checks" == *'-v "$out:/out:ro"'* ]]
+  # Of the repository it gets only what it reads, never the whole working
+  # tree: google-github-actions/auth leaves the release identity's
+  # credentials file (gha-creds-*.json) there.
+  [[ "$checks" != *'"$repo:'* && "$checks" != *'$GITHUB_WORKSPACE'* ]]
+  mounts=$(grep -o -- '-v "[^"]*"' <<<"$checks" | sort)
+  [ "$mounts" = "$(printf '%s\n' '-v "$out:/out:ro"' '-v "$repo/build/lib.sh:/src/build/lib.sh:ro"' \
+    '-v "$repo/build/verify-bundles.sh:/src/build/verify-bundles.sh:ro"' '-v "$repo/pki:/src/pki:ro"' | sort)" ] ||
+    { echo "$mounts"; return 1; }
+  # ... and the script reads nothing else of it: lib.sh, and pki/ through $src
+  [ "$(grep -o '"\$\(src\|here\)"[^ )]*\|\$\(src\|here\)/[^" )]*' "$repo/build/verify-bundles.sh" | sort -u | tr '\n' ' ')" = \
+    '"$src"/pki/ironflockos-bundle-signer-*.pem $here/.. $here/lib.sh ' ]
   # with the tools it needs, and its scratch space
   packages=$(grep -A1 'install --no-install-recommends' <<<"$checks" | tail -n 1)
   for pkg in rauc openssl e2fsprogs fdisk jq; do [[ " $packages " == *" $pkg "* ]] || { echo "$pkg: $packages"; return 1; }; done

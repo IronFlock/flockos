@@ -4,11 +4,12 @@
 #   verify-bundles.sh release|dry-run DIR
 #
 # Runs in a build container of its own after build/sign-bundles.sh
-# (build/sign-in-builder.sh), without the release identity; it only reads
-# DIR. DIR holds one directory per image (out/<image-id>/). For each bundle,
-# the keyring comes from the disk image next to it: /etc/rauc/keyring.pem in
-# slot A (the partition rootfs-a of <name>.img.gz), the keyring a device
-# installed from that image checks its updates with. The bundle is checked
+# (build/sign-in-builder.sh), without the release identity: of the
+# repository it gets and reads only this script, build/lib.sh and pki/, and
+# it only reads DIR. DIR holds one directory per image (out/<image-id>/).
+# For each bundle, the keyring comes from the disk image next to it:
+# /etc/rauc/keyring.pem in slot A (the partition rootfs-a of <name>.img.gz),
+# the keyring a device installed from that image checks its updates with. The bundle is checked
 # against it as the device checks it (code-signing purpose, the signing time).
 # sign-bundles.sh checks against pki/ironflockos-root-ca.pem; this checks the
 # image itself.

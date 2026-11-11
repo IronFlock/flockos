@@ -7,11 +7,14 @@
 # DIR (default out) holds the images of a release build, one directory each.
 # For release, GOOGLE_APPLICATION_CREDENTIALS names the credentials file of
 # the workload identity (google-github-actions/auth in release.yml); it is
-# mounted read-only into the container that signs, and only there: the check
-# reads the images' file systems and gets neither the identity nor write
-# access to DIR. IRONFLOCKOS_WORK, when set, is the scratch space of the
-# check, which unpacks each image there. Always linux/amd64: Google's PKCS#11
-# library exists for amd64 only.
+# mounted read-only into the container that signs, and only there. The check
+# reads the images' file systems, which a pull request's run may have built:
+# it gets DIR read-only and, of the repository, only the files it reads
+# (build/verify-bundles.sh, build/lib.sh, pki/). Not the whole working tree,
+# where google-github-actions/auth leaves its credentials file
+# (gha-creds-*.json, a token for the release identity). IRONFLOCKOS_WORK,
+# when set, is the scratch space of the check, which unpacks each image
+# there. Always linux/amd64: Google's PKCS#11 library exists for amd64 only.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -62,7 +65,9 @@ log "checking the signed bundles in $out against their images' keyrings ($mode)"
 # shellcheck disable=SC2016 # expanded by the container's shell
 docker run --rm \
   --platform linux/amd64 \
-  -v "$repo:/src:ro" \
+  -v "$repo/build/verify-bundles.sh:/src/build/verify-bundles.sh:ro" \
+  -v "$repo/build/lib.sh:/src/build/lib.sh:ro" \
+  -v "$repo/pki:/src/pki:ro" \
   -v "$out:/out:ro" \
   ${scratch[@]+"${scratch[@]}"} \
   -e DEBIAN_FRONTEND=noninteractive \

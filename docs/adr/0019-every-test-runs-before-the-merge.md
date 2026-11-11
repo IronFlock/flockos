@@ -57,8 +57,10 @@ A release run that reuses its pull request's images only releases them:
 `tag` and `assets`. It skips `e2e`. The pull request tested those images.
 
 `sign` checks the release signature against the image itself, without a VM.
-After the Cloud KMS signature, `build/verify-bundles.sh`, in a container
-that gets neither the release identity nor write access to the images,
+After the Cloud KMS signature, `build/verify-bundles.sh` runs in a container
+of its own. That container gets the images read-only and, of the
+repository, only the script, `build/lib.sh` and `pki/`: not the working
+tree, where the credentials file of the release identity lies. The script
 unpacks the disk image next to each bundle, reads `/etc/rauc/keyring.pem`
 from slot A (the partition `rootfs-a`) with debugfs, and verifies the bundle
 against that keyring as a device does: with the code-signing purpose and the
