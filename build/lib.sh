@@ -160,14 +160,18 @@ min_disk_size() {
 
 # hardware_list ROOT KERNEL...: the devices the kernels of the tree ROOT have a
 # driver for, which `ironflock os install` matches a machine's disk controller
-# and network card against: the "alias <pattern> <module>" lines of each
-# kernel's modules.alias (drivers built as modules), then the same lines for
-# the drivers built into the kernel, which modules.alias leaves out, each
-# kernel's after a comment line. depmod puts the built-in ones only into the
-# binary modules.builtin.alias.bin; it reads them from modules.builtin.modinfo
-# ("<module>.alias=<pattern>" records, NUL-separated), which the kernel
-# package ships (Debian's and the Raspberry Pi's 6.12 kernels do), and so
-# does this. Fails when a kernel lacks either file.
+# and network card against. For each kernel, after a comment line:
+#   - "alias <pattern> <module>" lines: the kernel's modules.alias (drivers
+#     built as modules), then the aliases of modules.builtin.modinfo
+#     ("<module>.alias=<pattern>" records, NUL-separated). On 6.12 that file
+#     holds only the aliases a built-in driver declares by name (fs-ext4),
+#     not those of its device table: a built-in driver such as virtio_pci
+#     has no alias line at all.
+#   - "builtin <module>" lines: every driver built into the kernel, from
+#     modules.builtin ("kernel/drivers/virtio/virtio_pci.ko"), the file's
+#     base name without .ko.
+# Debian's and the Raspberry Pi's 6.12 kernel packages ship modules.builtin
+# and modules.builtin.modinfo. Fails when a kernel lacks any of the three.
 hardware_list() {
   local root=$1 v dir
   shift
@@ -176,9 +180,12 @@ hardware_list() {
     [ -s "$dir/modules.alias" ] || die "kernel $v has no modules.alias in ${dir#"$root"} (depmod)"
     [ -s "$dir/modules.builtin.modinfo" ] ||
       die "kernel $v has no modules.builtin.modinfo in ${dir#"$root"}: no list of its built-in drivers"
-    echo "# kernel $v: modules.alias and the aliases of modules.builtin.modinfo"
+    [ -s "$dir/modules.builtin" ] ||
+      die "kernel $v has no modules.builtin in ${dir#"$root"}: no list of its built-in drivers"
+    echo "# kernel $v: alias lines of modules.alias and modules.builtin.modinfo, builtin lines of modules.builtin"
     grep '^alias ' "$dir/modules.alias" || true
     tr '\0' '\n' <"$dir/modules.builtin.modinfo" | sed -n 's/^\([^.=]*\)\.alias=\(..*\)$/alias \2 \1/p'
+    sed -n 's|^.*/||; s|^\(..*\)\.ko$|builtin \1|p' "$dir/modules.builtin"
   done
 }
 

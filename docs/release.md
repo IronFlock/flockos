@@ -110,22 +110,30 @@ refuses a release image without them, and a catalog with only one of them or
 with `min_disk_size` below `raw_size`.
 
 **The hardware list** tells which devices the image's kernels have a driver
-for. The build (`hardware_list` in `build/lib.sh`) takes each kernel's
-`modules.alias`, the drivers built as modules, and the drivers built into the
-kernel, which `modules.alias` leaves out: depmod writes those only into the
-binary `modules.builtin.alias.bin`, from the `<module>.alias=<pattern>`
-records of `modules.builtin.modinfo`, which the kernel package ships, and the
-build reads them from there. A kernel without either file stops the build.
-The file is gzip of text lines: `alias <pattern> <module>`, as depmod writes
-them, and before each kernel's lines a comment, `# kernel <version>: ...`.
-One kernel on the EFI targets; the Raspberry Pi image has two; Jetson, which
-has no disk image, has no list. A device has a driver when its modalias
-(`/sys/.../modalias`, such as `pci:v00008086d000015B8sv...`) matches a
-pattern by shell rules (`*`, `?`, `[...]`), as modprobe matches them, after
-it has turned `-` into `_` outside `[...]` in both. `os install` matches the
-disk controller and the network card. A match says nothing about a firmware
-file the driver may need. Every disk image has one, the installer too; it is
-in `SHA256SUMS`, and the signed catalog carries its hash. The SLSA provenance
+for. The build (`hardware_list` in `build/lib.sh`) writes, for each kernel,
+after a comment line (`# kernel <version>: ...`):
+
+- `alias <pattern> <module>` lines: the kernel's `modules.alias`, the drivers
+  built as modules, as depmod writes them; then the `<module>.alias=<pattern>`
+  records of `modules.builtin.modinfo`. On 6.12 those are only the aliases a
+  built-in driver declares by name (`fs-ext4`), not those of its device
+  table: a built-in driver such as `virtio_pci` has no `alias` line.
+- `builtin <module>` lines: every driver built into the kernel, from its
+  `modules.builtin` (`kernel/drivers/virtio/virtio_pci.ko` becomes
+  `builtin virtio_pci`).
+
+A kernel without one of the three files stops the build. One kernel on the
+EFI targets; the Raspberry Pi image has two; Jetson, which has no disk image,
+has no list. A device has a driver when its modalias (`/sys/.../modalias`,
+such as `pci:v00008086d000015B8sv...`) matches an `alias` pattern by shell
+rules (`*`, `?`, `[...]`), as modprobe matches them, after it has turned `-`
+into `_` outside `[...]` in both; or, for a driver built into the kernel, when
+the running machine's driver of the device (`/sys/.../driver/module`) has a
+`builtin` line. The releases 0.15.0 and older have no `builtin` lines: their
+lists miss the built-in drivers' device tables. `os install` matches the disk
+controller and the network card. A match says nothing about a firmware file
+the driver may need. Every disk image has one, the installer too; it is in
+`SHA256SUMS`, and the signed catalog carries its hash. The SLSA provenance
 covers the images and bundles, not it, as it does not cover the SBOMs
 either.
 

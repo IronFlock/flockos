@@ -54,7 +54,8 @@ type Image struct {
 	Payloads []string `json:"payloads,omitempty"`
 	// ModulesAlias is the image's hardware list,
 	// <image-id>-<version>.modules.alias.gz: the driver aliases of its
-	// kernels, from modules.alias and modules.builtin.modinfo (build/lib.sh
+	// kernels, from modules.alias and modules.builtin.modinfo, and their
+	// built-in drivers, from modules.builtin (build/lib.sh
 	// hardware_list), which `ironflock os install` matches a machine's disk
 	// controller and network card against. Releases up to 0.14.0 have none.
 	ModulesAlias *Artifact `json:"modules_alias,omitempty"`

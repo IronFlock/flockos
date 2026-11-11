@@ -160,31 +160,36 @@ repart() {
   [ "$(cat "$tmp/y.sizes")" = "$(printf 'raw_size=3000\nmin_disk_size=3000')" ]
 }
 
-# kernel ROOT VERSION: a kernel's module lists as the kernel package and
-# depmod leave them: modules.alias (depmod) and modules.builtin.modinfo
-# (NUL-separated <module>.<key>=<value> records, as the kernel installs it).
+# kernel ROOT VERSION: a kernel's module lists as a 6.12 kernel package and
+# depmod leave them: modules.alias (depmod); modules.builtin.modinfo
+# (NUL-separated <module>.<key>=<value> records), which holds only the
+# aliases a built-in driver declares by name, not its device table's: no
+# line for virtio_pci or nvme; modules.builtin, the built-in drivers' paths.
 kernel() {
   local d=$1/usr/lib/modules/$2
   mkdir -p "$d"
   printf '# Aliases extracted from modules themselves.\nalias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e\nalias virtio:d00000001v* virtio_net\n' >"$d/modules.alias"
-  printf 'nvme.license=GPL\0nvme.alias=pci:v*d*sv*sd*bc01sc08i02*\0ext4.alias=fs-ext4\0ext4.description=Fourth Extended Filesystem\0of_x.alias=of:N*T*Cbrcm,bcm2835-sdhost\0' >"$d/modules.builtin.modinfo"
+  printf 'nvme.license=GPL\0nvme.description=NVM Express device driver\0ext4.alias=fs-ext4\0ext4.description=Fourth Extended Filesystem\0virtio_pci.license=GPL\0' >"$d/modules.builtin.modinfo"
+  printf 'kernel/fs/ext4/ext4.ko\nkernel/drivers/virtio/virtio_pci.ko\nkernel/drivers/nvme/host/nvme.ko\n' >"$d/modules.builtin"
 }
 
-@test "hardware_list: each kernel's module aliases, then its built-in ones from modules.builtin.modinfo, under a comment line" {
+@test "hardware_list: each kernel's alias lines, then a builtin line per built-in driver, under a comment line" {
   kernel "$tmp/root" 6.12.48+deb13-amd64
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' '# kernel 6.12.48+deb13-amd64: modules.alias and the aliases of modules.builtin.modinfo' \
+  [ "$output" = "$(printf '%s\n' \
+    '# kernel 6.12.48+deb13-amd64: alias lines of modules.alias and modules.builtin.modinfo, builtin lines of modules.builtin' \
     'alias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e' 'alias virtio:d00000001v* virtio_net' \
-    'alias pci:v*d*sv*sd*bc01sc08i02* nvme' 'alias fs-ext4 ext4' 'alias of:N*T*Cbrcm,bcm2835-sdhost of_x')" ]
+    'alias fs-ext4 ext4' 'builtin ext4' 'builtin virtio_pci' 'builtin nvme')" ]
   # The Raspberry Pi's two kernels.
   kernel "$tmp/root" 6.12.47+rpt-rpi-2712
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64 6.12.47+rpt-rpi-2712
   [ "$(grep -c '^# kernel ' <<<"$output")" = 2 ]
-  [ "$(grep -c '^alias ' <<<"$output")" = 10 ]
+  [ "$(grep -c '^alias ' <<<"$output")" = 6 ]
+  [ "$(grep -c '^builtin ' <<<"$output")" = 6 ]
 }
 
-@test "hardware_list: a kernel without modules.alias or modules.builtin.modinfo stops the build" {
+@test "hardware_list: a kernel without modules.alias, modules.builtin.modinfo or modules.builtin stops the build" {
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -ne 0 ]
   [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.alias"* ]]
@@ -195,6 +200,11 @@ kernel() {
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -ne 0 ]
   [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.builtin.modinfo"* ]]
+  kernel "$tmp/root" 6.12.48+deb13-amd64
+  rm "$tmp/root/usr/lib/modules/6.12.48+deb13-amd64/modules.builtin"
+  run hardware_list "$tmp/root" 6.12.48+deb13-amd64
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.builtin in"* ]]
 }
 
 @test "the build publishes each disk image's hardware list, gzip without a name or time" {
