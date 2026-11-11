@@ -214,12 +214,13 @@ trust a throwaway CA of their own build. A release pull request also runs
 IronFlockOS root CA) and boots the one of `amd64-efi base` in its `e2e` job
 with `--only boot`: its bundle carries the dry run's stand-in signature,
 which a release image refuses, so the update and every step after it cannot
-run. Every test runs before the merge
-([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)): the release run
-that reuses those images does not test them again; its `sign` job checks
-each bundle against the keyring in its image without a VM. Only a release
-run that has to build its images runs `e2e` in full, with its own
-KMS-signed bundle, before it publishes them.
+run. The other release images are not booted at all. Every test runs before
+the merge ([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)): the
+release run that reuses those images does not test them again; its `sign`
+job checks each bundle with `rauc info` against the keyring and RAUC
+settings in slot A of its image, without a VM and without an install. Only a
+release run that has to build its images runs `e2e` in full on its image of
+`amd64-efi base`, with its own KMS-signed bundle, before it publishes.
 
 ## Raspberry Pi image checks
 

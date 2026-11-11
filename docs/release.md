@@ -7,8 +7,8 @@ takes the images its pull request's dry run built (or builds them), signs the
 bundles, publishes the images and the signed catalog, and sets the tag last.
 Nothing is built, signed or published from a laptop. Every test runs before
 the merge ([below](#tests-before-the-merge)): a release that takes its pull
-request's images does not test them again; one that builds them tests them
-before it publishes.
+request's images does not test them again; one that builds them boots its
+image of `amd64-efi base` in `e2e` before it publishes.
 
 ## The release run
 
@@ -18,9 +18,9 @@ before it publishes.
 | `source` | Where the images come from: while the switch is on, a release reuses those of its pull request's dry run when it can prove they are the build of the release commit's tree, and builds them otherwise ([below](#reused-images)). The job summary says which and why | none |
 | `build` | Only when the release does not reuse: every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM. Each image's build also lists its files | none |
 | `manifest` | With a build: the manifest `build.tsv`, every file of every image with sha256 and size (`build/reuse.sh manifest`) | none |
-| `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), then against the keyring that the image itself carries, `/etc/rauc/keyring.pem` of its slot A (`build/verify-bundles.sh`), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
+| `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), then against the keyring that the image itself carries, `/etc/rauc/keyring.pem` of its slot A, with the image's own RAUC settings (`build/verify-bundles.sh`, in a container without the release identity), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
 | `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code, one call per image; `stage` waits for it | the harness workflow (Sigstore) |
-| `e2e` | Only when the run built its images: the release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)). Skipped when the release reuses its pull request's images, which that pull request tested ([below](#tests-before-the-merge)) | none |
+| `e2e` | Only when the run built its images: the release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)). Skipped when the release reuses its pull request's images: that pull request's dry run booted the same bytes of `amd64-efi base`; the other release images are published without a test of their own bytes, in either case ([below](#tests-before-the-merge)) | none |
 | `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/ironflockos/<version>/`, eight uploads at a time, `SHA256SUMS` last (`build/publish.sh stage`). It also lists each file's sha256 and size for `promote` (`build/publish.sh meta`) | `ironflockos-publisher` |
 | `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/ironflockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `ironflockos-publisher` |
 | `promote` | The staged files to `gs://ironflock-downloads/ironflockos/<version>/`, eight at a time; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `ironflockos/release-notes.json`. Then the catalog, built on the published one from the list `stage` made (no image or bundle is downloaded) and signed with the catalog key, to `ironflockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `ironflockos-release` (the catalog), `ironflockos-publisher` (the files) |
@@ -100,9 +100,12 @@ keeps an image made from the same file.
   manifest of the build, and `would-reuse` checks this run as the release run
   will check it: a failure there fails the dry run. A manual run does neither:
   it has no pull request.
-- `sign` uses a throwaway stand-in for the bundle signer. The keyring in each
-  image must refuse the stand-in's bundle and accept the bundle signer's
-  certificate.
+- `sign` uses a throwaway stand-in for the bundle signer. The check against
+  each image then first verifies the bundle with the stand-in's CA and the
+  image's settings (a positive control: rauc and the bundle work in that
+  container); the image's own keyring must then refuse it by rauc's
+  signature check, and accept the bundle signer's certificate. The
+  stand-in's CA never reaches an artifact.
 - `e2e` boots and reboots only: no release image accepts a stand-in bundle.
 - `stage` and `promote` print their storage calls (`DRY_RUN=1`).
 - `sources` looks up every source package as a release does, so one without
@@ -162,30 +165,39 @@ every image as a development build in QEMU with the whole sequence (first
 boot, update into slot B, factory reset, fallback, crash), the installer
 sticks, and the dry run of `release.yml` with its release build of every
 image, whose `e2e` boots and reboots the release image of `amd64-efi base`.
+Of the release images, only that one is booted; the other seven are
+published without a test of their own bytes, their development builds
+tested in their place.
 
 The release run after the merge then only releases the images it takes from
 that pull request: it signs, attests, stages, publishes the source code,
 promotes, makes the VM images, tags and attaches the assets. What it checks,
 it checks before it publishes: the proof that the images are the release
 commit's build (`source`), every file against the manifest and every bundle
-against the root CA and against the keyring in its own image (`sign`), the
+against the root CA and, with `rauc info` and the image's own RAUC
+settings, against the keyring in slot A of its own image (`sign`), the
 catalog's signature and every file through the download proxy (`promote`),
 and each VM image against `SHA256SUMS` (`vm-images`).
 
 **The fall-back.** A release that builds its images itself (the switch is
-off, the lookup failed, `source` failed or was cancelled) tests them in `e2e`
-before `promote`, with its own KMS-signed bundle, as before. Images that
-nobody tested are never published.
+off, the lookup failed, `source` failed or was cancelled) runs `e2e` on its
+image of `amd64-efi base` before `promote`, with its own KMS-signed bundle,
+as before: nobody has booted the bytes of that build. Its other seven
+images are published without a test of their own bytes, as in a release
+that reuses.
 
 **What stays untested before the merge.** Before the merge, no release image
-installs a bundle with the release signature: only the bundle signer in Cloud
-KMS makes such a bundle, and no pull request may reach it. When the release
-reuses its images, that stays so until devices get the release. The update
-into slot B, the factory reset, the fallback and the crash run on the
-development builds of the same tree. `sign` shows without a VM that each
-image's keyring accepts the release signature. Only the release image of
-`amd64-efi base` boots as a release build; the other release images are not
-booted at all, as before.
+installs a bundle, and no bundle with the release signature is installed
+anywhere: only the bundle signer in Cloud KMS makes such a bundle, and no
+pull request may reach it. When the release reuses its images, that stays
+so until devices get the release. The update into slot B, the factory
+reset, the fallback and the crash run on the development builds of the
+same tree. `sign` shows without a VM that each image's keyring in slot A
+accepts the release signature in `rauc info`; it does not install, and it
+does not read the keyring inside the bundle's root filesystem, which a
+device checks its next update with. Only the release image of `amd64-efi
+base` boots as a release build; the other release images are not booted at
+all, as before.
 
 ## What `ironflock os install` reads
 

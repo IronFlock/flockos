@@ -177,10 +177,11 @@ Pull requests into `main` are squash-merged and need the checks `ci-ok` and
 QEMU. A release is a version bump: `just release-patch` (or `release-minor`,
 `release-major`) opens the pull request `release ironflockos v<version>`, whose CI also
 builds the release images and runs every test. Its merge runs `release.yml`, which
-reuses those images when it can (otherwise it builds and tests them itself), signs the
-bundles in Cloud KMS, checks each against the keyring in its image, publishes the
-images and the signed catalog, and sets the tag last ([docs/release.md](docs/release.md),
-ADR-0018, ADR-0019).
+reuses those images when it can (otherwise it builds them and boots its image of
+`amd64-efi base` in QEMU), signs the bundles in Cloud KMS, checks each against the
+keyring in its image (without installing it), publishes the images and the signed
+catalog, and sets the tag last ([docs/release.md](docs/release.md), ADR-0018,
+ADR-0019).
 
 ## Documentation
 

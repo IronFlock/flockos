@@ -46,34 +46,51 @@ again, the crash needs two good slots.
 ### Before the merge
 
 Every test runs in the release pull request's CI, as listed above. The dry
-run's `sign` also checks each bundle against the keyring its image carries
-(below): the stand-in's bundle must be refused, and the bundle signer's
+run's `sign` also runs the check of each bundle against its image (below)
+in the dry run's form: first a positive control, in which the bundle must
+verify with the stand-in's CA in place of the image's keyring and otherwise
+the image's settings; then the image's own keyring must refuse it, by
+rauc's signature check and not by any other error; and the bundle signer's
 certificate must chain to that keyring.
 
 ### After the merge
 
 A release run that reuses its pull request's images only releases them:
 `source`, `sign`, `attest`, `stage`, `sources`, `promote`, `vm-images`,
-`tag` and `assets`. It skips `e2e`. The pull request tested those images.
+`tag` and `assets`. It skips `e2e`. What the pull request tested of them:
+its dry run booted the image of `amd64-efi base`, the same bytes the release
+publishes, and rebooted it. The other seven release images (base-rt and
+nvidia of `amd64-efi`, base and base-rt of `arm64-efi`, the Raspberry Pi
+image and both installer sticks) are published without any test of their
+own bytes; their development builds, from the same tree, were tested in
+full.
 
 `sign` checks the release signature against the image itself, without a VM.
 After the Cloud KMS signature, `build/verify-bundles.sh` runs in a container
 of its own. That container gets the images read-only and, of the
 repository, only the script, `build/lib.sh` and `pki/`: not the working
 tree, where the credentials file of the release identity lies. The script
-unpacks the disk image next to each bundle, reads `/etc/rauc/keyring.pem`
-from slot A (the partition `rootfs-a`) with debugfs, and verifies the bundle
-against that keyring as a device does: with the code-signing purpose and the
-signing time. A bundle that does not verify stops the release before `stage`. This
-is the part of the old `e2e` that only the release signature can show.
+unpacks the disk image next to each bundle and reads `/etc/rauc/keyring.pem`
+and `/etc/rauc/system.conf` from slot A (the partition `rootfs-a`) with
+debugfs. It runs `rauc info` on the bundle with the image's own settings:
+its `compatible` and `bundle-formats` and its whole `[keyring]` section
+(code-signing purpose, the signing time), the keyring being the one read
+from the image. What differs from a device: `rauc info` checks the
+signature and the format, it installs nothing; it does not get the image's
+slots, bootloader, handlers and data directory (`bootloader=noop`). The
+bundle's `compatible` must be the image's, as an install requires. A bundle
+that does not verify stops the release before `stage`. This is the part of
+the old `e2e` that only the release signature can show.
 
 ### The fall-back
 
 A release run that builds its images itself runs `e2e` as before: the whole
-sequence with its own signed bundle, before `promote`. That happens when the
-switch `IRONFLOCKOS_REUSE` is off, when the lookup fails, and when `source`
-fails or is cancelled. Nobody has tested those images, and images that
-nobody tested are never published.
+sequence on its image of `amd64-efi base`, with its own signed bundle,
+before `promote`. That happens when the switch `IRONFLOCKOS_REUSE` is off,
+when the lookup fails, and when `source` fails or is cancelled. Nobody has
+booted the bytes of that build, so the release boots its image of
+`amd64-efi base` before it publishes anything. As in a reused run, the other
+seven release images are published without a test of their own bytes.
 
 ### The job graph
 
@@ -85,15 +102,22 @@ it.
 
 ## What stays untested before the merge
 
-- **The update of a release image.** When the release reuses its images, no
-  release image installs a bundle in a VM before devices can get the
-  release. The update into slot B, the factory reset, the fallback and the
-  crash run only on the development builds of the same tree, which trust a
-  throwaway CA of their own build. The release image of `amd64-efi base`
-  boots and reboots, nothing more.
+- **The update of a release image.** No release image installs a bundle
+  before the merge, and no bundle with the release signature is installed
+  anywhere before the merge. When the release reuses its images, that stays
+  so until devices get the release. The update into slot B, the factory
+  reset, the fallback and the crash run only on the development builds of
+  the same tree, which trust a throwaway CA of their own build. The release
+  image of `amd64-efi base` boots and reboots, nothing more.
 - **The release signature in a VM.** The Cloud KMS signature exists only after
   the merge. `verify-bundles.sh` shows that each image's keyring accepts it
-  as RAUC checks it, but not that an installation with it succeeds.
+  with the image's settings in `rauc info`, but not that an installation
+  with it succeeds.
+- **Only slot A's keyring.** The check reads the keyring in slot A of the
+  disk image. The bundle carries a root filesystem with a keyring of its
+  own, which a device takes over with the update and checks the next update
+  with; the check does not read it. Both come from the same build, but
+  nothing checks that they are the same.
 - **The other release images.** Only `amd64-efi base` boots as a release
   build. The release builds of `amd64-efi nvidia`, `arm64-efi`, the `rt`
   images, the Raspberry Pi and the installer sticks are not booted at all; it
@@ -109,8 +133,12 @@ it.
   the merge.
 - A release that builds its images takes as long as before.
 - `sign` unpacks each image once more, on the runner's second disk, to read
-  its keyring. A dry run does the same, so a fault in that check shows on the
-  pull request.
+  its keyring, in a second container with its own package installation. A
+  dry run runs the same steps up to the final verdict, with the positive
+  control in place of the release signature: a fault in unpacking the
+  image, reading its keyring and settings, the container's rauc or the
+  bundle's format shows on the pull request. That `rauc info` accepts the
+  Cloud KMS signature with the image's keyring shows only in the release.
 - A fault that shows only with the release keyring and a bundle signed in
   Cloud KMS reaches the test channel and the VM image families before anyone
   sees it. Production moves later, by hand, once the release has proven

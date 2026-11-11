@@ -97,8 +97,8 @@ run_check() {
   # a build in a release that reused
   run_check release true build=success
   [ "$status" -ne 0 ]
-  # its pull request tested the images: a QEMU test in the release run is a
-  # condition gone wrong, whatever its result
+  # its pull request's dry run booted the image: a QEMU test in the release
+  # run is a condition gone wrong, whatever its result
   run_check release true e2e=success
   [ "$status" -ne 0 ]
   [[ "$output" == *"FAIL e2e          success, expected skipped"* ]]
@@ -126,7 +126,7 @@ run_check() {
 @test "a release that builds tests its images: e2e must succeed, whatever made it build" {
   run_check release false
   [[ "$output" == *"ok   e2e          success"* ]]
-  # nobody tested the images it built
+  # nobody booted the images it built
   run_check release false e2e=skipped
   [ "$status" -ne 0 ]
   [[ "$output" == *"FAIL e2e          skipped, expected success"* ]]

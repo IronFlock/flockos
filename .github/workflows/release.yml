@@ -22,9 +22,12 @@
 # every image once, promote only the list of hashes and sizes stage made.
 #
 # Every test runs before the merge (ADR-0019): a release that reuses its pull
-# request's images only releases them, and skips e2e. A release that builds
-# its images, because it cannot reuse them, runs e2e on them before it
-# publishes, as nobody has tested them.
+# request's images only releases them, and skips e2e; that pull request's dry
+# run booted its image of amd64-efi base. A release that builds its images,
+# because it cannot reuse them, runs e2e on its image of amd64-efi base
+# before it publishes, as nobody has booted that build. The other release
+# images are published without a test of their own bytes either way; their
+# development builds are tested in the pull request.
 #
 # A no-release merge starts nothing: `paths` holds only VERSION, and when a
 # no-release pull request touches it anyway the jobs are skipped by its merge
@@ -457,8 +460,8 @@ jobs:
   # falls back. A dry run's bundles carry the stand-in's signature, which no
   # release image accepts: it boots and reboots only.
   # Only for images this run built (ADR-0019): a run that reuses its pull
-  # request's images skips it, as that pull request tested them; a run that
-  # built them, because it could not reuse, tests them here.
+  # request's images skips it, as that pull request's dry run booted the same
+  # bytes; a run that built them, because it could not reuse, boots them here.
   e2e:
     needs: [verify, source, sign]
     if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}

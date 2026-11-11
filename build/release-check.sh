@@ -11,8 +11,8 @@
 #   verify skipped     a push that releases nothing: every job skipped
 #   release, dry-run   source: succeeded (it may have failed when the run built)
 #                      build, manifest: skipped when it reused, else succeeded
-#                      e2e: skipped when it reused (its pull request tested
-#                        the images, ADR-0019), else succeeded
+#                      e2e: skipped when it reused (its pull request's dry
+#                        run booted the image, ADR-0019), else succeeded
 #                      attest-build, would-reuse: succeeded in a dry run of a
 #                        pull request that built, else skipped
 #                      sign, attest, stage, sources, promote, vm-images:
