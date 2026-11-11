@@ -94,7 +94,7 @@ keeps an image made from the same file.
 
 ## What `ironflock os install` reads
 
-`ironflock os install` of device-init (its ADR-0008) writes an image onto the
+`ironflock os install` of IronFlock/ironflock-cli (its ADR-0008) writes an image onto the
 disk of a running machine. Besides an image's `url`, `sha256` and `size`, it
 reads these fields of `releases.<version>.images.<image-id>` in the catalog.
 Releases up to 0.14.0 have none of them.
@@ -231,18 +231,22 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
    changes nothing. At the end it prints the line for step 5. Done
    2026-11-11 (`pki/ironflockos-catalog.pub`, key id `036ef3bd`, [pki/README.md](../pki/README.md)).
 3. **The download proxy** serves `gs://ironflock-downloads/ironflockos/` under
-   `https://instance-registry.ironflock.com/dl/ironflockos/` (registry-proxy,
-   the release after its `ironflockos-names` branch). Without it, `promote` would stop
-   before the tag. Open: until then only `dl/flockos/` is served.
-4. **The VM images:** `tools/release-setup.sh --yes` again, after it has gained
-   the role `ironflockosVmImagePublisher` (ADR-0010). It keeps everything that
-   exists and adds the role and its binding for `ironflockos-publisher`. Until
-   then `vm-images` fails, and with it the tag; re-run the failed jobs after
-   it.
+   `https://instance-registry.ironflock.com/dl/ironflockos/` (registry-proxy).
+   Without it, `promote` would stop before the tag. Done 2026-11-11
+   (registry-proxy v0.2.12).
+4. **The VM images:** `tools/release-setup.sh --yes` again, with the role
+   `ironflockosVmImagePublisher` (ADR-0010). It keeps everything that exists and
+   adds the role and its binding for `ironflockos-publisher`. Without them
+   `vm-images` fails, and with it the tag; re-run the failed jobs after it.
+   Done 2026-11-11.
 5. **The device-agent** trusts the catalog key: the line from step 2 goes into
    `IRONFLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
-   an agent release. `CATALOG_MIN_AGENT` names that release: device-agent
-   1.6.1 (#204).
+   an agent release. Done: device-agent 1.6.10, the live agent, trusts key
+   `036ef3bd`; it is also the first that knows `ID=ironflockos`. An older agent
+   does not read the new catalog at all. `CATALOG_MIN_AGENT` in
+   `build/release.conf` is not that release: it is a release's `min_agent`, the
+   oldest agent that may install its bundles (an older one updates itself
+   first), and stays 1.6.3.
 
 ## Not yet
 
