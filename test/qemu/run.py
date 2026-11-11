@@ -369,8 +369,9 @@ class VM:
                          "COLUMNS=1000 TERM=dumb", timeout=10, check=False)
                 # run() puts its command into a subshell, so the exports above
                 # never reach the shell: a pager would wait for a key on any
-                # line longer than the terminal. This line is the shell's own.
-                self._send("export SYSTEMD_PAGER= PAGER=cat\r")
+                # line longer than the terminal, and colours would be in what
+                # the checks read. This line is the shell's own.
+                self._send("export SYSTEMD_PAGER= PAGER=cat SYSTEMD_COLORS=0 NO_COLOR=1\r")
                 return self.run("cat /proc/sys/kernel/random/boot_id", timeout=30).strip()
         raise TestFailure(f"no shell on the second serial port after {timeout}s (see console.log)")
 
@@ -694,7 +695,9 @@ class Runner:
         QEMU's user network hands out the same address by DHCP, so the device
         stays reachable either way; the profile is what tells them apart."""
         self.vm.run("systemctl is-enabled flockos-network-profiles.service")
-        route = self.vm.run("ip -o -4 route show default").split()
+        # ip colours what it writes to a terminal, and the test shell is one:
+        # through a pipe it does not.
+        route = self.vm.run("ip -o -4 route show default | cat").split()
         if len(route) < 5 or route[0] != "default" or route[1] != "via" or route[3] != "dev":
             raise TestFailure(f"no default route to copy: {' '.join(route)}")
         gateway, nic = route[2], route[4]
@@ -820,7 +823,7 @@ class Runner:
         # update downloads from it).
         self.wait_for(f"[ \"$(nmcli -g GENERAL.CONNECTION device show {nic})\" = {STATIC_PROFILE} ]", 60,
                       "NetworkManager to bring up the static profile")
-        addr = self.vm.run(f"ip -o -4 addr show dev {nic}")
+        addr = self.vm.run(f"ip -o -4 addr show dev {nic} | cat")
         if f" {address} " not in addr or "dynamic" in addr:
             raise TestFailure(f"{nic} does not have the static address {address}:\n{addr}")
         self.vm.run(f"ip -o -4 route show default | grep -q '^default via {gateway} dev {nic} '")
