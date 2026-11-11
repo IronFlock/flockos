@@ -100,6 +100,15 @@ each() {
   return "$rc"
 }
 
+# warm_gcloud: one gcloud call before many run at once, so that the
+# credential and access-token caches in ~/.config/gcloud exist before eight
+# processes open them (the workload identity's first token is fetched
+# here). A failure here is only a warning: the uploads tell.
+warm_gcloud() {
+  [ "${DRY_RUN:-0}" != 1 ] || return 0
+  gcloud auth print-access-token >/dev/null || warn "gcloud auth print-access-token failed; the uploads go on"
+}
+
 # stage_one VERSION FILE: one file to the staging tree.
 stage_one() { put "$2" "$STAGING/$1/$(basename "$2")"; }
 
@@ -171,6 +180,7 @@ case "$cmd" in
     trap 'rm -f "$sums"' EXIT
     sums "$dir" >"$sums"
     # The files side by side, SHA256SUMS once every one of them is there.
+    warm_gcloud
     files "$dir" | each stage_one "$version"
     put "$sums" "$STAGING/$version/SHA256SUMS"
     done_ "staged $(wc -l <"$sums" | tr -d ' ') files to $STAGING/$version/"
@@ -182,6 +192,7 @@ case "$cmd" in
       done_ "promoted $STAGING/$version/ to $LIVE/$version/"
       exit 0
     fi
+    warm_gcloud
     storage ls "$STAGING/$version/" | each promote_one "$version"
     done_ "promoted $STAGING/$version/ to $LIVE/$version/"
     ;;

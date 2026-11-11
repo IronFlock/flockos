@@ -145,6 +145,30 @@ staged() {
   [[ "$output" != *"promoted"* ]]
 }
 
+@test "stage and promote make one gcloud call before the parallel ones; a dry run makes none" {
+  fake_gcloud
+  run env PATH="$tmp/bin:$PATH" bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$tmp/log")" = "gcloud auth print-access-token" ]
+  [ "$(grep -c 'auth print-access-token' "$tmp/log")" = 1 ]
+  rm "$tmp/log"
+  staged 3
+  run env PATH="$tmp/bin:$PATH" bash "$publish" promote 1.0.0
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$tmp/log")" = "gcloud auth print-access-token" ]
+  DRY_RUN=1 run bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"print-access-token"* ]]
+}
+
+@test "a failed first gcloud call is a warning: the uploads go on and tell" {
+  fake_gcloud
+  FAIL=print-access-token run env PATH="$tmp/bin:$PATH" bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: gcloud auth print-access-token failed"* ]]
+  [ "$(grep -c 'storage cp' "$tmp/log")" = 12 ]
+}
+
 @test "PUBLISH_JOBS must be a number" {
   PUBLISH_JOBS=x DRY_RUN=1 run bash "$publish" stage "$tmp/out" 1.0.0
   [ "$status" -ne 0 ]
