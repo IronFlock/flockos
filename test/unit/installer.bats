@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
-# flockos-installer (WP-3.1): installer.conf, which disks qualify, the
+# ironflockos-installer (WP-3.1): installer.conf, which disks qualify, the
 # selection rules, the payload choice, and a dry run of the whole program.
 
-lib="$BATS_TEST_DIRNAME/../../profiles/installer/overlay/usr/lib/flockos"
+lib="$BATS_TEST_DIRNAME/../../profiles/installer/overlay/usr/lib/ironflockos"
 repo="$BATS_TEST_DIRNAME/../.."
 
 setup() {
-  # shellcheck source=profiles/installer/overlay/usr/lib/flockos/installer-lib.sh
+  # shellcheck source=profiles/installer/overlay/usr/lib/ironflockos/installer-lib.sh
   . "$lib/installer-lib.sh"
   tmp=$(mktemp -d)
   # A sealed IPC booted from the installer stick (sdb): one NVMe, one small
@@ -85,10 +85,10 @@ teardown() { rm -rf "$tmp"; }
 
 @test "payload: the only one, the one named, and a clear error for several" {
   mkdir -p "$tmp/p"
-  touch "$tmp/p/flockos-amd64-efi-base-1.0.0.img.zst"
-  [ "$(installer_payload "$tmp/p" "")" = "$tmp/p/flockos-amd64-efi-base-1.0.0.img.zst" ]
-  touch "$tmp/p/flockos-amd64-efi-nvidia-1.0.0.img.zst"
-  [ "$(installer_payload "$tmp/p" nvidia)" = "$tmp/p/flockos-amd64-efi-nvidia-1.0.0.img.zst" ]
+  touch "$tmp/p/ironflockos-amd64-efi-base-1.0.0.img.zst"
+  [ "$(installer_payload "$tmp/p" "")" = "$tmp/p/ironflockos-amd64-efi-base-1.0.0.img.zst" ]
+  touch "$tmp/p/ironflockos-amd64-efi-nvidia-1.0.0.img.zst"
+  [ "$(installer_payload "$tmp/p" nvidia)" = "$tmp/p/ironflockos-amd64-efi-nvidia-1.0.0.img.zst" ]
   run installer_payload "$tmp/p" ""
   [ "$status" -ne 0 ]
   [[ "$output" == *"set payload="* ]]
@@ -96,21 +96,21 @@ teardown() { rm -rf "$tmp"; }
 
 @test "payload: base never picks base-rt, and an image id selects exactly" {
   mkdir -p "$tmp/p"
-  for v in base base-rt nvidia; do touch "$tmp/p/flockos-amd64-efi-$v-1.0.0.img.zst"; done
-  [ "$(installer_payload "$tmp/p" base)" = "$tmp/p/flockos-amd64-efi-base-1.0.0.img.zst" ]
-  [ "$(installer_payload "$tmp/p" base-rt)" = "$tmp/p/flockos-amd64-efi-base-rt-1.0.0.img.zst" ]
-  [ "$(installer_payload "$tmp/p" flockos-amd64-efi-base)" = "$tmp/p/flockos-amd64-efi-base-1.0.0.img.zst" ]
-  [ "$(installer_payload "$tmp/p" flockos-amd64-efi-nvidia)" = "$tmp/p/flockos-amd64-efi-nvidia-1.0.0.img.zst" ]
-  run installer_payload "$tmp/p" flockos-arm64-efi-base
-  [ "$status" -ne 0 ] && [[ "$output" == *"no payload for flockos-arm64-efi-base"* ]]
+  for v in base base-rt nvidia; do touch "$tmp/p/ironflockos-amd64-efi-$v-1.0.0.img.zst"; done
+  [ "$(installer_payload "$tmp/p" base)" = "$tmp/p/ironflockos-amd64-efi-base-1.0.0.img.zst" ]
+  [ "$(installer_payload "$tmp/p" base-rt)" = "$tmp/p/ironflockos-amd64-efi-base-rt-1.0.0.img.zst" ]
+  [ "$(installer_payload "$tmp/p" ironflockos-amd64-efi-base)" = "$tmp/p/ironflockos-amd64-efi-base-1.0.0.img.zst" ]
+  [ "$(installer_payload "$tmp/p" ironflockos-amd64-efi-nvidia)" = "$tmp/p/ironflockos-amd64-efi-nvidia-1.0.0.img.zst" ]
+  run installer_payload "$tmp/p" ironflockos-arm64-efi-base
+  [ "$status" -ne 0 ] && [[ "$output" == *"no payload for ironflockos-arm64-efi-base"* ]]
   run installer_payload "$tmp/p" rt
   [ "$status" -ne 0 ]
 }
 
 @test "installer.conf takes an image id as payload, as FlockFlasher writes it" {
-  printf 'payload=flockos-amd64-efi-base-rt\n' >"$tmp/installer.conf"
+  printf 'payload=ironflockos-amd64-efi-base-rt\n' >"$tmp/installer.conf"
   installer_conf "$tmp/installer.conf"
-  [ "$CONF_PAYLOAD" = flockos-amd64-efi-base-rt ]
+  [ "$CONF_PAYLOAD" = ironflockos-amd64-efi-base-rt ]
 }
 
 @test "the boot entry's loader is the target's EFI_LOADER" {
@@ -143,48 +143,48 @@ esac
 SH
   printf '#!/bin/bash\necho /dev/sdb2\n' >"$tmp/bin/findmnt"
   chmod +x "$tmp/bin"/*
-  touch "$tmp/payload/flockos-amd64-efi-base-1.0.0.img.zst"
-  echo 4617000000 >"$tmp/payload/flockos-amd64-efi-base-1.0.0.img.zst.size"
+  touch "$tmp/payload/ironflockos-amd64-efi-base-1.0.0.img.zst"
+  echo 4617000000 >"$tmp/payload/ironflockos-amd64-efi-base-1.0.0.img.zst.size"
   echo '{}' >"$tmp/esp/device.flock"
 }
 
 @test "dry run: picks the NVMe, would register it, writes nothing" {
   fake_machine
   printf 'confirm=no\n' >"$tmp/esp/installer.conf"
-  PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_PAYLOAD_DIR=$tmp/payload FLOCKOS_DRY_RUN=1 run bash "$lib/installer"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_PAYLOAD_DIR=$tmp/payload IRONFLOCKOS_DRY_RUN=1 run bash "$lib/installer"
   [ "$status" -eq 0 ]
   [[ "$output" == *"target: /dev/nvme0n1 (rule: disk=largest)"* ]]
-  [[ "$output" == *"would write $tmp/payload/flockos-amd64-efi-base-1.0.0.img.zst to /dev/nvme0n1"* ]]
+  [[ "$output" == *"would write $tmp/payload/ironflockos-amd64-efi-base-1.0.0.img.zst to /dev/nvme0n1"* ]]
   [[ "$output" == *"would run: efibootmgr --quiet --create --disk /dev/nvme0n1 --part 1"* ]]
   [[ "$output" == *"would run: systemctl poweroff"* ]]
-  grep -q 'target: /dev/nvme0n1' "$tmp/esp/flockos-installer.log"
+  grep -q 'target: /dev/nvme0n1' "$tmp/esp/ironflockos-installer.log"
 }
 
-@test "dry run: the .flock and the site's proxy.conf go to the new FLOCKOS partition" {
+@test "dry run: the .flock and the site's proxy.conf go to the new IRONFLOCKOS partition" {
   fake_machine
   printf 'confirm=no\n' >"$tmp/esp/installer.conf"
   printf 'http_proxy=http://proxy:3128\n' >"$tmp/esp/proxy.conf"
-  PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_PAYLOAD_DIR=$tmp/payload FLOCKOS_DRY_RUN=1 run bash "$lib/installer"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_PAYLOAD_DIR=$tmp/payload IRONFLOCKOS_DRY_RUN=1 run bash "$lib/installer"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"copying device.flock to the new FLOCKOS partition"* ]]
-  [[ "$output" == *"copying proxy.conf to the new FLOCKOS partition"* ]]
+  [[ "$output" == *"copying device.flock to the new IRONFLOCKOS partition"* ]]
+  [[ "$output" == *"copying proxy.conf to the new IRONFLOCKOS partition"* ]]
   # The stick keeps it, for the next device.
   [ -e "$tmp/esp/proxy.conf" ]
 }
 
 @test "dry run: with confirm=yes anything but 'yes' stops before writing" {
   fake_machine
-  PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_PAYLOAD_DIR=$tmp/payload FLOCKOS_DRY_RUN=1 run bash "$lib/installer" <<<"no"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_PAYLOAD_DIR=$tmp/payload IRONFLOCKOS_DRY_RUN=1 run bash "$lib/installer" <<<"no"
   [ "$status" -ne 0 ]
   [[ "$output" == *"stopped on the console"* ]]
-  [[ "$output" != *"writing flockos-"* ]]
+  [[ "$output" != *"writing ironflockos-"* ]]
   [[ "$output" != *"would write"* ]]
 }
 
 @test "dry run: an invalid installer.conf stops with the reason" {
   fake_machine
   printf 'disk=/tmp/evil\n' >"$tmp/esp/installer.conf"
-  PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_PAYLOAD_DIR=$tmp/payload FLOCKOS_DRY_RUN=1 run bash "$lib/installer"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_PAYLOAD_DIR=$tmp/payload IRONFLOCKOS_DRY_RUN=1 run bash "$lib/installer"
   [ "$status" -ne 0 ]
   [[ "$output" == *"installer.conf:1"* ]]
 }

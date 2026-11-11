@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 # Proxy (docs/build.md, "Proxy"): proxy.conf to the environment of the agent,
 # Docker and containerd, with the .flock's LAN hosts off the proxy; ntp= to
-# chrony; a proxy.conf on the FLOCKOS partition replaces the device's.
+# chrony; a proxy.conf on the IRONFLOCKOS partition replaces the device's.
 
 repo="$BATS_TEST_DIRNAME/../.."
-proxy="$repo/overlay/usr/lib/flockos/proxy"
+proxy="$repo/overlay/usr/lib/ironflockos/proxy"
 units="$repo/overlay/usr/lib/systemd/system"
 
 setup() {
@@ -13,8 +13,8 @@ setup() {
   printf '#!/bin/sh\necho "$*" >>"%s/systemctl.log"\n' "$tmp" >"$tmp/bin/systemctl"
   printf '#!/bin/sh\necho "$*" >>"%s/chronyc.log"\n' "$tmp" >"$tmp/bin/chronyc"
   chmod +x "$tmp/bin/"*
-  export PATH="$tmp/bin:$PATH" FLOCKOS_PROXY_CONF=$tmp/data/proxy.conf FLOCKOS_ESP=$tmp/esp \
-    FLOCKOS_RUN=$tmp/run FLOCKOS_AGENT_FLOCK=$tmp/agent/device-config.flock
+  export PATH="$tmp/bin:$PATH" IRONFLOCKOS_PROXY_CONF=$tmp/data/proxy.conf IRONFLOCKOS_ESP=$tmp/esp \
+    IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_AGENT_FLOCK=$tmp/agent/device-config.flock
   env=$tmp/run/proxy.env
 }
 
@@ -27,7 +27,7 @@ value() { sed -n "s/^$1=//p" "$env"; }
   run bash "$proxy"
   [ "$status" -eq 0 ]
   [[ "$output" == *"proxy: none"* ]]
-  [ ! -e "$env" ] && [ ! -e "$tmp/run/chrony-sources/flockos.sources" ]
+  [ ! -e "$env" ] && [ ! -e "$tmp/run/chrony-sources/ironflockos.sources" ]
   [ ! -e "$tmp/systemctl.log" ]
 }
 
@@ -66,7 +66,7 @@ JSON
   [ "$(value NO_PROXY)" = "localhost,127.0.0.1,::1,appliance.local,.appliance.local,192.168.1.10,reg.lan,fd00::5,fe80::1,10.0.0.0/8,.corp.example" ]
 }
 
-@test "on a first boot the .flock on the FLOCKOS partition decides, not an old copy" {
+@test "on a first boot the .flock on the IRONFLOCKOS partition decides, not an old copy" {
   printf 'http_proxy=http://proxy:3128\n' >"$tmp/data/proxy.conf"
   echo '{"appliance_domain": "old.example"}' >"$tmp/agent/device-config.flock"
   echo '{"appliance_domain": "new.example", "insecure-registries": "lan-registry:5000"}' >"$tmp/esp/device.flock"
@@ -74,19 +74,19 @@ JSON
   [ "$(value NO_PROXY)" = "localhost,127.0.0.1,::1,new.example,.new.example,lan-registry" ]
 }
 
-@test "a proxy.conf on the FLOCKOS partition replaces the device's and leaves the partition" {
+@test "a proxy.conf on the IRONFLOCKOS partition replaces the device's and leaves the partition" {
   printf 'http_proxy=http://old:3128\n' >"$tmp/data/proxy.conf"
   printf 'http_proxy=http://new:3128\nntp=10.1.1.1\n' >"$tmp/esp/proxy.conf"
   run bash "$proxy"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"took proxy.conf from the FLOCKOS partition"* ]]
+  [[ "$output" == *"took proxy.conf from the IRONFLOCKOS partition"* ]]
   [ ! -e "$tmp/esp/proxy.conf" ]
   grep -qx 'http_proxy=http://new:3128' "$tmp/data/proxy.conf"
   [ "$(mode "$tmp/data/proxy.conf")" = 600 ]
   [ "$(value HTTP_PROXY)" = http://new:3128 ]
 }
 
-@test "a FLOCKOS proxy.conf with the execute bits FAT shows becomes the device's with mode 600" {
+@test "a IRONFLOCKOS proxy.conf with the execute bits FAT shows becomes the device's with mode 600" {
   printf 'http_proxy=http://new:3128\n' >"$tmp/esp/proxy.conf"
   chmod 0755 "$tmp/esp/proxy.conf"
   run bash "$proxy"
@@ -104,12 +104,12 @@ JSON
   grep -qx 'http_proxy=http://newer:3128' "$tmp/data/proxy.conf"
 }
 
-@test "a FLOCKOS proxy.conf with an error stays there; the device keeps its own, and the unit fails" {
+@test "a IRONFLOCKOS proxy.conf with an error stays there; the device keeps its own, and the unit fails" {
   printf 'http_proxy=http://old:3128\n' >"$tmp/data/proxy.conf"
   printf 'http_proxy=proxy-without-scheme:3128\n' >"$tmp/esp/proxy.conf"
   run bash "$proxy"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"ignored the FLOCKOS partition's proxy.conf"* ]]
+  [[ "$output" == *"ignored the IRONFLOCKOS partition's proxy.conf"* ]]
   [ -e "$tmp/esp/proxy.conf" ]
   grep -qx 'http_proxy=http://old:3128' "$tmp/data/proxy.conf"
   [ "$(value HTTP_PROXY)" = http://old:3128 ]
@@ -133,7 +133,7 @@ JSON
   printf 'ntp=10.0.0.1,ntp.corp.example\n' >"$tmp/data/proxy.conf"
   run bash "$proxy" apply
   [ "$status" -eq 0 ]
-  s=$tmp/run/chrony-sources/flockos.sources
+  s=$tmp/run/chrony-sources/ironflockos.sources
   grep -qx 'server 10.0.0.1 iburst' "$s"
   grep -qx 'server ntp.corp.example iburst' "$s"
   [ "$(mode "$s")" = 644 ]
@@ -145,7 +145,7 @@ JSON
   [ ! -e "$s" ]
 }
 
-@test "apply restarts containerd, Docker and the agent on a change only, and never takes the FLOCKOS file" {
+@test "apply restarts containerd, Docker and the agent on a change only, and never takes the IRONFLOCKOS file" {
   printf 'http_proxy=http://proxy:3128\n' >"$tmp/data/proxy.conf"
   run bash "$proxy" apply
   [ "$status" -eq 0 ]
@@ -163,17 +163,17 @@ JSON
 
 @test "the units, the drop-ins, chrony, the build and the installer name the same files" {
   for u in docker containerd ironflock-device-agent; do
-    grep -qx 'EnvironmentFile=-/run/flockos/proxy.env' "$units/$u.service.d/20-flockos-proxy.conf"
+    grep -qx 'EnvironmentFile=-/run/ironflockos/proxy.env' "$units/$u.service.d/20-ironflockos-proxy.conf"
   done
-  grep -q '^Before=containerd.service docker.service ironflock-device-agent.service chrony.service$' "$units/flockos-proxy.service"
+  grep -q '^Before=containerd.service docker.service ironflock-device-agent.service chrony.service$' "$units/ironflockos-proxy.service"
   # Not after enroll, which runs after Docker: that would be a cycle.
-  [ -z "$(grep -E '^After=.*flockos-enroll' "$units/flockos-proxy.service")" ]
-  grep -q '^After=docker.service' "$units/flockos-enroll.service"
-  grep -qx 'PathChanged=/data/flockos/proxy.conf' "$units/flockos-proxy.path"
-  grep -qx 'ExecStart=/usr/lib/flockos/proxy apply' "$units/flockos-proxy-reload.service"
-  grep -qx 'sourcedir /run/flockos/chrony-sources' "$repo/overlay/etc/chrony/conf.d/10-flockos.conf"
-  grep -q 'ln -sfn /data/flockos/proxy.conf "$ROOT/etc/flockos/proxy.conf"' "$repo/build/customize.sh"
-  grep -q 'flockos-proxy.service$' "$repo/build/customize.sh"
-  grep -q 'systemd-repart.service flockos-proxy.service flockos-proxy.path flockos-proxy-reload.service$' "$repo/build/customize.sh"
-  grep -q 'carry+=("$esp/proxy.conf")' "$repo/profiles/installer/overlay/usr/lib/flockos/installer"
+  [ -z "$(grep -E '^After=.*ironflockos-enroll' "$units/ironflockos-proxy.service")" ]
+  grep -q '^After=docker.service' "$units/ironflockos-enroll.service"
+  grep -qx 'PathChanged=/data/ironflockos/proxy.conf' "$units/ironflockos-proxy.path"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/proxy apply' "$units/ironflockos-proxy-reload.service"
+  grep -qx 'sourcedir /run/ironflockos/chrony-sources' "$repo/overlay/etc/chrony/conf.d/10-ironflockos.conf"
+  grep -q 'ln -sfn /data/ironflockos/proxy.conf "$ROOT/etc/ironflockos/proxy.conf"' "$repo/build/customize.sh"
+  grep -q 'ironflockos-proxy.service$' "$repo/build/customize.sh"
+  grep -q 'systemd-repart.service ironflockos-proxy.service ironflockos-proxy.path ironflockos-proxy-reload.service$' "$repo/build/customize.sh"
+  grep -q 'carry+=("$esp/proxy.conf")' "$repo/profiles/installer/overlay/usr/lib/ironflockos/installer"
 }

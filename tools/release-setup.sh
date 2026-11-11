@@ -8,36 +8,36 @@
 #   tools/release-setup.sh --yes      do it
 #
 # Creates (idempotent: what exists is kept):
-#   key ironflock-release/flockos-catalog  EC_SIGN_ED25519, SOFTWARE (as the
-#     agent's agent-update key): signs dl/flockos/manifest.json (ADR-0009);
-#     flockos-release (the ceremony's release identity) may sign with it and
+#   key ironflock-release/ironflockos-catalog  EC_SIGN_ED25519, SOFTWARE (as the
+#     agent's agent-update key): signs dl/ironflockos/manifest.json (ADR-0009);
+#     ironflockos-release (the ceremony's release identity) may sign with it and
 #     with nothing else of that ring
-#   service account flockos-publisher, usable only by IronFlock/ironflockos
+#   service account ironflockos-publisher, usable only by IronFlock/ironflockos
 #     release runs (workload identity attribute release=<repo id>:release):
-#     object admin on gs://ironflock-downloads/staging/flockos/ and
-#     gs://ironflock-downloads/flockos/ only (an IAM condition), object
+#     object admin on gs://ironflock-downloads/staging/ironflockos/ and
+#     gs://ironflock-downloads/ironflockos/ only (an IAM condition), object
 #     viewer on the bucket for listing (its objects are public anyway), as
-#     device-init's publisher; and the custom role flockosVmImagePublisher on
-#     the project for images named flockos-* only (an IAM condition): it makes
+#     device-init's publisher; and the custom role ironflockosVmImagePublisher on
+#     the project for images named ironflockos-* only (an IAM condition): it makes
 #     the Compute Engine images of the releases (ADR-0010) and nothing else of
 #     Compute Engine
-# then writes pki/flockos-catalog.pub and prints the line for the agent's
-# FLOCKOS_CATALOG_PUBLIC_KEYS (device-agent src/osupdate/catalog.go).
+# then writes pki/ironflockos-catalog.pub and prints the line for the agent's
+# IRONFLOCKOS_CATALOG_PUBLIC_KEYS (device-agent src/osupdate/catalog.go).
 #
 # Needs gcloud (authenticated as a project owner), gh and openssl.
 set -euo pipefail
 PROJECT=${PROJECT:-record-1283}
 LOCATION=${LOCATION:-europe-west1}
 RING=ironflock-release
-KEY=flockos-catalog
-SIGNER=flockos-release
-PUBLISHER=flockos-publisher
-IMAGE_ROLE=flockosVmImagePublisher
+KEY=ironflockos-catalog
+SIGNER=ironflockos-release
+PUBLISHER=ironflockos-publisher
+IMAGE_ROLE=ironflockosVmImagePublisher
 BUCKET=ironflock-downloads
 REPO=IronFlock/ironflockos
 POOL_PROVIDER_PROJECT_NUMBER=${POOL_PROVIDER_PROJECT_NUMBER:-615643915869}
 POOL=github-pool
-PUB=pki/flockos-catalog.pub
+PUB=pki/ironflockos-catalog.pub
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
 cd "$repo"
@@ -80,7 +80,7 @@ echo "== the catalog key"
 exists kms keys describe "$KEY" --keyring "$RING" "${kms[@]}" ||
   do_ "$gcloud" kms keys create "$KEY" --keyring "$RING" "${kms[@]}" \
     --purpose asymmetric-signing --default-algorithm ec-sign-ed25519 --protection-level software \
-    --labels product=flockos,use=catalog-signing
+    --labels product=ironflockos,use=catalog-signing
 bind_ "$gcloud" kms keys add-iam-policy-binding "$KEY" --keyring "$RING" "${kms[@]}" \
   --member "serviceAccount:$signer_email" --role roles/cloudkms.signerVerifier --condition=None
 
@@ -92,11 +92,11 @@ condition=$(mktemp)
 images_condition=$(mktemp)
 trap 'rm -f "$condition" "$images_condition"' EXIT
 cat >"$condition" <<CONDITION
-title: flockos trees
+title: ironflockos trees
 description: the IronFlockOS staging and live trees only
 expression: >-
-  resource.name.startsWith("projects/_/buckets/$BUCKET/objects/staging/flockos/") ||
-  resource.name.startsWith("projects/_/buckets/$BUCKET/objects/flockos/")
+  resource.name.startsWith("projects/_/buckets/$BUCKET/objects/staging/ironflockos/") ||
+  resource.name.startsWith("projects/_/buckets/$BUCKET/objects/ironflockos/")
 CONDITION
 bind_ "$gcloud" storage buckets add-iam-policy-binding "gs://$BUCKET" \
   --member "serviceAccount:$publisher_email" --role roles/storage.objectAdmin --condition-from-file "$condition"
@@ -109,14 +109,14 @@ echo "== the Compute Engine images of the releases (ADR-0010)"
 exists iam roles describe "$IMAGE_ROLE" --project "$PROJECT" ||
   do_ "$gcloud" iam roles create "$IMAGE_ROLE" --project "$PROJECT" --stage GA \
     --title "IronFlockOS VM image publisher" \
-    --description "Makes the Compute Engine images of IronFlockOS releases; bound for flockos-* images only" \
+    --description "Makes the Compute Engine images of IronFlockOS releases; bound for ironflockos-* images only" \
     --permissions compute.images.create,compute.images.get,compute.images.setLabels,compute.globalOperations.get
 cat >"$images_condition" <<CONDITION
-title: flockos images
-description: Compute Engine images named flockos-* only
+title: ironflockos images
+description: Compute Engine images named ironflockos-* only
 expression: >-
   resource.type != "compute.googleapis.com/Image" ||
-  resource.name.startsWith("projects/$PROJECT/global/images/flockos-")
+  resource.name.startsWith("projects/$PROJECT/global/images/ironflockos-")
 CONDITION
 bind_ "$gcloud" projects add-iam-policy-binding "$PROJECT" --format none \
   --member "serviceAccount:$publisher_email" --role "projects/$PROJECT/roles/$IMAGE_ROLE" \
@@ -134,7 +134,7 @@ if [ "$yes" = 1 ]; then
   raw=$(openssl pkey -pubin -in "$PUB" -outform DER | tail -c 32 | base64)
   echo
   echo "Done. Commit $PUB on a branch and open a pull request."
-  echo "The device-agent trusts the catalog with this line in FLOCKOS_CATALOG_PUBLIC_KEYS"
+  echo "The device-agent trusts the catalog with this line in IRONFLOCKOS_CATALOG_PUBLIC_KEYS"
   echo "(src/osupdate/catalog.go):"
   echo
   echo "$raw # Cloud KMS $RING/$KEY version 1, IronFlockOS release catalog"

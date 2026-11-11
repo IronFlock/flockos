@@ -4,8 +4,8 @@ package main
 // file {"payload": "<base64>", "signature": "<base64 of the 64-byte Ed25519
 // signature>"}, the signature over
 //
-//	flockos-manifest:v1
-//	flockos/manifest.json
+//	ironflockos-manifest:v1
+//	ironflockos/manifest.json
 //	<sha256 hex of the payload>
 //
 // joined by "\n", no trailing newline (ADR-0009). The agent reads at most
@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	signContext = "flockos-manifest:v1"
-	signSubject = "flockos/manifest.json"
+	signContext = "ironflockos-manifest:v1"
+	signSubject = "ironflockos/manifest.json"
 	maxEnvelope = 64 << 10
 )
 
@@ -79,7 +79,7 @@ func open(data []byte, pub ed25519.PublicKey) ([]byte, error) {
 }
 
 // parsePublicKey reads a key as the agent lists it (standard base64 of the
-// raw 32 bytes) or as a PEM public key (Cloud KMS, pki/flockos-catalog.pub).
+// raw 32 bytes) or as a PEM public key (Cloud KMS, pki/ironflockos-catalog.pub).
 func parsePublicKey(text string) (ed25519.PublicKey, error) {
 	text = strings.TrimSpace(text)
 	if block, _ := pem.Decode([]byte(text)); block != nil {

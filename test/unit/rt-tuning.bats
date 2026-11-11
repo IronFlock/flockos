@@ -2,7 +2,7 @@
 # rt-tuning (WP-4b.1): rt.conf to kernel parameters in grubenv, applied at the
 # next boot; THP and the governor at once.
 
-tuning="$BATS_TEST_DIRNAME/../../profiles/kernel-rt/overlay/usr/lib/flockos/rt-tuning"
+tuning="$BATS_TEST_DIRNAME/../../profiles/kernel-rt/overlay/usr/lib/ironflockos/rt-tuning"
 
 setup() {
   tmp=$(mktemp -d)
@@ -19,8 +19,8 @@ case "$2" in
 esac
 SH
   chmod +x "$tmp/bin/grub-editenv"
-  export PATH="$tmp/bin:$PATH" FLOCKOS_RT_CONF=$tmp/rt.conf FLOCKOS_GRUBENV=$tmp/grubenv \
-    FLOCKOS_SYS=$tmp/sys FLOCKOS_RUN=$tmp/run FLOCKOS_ARCH=amd64
+  export PATH="$tmp/bin:$PATH" IRONFLOCKOS_RT_CONF=$tmp/rt.conf IRONFLOCKOS_GRUBENV=$tmp/grubenv \
+    IRONFLOCKOS_SYS=$tmp/sys IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_ARCH=amd64
 }
 
 teardown() { rm -rf "$tmp"; }
@@ -28,7 +28,7 @@ teardown() { rm -rf "$tmp"; }
 @test "without rt.conf: C-states limited, no isolation; THP never, governor performance" {
   run bash "$tuning"
   [ "$status" -eq 0 ]
-  grep -qx 'FLOCKOS_RT_CMDLINE=nosoftlockup processor.max_cstate=1 intel_idle.max_cstate=0' "$tmp/grubenv"
+  grep -qx 'IRONFLOCKOS_RT_CMDLINE=nosoftlockup processor.max_cstate=1 intel_idle.max_cstate=0' "$tmp/grubenv"
   [ "$(cat "$tmp/sys/kernel/mm/transparent_hugepage/enabled")" = never ]
   [ "$(cat "$tmp/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor")" = performance ]
   [ -e "$tmp/run/rt-reboot-required" ]
@@ -53,10 +53,10 @@ teardown() { rm -rf "$tmp"; }
 @test "cstates=on and arm64 leave the C-state parameters out" {
   printf 'cstates=on\n' >"$tmp/rt.conf"
   bash "$tuning"
-  grep -qx 'FLOCKOS_RT_CMDLINE=nosoftlockup' "$tmp/grubenv"
+  grep -qx 'IRONFLOCKOS_RT_CMDLINE=nosoftlockup' "$tmp/grubenv"
   printf 'cstates=limit\n' >"$tmp/rt.conf"
-  FLOCKOS_ARCH=arm64 bash "$tuning"
-  grep -qx 'FLOCKOS_RT_CMDLINE=nosoftlockup processor.max_cstate=1' "$tmp/grubenv"
+  IRONFLOCKOS_ARCH=arm64 bash "$tuning"
+  grep -qx 'IRONFLOCKOS_RT_CMDLINE=nosoftlockup processor.max_cstate=1' "$tmp/grubenv"
 }
 
 @test "refuses what is not a CPU list or a known key, and changes nothing" {

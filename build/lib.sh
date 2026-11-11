@@ -59,11 +59,11 @@ slot_fill() {
 # check_slot_fill EXT4_IMAGE NAME: a root slot's size is fixed for a
 # device's lifetime (rootfs-b and /data are made once, on the first boot), so
 # every later release has to fit the slots of the oldest device in the field.
-# This warns (and annotates the CI run) from FLOCKOS_SLOT_FILL_WARN percent
-# and fails the build from FLOCKOS_SLOT_FILL_MAX, releases before a tree
+# This warns (and annotates the CI run) from IRONFLOCKOS_SLOT_FILL_WARN percent
+# and fails the build from IRONFLOCKOS_SLOT_FILL_MAX, releases before a tree
 # outgrows its slot.
 check_slot_fill() {
-  local warn_at=${FLOCKOS_SLOT_FILL_WARN:-75} max=${FLOCKOS_SLOT_FILL_MAX:-90} pct used size msg
+  local warn_at=${IRONFLOCKOS_SLOT_FILL_WARN:-75} max=${IRONFLOCKOS_SLOT_FILL_MAX:-90} pct used size msg
   read -r pct used size <<<"$(slot_fill "$1")"
   msg="$2: the root slot is ${pct}% full ($((used >> 20)) MiB of $((size >> 20)) MiB)"
   if [ "$pct" -ge "$max" ]; then
@@ -199,10 +199,10 @@ valid_target() { case "$1" in amd64-efi | arm64-efi | rpi-arm64 | jetson-orin) r
 valid_variant() { case "$1" in base | nvidia | installer) return 0 ;; *) return 1 ;; esac }
 valid_kernel() { case "$1" in std | rt) return 0 ;; *) return 1 ;; esac }
 
-# image_id TARGET VARIANT KERNEL: flockos-<target>-<variant>[-rt], the RAUC
+# image_id TARGET VARIANT KERNEL: ironflockos-<target>-<variant>[-rt], the RAUC
 # compatible and IMAGE_ID of the image.
 image_id() {
-  local id="flockos-$1-$2"
+  local id="ironflockos-$1-$2"
   [ "$3" = rt ] && id="$id-rt"
   printf '%s' "$id"
 }
@@ -211,7 +211,7 @@ image_id() {
 # target has the same partition and filesystem ids.
 uuid_for() {
   local h
-  h=$(printf 'flockos:%s:%s' "${IMAGE_ID:?}" "$1" | sha256sum | cut -c1-32)
+  h=$(printf 'ironflockos:%s:%s' "${IMAGE_ID:?}" "$1" | sha256sum | cut -c1-32)
   printf '%s-%s-4%s-8%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}"
 }
 

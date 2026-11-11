@@ -8,7 +8,7 @@ publish="$repo/build/publish.sh"
 
 setup() {
   tmp=$(mktemp -d)
-  for id in flockos-amd64-efi-base flockos-amd64-efi-installer; do
+  for id in ironflockos-amd64-efi-base ironflockos-amd64-efi-installer; do
     mkdir -p "$tmp/out/$id"
     printf 'image' >"$tmp/out/$id/$id-1.0.0.img.gz"
     printf 'osr' >"$tmp/out/$id/$id-1.0.0.os-release"
@@ -18,7 +18,7 @@ setup() {
     printf 'not published' >"$tmp/out/$id/$id-1.0.0.ironflock.json"
     printf 'raw_size=1\nmin_disk_size=1\n' >"$tmp/out/$id/$id-1.0.0.sizes"
   done
-  printf 'bundle' >"$tmp/out/flockos-amd64-efi-base/flockos-amd64-efi-base-1.0.0.raucb"
+  printf 'bundle' >"$tmp/out/ironflockos-amd64-efi-base/ironflockos-amd64-efi-base-1.0.0.raucb"
 }
 
 teardown() { rm -rf "$tmp"; }
@@ -27,23 +27,23 @@ teardown() { rm -rf "$tmp"; }
   run bash "$publish" sums "$tmp/out"
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | wc -l | tr -d ' ')" = 11 ]
-  [[ "$output" == *"  flockos-amd64-efi-base-1.0.0.raucb"* ]]
-  [[ "$output" == *"  flockos-amd64-efi-installer-1.0.0.cdx.json"* ]]
+  [[ "$output" == *"  ironflockos-amd64-efi-base-1.0.0.raucb"* ]]
+  [[ "$output" == *"  ironflockos-amd64-efi-installer-1.0.0.cdx.json"* ]]
   # The hardware list, which the catalog names; the sizes are in the catalog.
-  [[ "$output" == *"  flockos-amd64-efi-base-1.0.0.modules.alias.gz"* ]]
+  [[ "$output" == *"  ironflockos-amd64-efi-base-1.0.0.modules.alias.gz"* ]]
   [[ "$output" != *"ironflock.json"* ]]
   [[ "$output" != *".sizes"* ]]
   [[ "$output" != *"/"* ]]
 }
 
-@test "stage uploads each file and SHA256SUMS to staging/flockos/<version>/, uncached" {
+@test "stage uploads each file and SHA256SUMS to staging/ironflockos/<version>/, uncached" {
   DRY_RUN=1 run bash "$publish" stage "$tmp/out" 1.0.0
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | grep -c '^+ gcloud storage cp')" = 12 ]
-  [[ "$output" == *"gs://ironflock-downloads/staging/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.raucb"* ]]
-  [[ "$output" == *"gs://ironflock-downloads/staging/flockos/1.0.0/SHA256SUMS"* ]]
+  [[ "$output" == *"gs://ironflock-downloads/staging/ironflockos/1.0.0/ironflockos-amd64-efi-base-1.0.0.raucb"* ]]
+  [[ "$output" == *"gs://ironflock-downloads/staging/ironflockos/1.0.0/SHA256SUMS"* ]]
   [[ "$output" == *"--cache-control=public, max-age=0"* ]]
-  [[ "$output" != *"gs://ironflock-downloads/flockos/"* ]]
+  [[ "$output" != *"gs://ironflock-downloads/ironflockos/"* ]]
   [[ "$output" == *"dry run, nothing changed: would have staged 11 files"* ]]
 }
 
@@ -53,30 +53,30 @@ teardown() { rm -rf "$tmp"; }
   [ "$status" -ne 0 ]
 }
 
-@test "promote copies staging to the live tree; the catalog goes to flockos/manifest.json" {
+@test "promote copies staging to the live tree; the catalog goes to ironflockos/manifest.json" {
   DRY_RUN=1 run bash "$publish" promote 1.0.0
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gs://ironflock-downloads/staging/flockos/1.0.0/* gs://ironflock-downloads/flockos/1.0.0/"* ]]
+  [[ "$output" == *"gs://ironflock-downloads/staging/ironflockos/1.0.0/* gs://ironflock-downloads/ironflockos/1.0.0/"* ]]
   printf '{}' >"$tmp/manifest.json"
   DRY_RUN=1 run bash "$publish" catalog "$tmp/manifest.json"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gs://ironflock-downloads/flockos/manifest.json"* ]]
+  [[ "$output" == *"gs://ironflock-downloads/ironflockos/manifest.json"* ]]
 }
 
-@test "notes publishes release-notes/<x.y.z>.md as flockos/release-notes.json, uncached" {
+@test "notes publishes release-notes/<x.y.z>.md as ironflockos/release-notes.json, uncached" {
   mkdir "$tmp/notes"
   printf '## New\n\n- A feature.\n' >"$tmp/notes/0.11.0.md"
   printf '## Fixed\n\n- A bug.\n' >"$tmp/notes/0.12.0.md"
   DRY_RUN=1 run bash "$publish" notes "$tmp/notes"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"+ gcloud storage cp --quiet --cache-control=public, max-age=0 "*" gs://ironflock-downloads/flockos/release-notes.json"* ]]
+  [[ "$output" == *"+ gcloud storage cp --quiet --cache-control=public, max-age=0 "*" gs://ironflock-downloads/ironflockos/release-notes.json"* ]]
   [[ "$output" == *"would have published the release notes of 2 version(s)"* ]]
 }
 
 @test "notes publishes {} without release notes, also when the directory is missing" {
   DRY_RUN=1 run bash "$publish" notes "$tmp/missing"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gs://ironflock-downloads/flockos/release-notes.json"* ]]
+  [[ "$output" == *"gs://ironflock-downloads/ironflockos/release-notes.json"* ]]
   [[ "$output" == *"the release notes of 0 version(s)"* ]]
 }
 
@@ -113,7 +113,7 @@ teardown() { rm -rf "$tmp"; }
   load_conf "$repo/build/release.conf"
   [ "$BUCKET" = gs://ironflock-downloads ]
   [[ "$DL_BASE" == https://* ]]
-  [[ "$CATALOG_KMS_KEY" =~ ^projects/[a-z0-9-]+/locations/[a-z0-9-]+/keyRings/ironflock-release/cryptoKeys/flockos-catalog/cryptoKeyVersions/[0-9]+$ ]]
+  [[ "$CATALOG_KMS_KEY" =~ ^projects/[a-z0-9-]+/locations/[a-z0-9-]+/keyRings/ironflock-release/cryptoKeys/ironflockos-catalog/cryptoKeyVersions/[0-9]+$ ]]
   [[ "$CATALOG_MIN_AGENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
@@ -140,7 +140,7 @@ needs() {
 @test "release.yml: only release runs authenticate, and only as the two IronFlockOS identities" {
   run grep -E 'service_account:' "$repo/.github/workflows/release.yml"
   [ "$status" -eq 0 ]
-  ! echo "$output" | grep -v -E 'flockos-(release|publisher)@record-1283\.iam\.gserviceaccount\.com'
+  ! echo "$output" | grep -v -E 'ironflockos-(release|publisher)@record-1283\.iam\.gserviceaccount\.com'
   # Every authentication step is guarded by the release mode, but in the
   # production job, which runs on a release tag only.
   run awk '/^  [a-z][a-z-]*:$/ { job = $1 } /uses: google-github-actions\/auth@/ && job != "production:" { print prev } { prev = $0 }' \

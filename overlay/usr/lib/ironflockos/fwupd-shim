@@ -1,0 +1,24 @@
+#!/bin/sh
+# With Secure Boot on, fwupd starts its UEFI capsule helper through shim, and
+# looks for shim next to the helper: in the OS's folder of the IRONFLOCKOS
+# partition, EFI/debian (ADR-0011). Without it a capsule update fails with
+# "shim isn't installed". The firmware boots shim from the removable-media
+# path instead, so this copies that same file: the device boots the shim it
+# already runs, and a newer one cannot revoke the GRUB next to it (SBAT).
+# RAUC does not write this partition, so it runs on every boot, which also
+# covers the devices flashed before it existed. Idempotent.
+set -eu
+# IRONFLOCKOS_ESP: for the unit tests only.
+esp=${IRONFLOCKOS_ESP:-/boot/efi}
+dir=$esp/EFI/debian
+# Only the EFI targets of build/mkimage.sh: Jetson's ESP boots NVIDIA's loader.
+[ -d "$dir" ] || exit 0
+for pair in BOOTX64.EFI:shimx64.efi BOOTAA64.EFI:shimaa64.efi; do
+  from=$esp/EFI/BOOT/${pair%:*}
+  to=$dir/${pair#*:}
+  [ -f "$from" ] || continue
+  cmp -s "$from" "$to" && continue
+  cp "$from" "$to.new"
+  sync "$to.new" 2>/dev/null || sync
+  mv "$to.new" "$to"
+done

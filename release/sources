@@ -25,4 +25,4 @@ nvidia-container-toolkit  none Apache-2.0 (https://github.com/NVIDIA/nvidia-cont
 nvidia-modprobe           upstream https://github.com/NVIDIA/nvidia-modprobe/archive/refs/tags/{upstream}.tar.gz
 # The open kernel modules the build makes from nvidia-kernel-open-dkms
 # (build/nvidia-modules.sh): MIT, the linked modules MIT/GPL-2.0.
-flockos-nvidia-modules    upstream https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/{upstream}.tar.gz
+ironflockos-nvidia-modules    upstream https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/{upstream}.tar.gz

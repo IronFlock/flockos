@@ -29,7 +29,7 @@ with a reason and an expiry date.
 parsing that never runs code, templates without holes, sizes, the matrix axes),
 the os-release contract, the target templates (GRUB A/B contract, RAUC
 `system.conf`, slot sizes) and the image's own scripts in
-`overlay/usr/lib/flockos` run against a temporary directory. The factory reset
+`overlay/usr/lib/ironflockos` run against a temporary directory. The factory reset
 (`factory-reset.bats`) runs against folders that stand for the data partition
 and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk`, `blkid`,
 `findmnt`, `grub-editenv`, `sync` and `timeout`: a power loss at each call of
@@ -38,7 +38,7 @@ new files, and, where `mawk` is installed, Debian's awk. Each failure path
 shows that the boot goes on, that the attempt is counted (three, then the
 reset gives up), and what the record says.
 The network profiles (`network-profiles.bats`) run against folders that stand
-for the FLOCKOS partition and `/data/network/connections`, with every rule a
+for the IRONFLOCKOS partition and `/data/network/connections`, with every rule a
 profile has to meet. They need bash and bats only:
 
 ```sh
@@ -50,11 +50,11 @@ just test
 `test/qemu/run.py` takes the artefacts of `just build` from `out/`, copies the
 disk image, grows the copy to 20 GiB (32 GiB for `nvidia`) and boots it with UEFI firmware (OVMF). The
 image is the shipped one; the only change to the copy is one value in its
-`grubenv`, `FLOCKOS_CMDLINE=systemd.debug_shell=ttyS1`, which gives a root shell
+`grubenv`, `IRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1`, which gives a root shell
 on the second serial port (on arm64 `hvc0`, a virtio console: QEMU's `virt`
 machine has one UART). The script drives that shell; the first serial port
 (kernel and systemd console) is written to `console.log`. Because `grubenv` is on
-the FLOCKOS partition, the shell is there on both slots, also after an update.
+the IRONFLOCKOS partition, the shell is there on both slots, also after an update.
 
 With `--secure-boot` the firmware is the build with Microsoft's keys enrolled
 and Secure Boot on (`OVMF_CODE_4M.secboot.fd` with `OVMF_VARS_4M.ms.fd` on q35
@@ -66,7 +66,7 @@ end-to-end test.
 Sequence:
 
 1. **First boot.** System state `running`; os-release carries the image id; the
-   FLOCKOS partition boots the image's own shim, MokManager and Debian's signed
+   IRONFLOCKOS partition boots the image's own shim, MokManager and Debian's signed
    GRUB (byte for byte the packaged files), without shim's fallback; shim's MOK
    table reached the kernel (`MOKvar=` in its EFI boot line), and Secure Boot
    is what the test asked for, by the kernel's boot log and `mokutil --sb-state`
@@ -75,17 +75,17 @@ Sequence:
    `systemd-repart` created `rootfs-b` (same size as `rootfs-a`) and `data` (grown
    to the disk); `/data` and its bind mounts are in place, `/apps` the bind mount
    of `/data/apps` with Docker and the agent ordered after it and
-   `flockos-apps-check` content, and an app's file is written there; machine-id
+   `ironflockos-apps-check` content, and an app's file is written there; machine-id
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses
    root and passwords; no account has a password; RAUC reports slot A booted with
    the right compatible, tried and not marked good by anything at boot (the
    test then marks it, as the device-agent does once it reaches the platform;
    the test `.flock`'s agent never does); Docker's data-root is on `/data` and, with
    `--docker-image-tar`, `hello-world` runs; `fwupdmgr` answers. With the test
-   `.flock` the harness puts on the FLOCKOS partition (a throwaway key, useless to
+   `.flock` the harness puts on the IRONFLOCKOS partition (a throwaway key, useless to
    the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
    rule and agent unit exist, the hostname is the `.flock`'s name, the `.flock` has
-   left the FLOCKOS partition and the agent's copy is 0600.
+   left the IRONFLOCKOS partition and the agent's copy is 0600.
    For `nvidia`, on a VM without a GPU: the `nvidia` module and the driver
    packages are at the pinned versions and the module is built for the running
    kernel; no compiler, DKMS or kernel headers are left; nouveau is blacklisted
@@ -103,23 +103,23 @@ Sequence:
    environment while it runs, and chrony (`ntp=`); `proxy.env` is readable by
    root only. Nothing listens on the proxy address: a real proxy is on the
    hardware checklist.
-   Then a network profile ([ADR-0016](adr/0016-network-profiles-from-the-flockos-partition.md)):
+   Then a network profile ([ADR-0016](adr/0016-network-profiles-from-the-ironflockos-partition.md)):
    a profile for a static address, the address, gateway and DNS server the VM
    has from DHCP on its card matched by MAC address, as `ironflock os install`
-   writes one, goes to the FLOCKOS partition's `network/` folder, and
+   writes one, goes to the IRONFLOCKOS partition's `network/` folder, and
    `network-profiles check` accepts it.
 2. **Reboot.** machine-id, SSH host key, the persistent journal and the app's
    file in `/apps` survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
-   `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
+   `rt.conf` reaches grubenv through `ironflockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
-   The `proxy.conf` put on the FLOCKOS partition before the reboot has replaced
+   The `proxy.conf` put on the IRONFLOCKOS partition before the reboot has replaced
    the device's (mode 0600) and left the partition, and Docker uses it; the test
    then removes the proxy. The network profile has left the partition for
    `/data/network/connections` (mode 0600, root's), and NetworkManager runs the
    card on it: the address without DHCP's `dynamic` flag, the default route
    through the gateway, and the host still answers. The profile is on trial
-   (`flockos-network-profiles-trial` runs); the test writes the agent's mark of
+   (`ironflockos-network-profiles-trial` runs); the test writes the agent's mark of
    a connection, which its own agent never earns, and the trial ends with the
    profile kept. It stays for the rest of the test (QEMU's DHCP would hand out
    the same address).
@@ -129,13 +129,13 @@ Sequence:
    enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
    the agent's place.
-4. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md)).
+4. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-ironflockos-partition.md)).
    On slot B, with slot A holding the system it was updated from: a container
    runs with a restart policy (its image is made in the VM from `sleep` and the
    libraries it links, as the harness has no registry), an app's file is in
    `/apps`, and the site has a network profile and a `proxy.conf`. The test
    writes `factory-reset.conf` with `keep-network=yes` and a new `.flock` (another
-   owner and name) to the FLOCKOS partition, each under a temporary name and
+   owner and name) to the IRONFLOCKOS partition, each under a temporary name and
    renamed, as `ironflock os reset -c` does, and `factory-reset check` accepts
    the request. The boot after the restart resets the device and restarts it by
    itself. It comes up on slot B (the reset's restart counted as no failed try),
@@ -146,14 +146,14 @@ Sequence:
    new one; the network profile, `proxy.conf` and RAUC's
    record of slot B are kept; slot A, read with `debugfs`, has the image's
    hostname, `uninitialized` as machine-id and no `enrolled` mark; slot B,
-   proven before, is marked good again by `flockos-slot-keep`. Then the same
-   request is put back as it was (content and time, as when the FLOCKOS
+   proven before, is marked good again by `ironflockos-slot-keep`. Then the same
+   request is put back as it was (content and time, as when the IRONFLOCKOS
    partition could not remove it) and the device restarts once: the reset is
    not done again, the journal says so, and the device keeps its machine-id
    and new identity. With `--no-flock` the device stays unenrolled, with the
-   hostname `flockos`. A failure of the step prints the units the reset touches
+   hostname `ironflockos`. A failure of the step prints the units the reset touches
    (`systemctl status`, their journal), the reset's record and state, the
-   FLOCKOS partition and the reset's lines from the serial console.
+   IRONFLOCKOS partition and the reset's lines from the serial console.
 5. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
    and nobody marks it good (as when the agent cannot reach the platform after
    an update); the next boot falls back to B.
@@ -167,7 +167,7 @@ Sequence:
 
 **Install test** (`--variant installer`, the `install-test` job, for amd64-efi
 under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to
-`payload=flockos-<target>-base` (the stick carries every image of its target)
+`payload=ironflockos-<target>-base` (the stick carries every image of its target)
 and `confirm=no`, and the test `.flock`, next to a blank 20 GiB NVMe. The stick
 must install that image to `/dev/nvme0n1` on its own, copy the `.flock` to the
 new disk and power off; its log must say all three. The NVMe then boots alone, with the UEFI variables the
@@ -227,7 +227,7 @@ WP-4b.2, WP-5.4, WP-6.6):
 1. Flash the CI-built image (or the release image) with FlockFlasher onto the
    boot medium, with a `.flock` file once Phase 2 enrollment is in.
 2. First boot reaches a login prompt on the screen and on the serial console
-   where the board has one; `lsblk` shows `FLOCKOS`, `rootfs-a`, `rootfs-b`,
+   where the board has one; `lsblk` shows `IRONFLOCKOS`, `rootfs-a`, `rootfs-b`,
    `data`, the last grown to the medium.
 3. Wired network comes up with DHCP; WiFi with a NetworkManager profile where
    the board has WiFi.
@@ -253,14 +253,14 @@ WP-4b.2, WP-5.4, WP-6.6):
    the `ntp=` servers.
 10. Factory reset (`docs/build.md`, "Factory reset"), on a device on WiFi
     with apps running: `factory-reset.conf` with `keep-network=yes` and a new
-    `.flock` on the FLOCKOS partition, restart. The screen shows the reset's
+    `.flock` on the IRONFLOCKOS partition, restart. The screen shows the reset's
     steps, the device restarts by itself, comes back on the same slot and WiFi,
     enrolls as the new device and runs no app of the old one;
     `factory-reset.log` says `result=done`. Then with an empty
     `factory-reset.conf` and no `.flock`: the device comes up unenrolled.
 11. Network profiles (`docs/build.md`, "Network profiles"), where the board has
     WiFi: flash with a `.flock` without WiFi and a WPA-PSK profile in `network/`
-    on the FLOCKOS partition, with the wired network unplugged. The device
+    on the IRONFLOCKOS partition, with the wired network unplugged. The device
     joins that WiFi on its first boot and enrolls; the profile has left the
     partition.
 12. Target-specific items in `docs/targets/<target>.md`.

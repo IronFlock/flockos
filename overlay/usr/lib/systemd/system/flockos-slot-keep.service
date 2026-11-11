@@ -1,9 +1,0 @@
-[Unit]
-Description=IronFlockOS: keep a proven slot once it has stayed up
-ConditionPathExists=/var/lib/flockos/slot-proven
-
-[Service]
-Type=oneshot
-# Not a failed unit when RAUC is busy with an update: the next boot is the
-# updated slot's anyway.
-ExecStart=-/usr/bin/rauc status mark-good

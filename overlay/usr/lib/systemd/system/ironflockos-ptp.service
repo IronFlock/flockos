@@ -1,0 +1,15 @@
+[Unit]
+Description=IronFlockOS: PTP settings from /etc/ironflockos/ptp.conf
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+After=local-fs.target ironflockos-data-layout.service
+# chrony reads the PTP source at its start.
+Before=chrony.service ironflockos-ptp4l.service ironflockos-phc2sys.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ironflockos/ptp
+
+[Install]
+WantedBy=multi-user.target
+Also=ironflockos-ptp.path

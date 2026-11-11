@@ -1,6 +1,6 @@
 package main
 
-// The payload of dl/flockos/manifest.json, schema 1 (docs/manifest.schema.json,
+// The payload of dl/ironflockos/manifest.json, schema 1 (docs/manifest.schema.json,
 // ADR-0009), built from a release's artifacts and the previous catalog.
 
 import (
@@ -122,7 +122,7 @@ type BoardDef struct {
 var (
 	versionRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$`)
 	buildIDRe = regexp.MustCompile(`^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-g[0-9a-f]{7,40}$`)
-	imageIDRe = regexp.MustCompile(`^flockos-([a-z0-9]+(?:-[a-z0-9]+)*)-(base|nvidia|installer)(-rt)?$`)
+	imageIDRe = regexp.MustCompile(`^ironflockos-([a-z0-9]+(?:-[a-z0-9]+)*)-(base|nvidia|installer)(-rt)?$`)
 	sha256Re  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
@@ -180,7 +180,7 @@ func targetArch(repo, target string) (string, error) {
 }
 
 // buildRelease reads one release from dir: one directory per image as the
-// release pipeline leaves them (flockos-<id>/ with <id>-<version>.img.gz, its
+// release pipeline leaves them (<id>/ with <id>-<version>.img.gz, its
 // raw size and minimum disk size in <id>-<version>.sizes, its hardware list
 // <id>-<version>.modules.alias.gz, the .raucb but for the installer,
 // <id>-<version>.os-release, and for the installer <id>-<version>.payloads,
@@ -194,12 +194,12 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 	rel := Release{MinAgent: minAgent, Images: map[string]Image{}}
 	for _, e := range entries {
 		id := e.Name()
-		if !e.IsDir() || !strings.HasPrefix(id, "flockos-") {
+		if !e.IsDir() || !strings.HasPrefix(id, "ironflockos-") {
 			continue
 		}
 		m := imageIDRe.FindStringSubmatch(id)
 		if m == nil {
-			return Release{}, fmt.Errorf("%s is not an image directory (flockos-<target>-<variant>[-rt])", id)
+			return Release{}, fmt.Errorf("%s is not an image directory (ironflockos-<target>-<variant>[-rt])", id)
 		}
 		target, variant, kernel := m[1], m[2], "std"
 		if m[3] != "" {

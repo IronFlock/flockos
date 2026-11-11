@@ -95,8 +95,8 @@ Updates come from IronFlock. The device-agent downloads the update bundle of its
 RAUC writes it into the inactive slot, and the device boots it. A release goes to the
 `test` channel first, and production moves to it after it has run on test devices.
 
-Every file of a release is at `https://instance-registry.ironflock.com/dl/flockos/<version>/`,
-for example `.../dl/flockos/0.11.0/flockos-amd64-efi-base-0.11.0.img.gz`. For each image there is the disk image (`.img.gz`), the update bundle (`.raucb`, none for
+Every file of a release is at `https://instance-registry.ironflock.com/dl/ironflockos/<version>/`,
+for example `.../dl/ironflockos/0.16.0/ironflockos-amd64-efi-base-0.16.0.img.gz`. For each image there is the disk image (`.img.gz`), the update bundle (`.raucb`, none for
 the installer), the package list (`.packages.tsv`) and `.os-release`. `SHA256SUMS`,
 the SBOMs and the signed catalog are attached to each
 [GitHub Release](https://github.com/IronFlock/ironflockos/releases).
@@ -108,12 +108,12 @@ the SBOMs and the signed catalog are attached to each
   refuse any other bundle. Pull-request and local builds sign with throwaway keys
   that no release image accepts ([docs/signing.md](docs/signing.md)).
 - **Signed catalog.** The device-agent and FlockFlasher read image and bundle URLs,
-  sizes and SHA-256 sums from the catalog `dl/flockos/manifest.json`, which is signed
+  sizes and SHA-256 sums from the catalog `dl/ironflockos/manifest.json`, which is signed
   with an Ed25519 key in Cloud KMS. To check it, run this in a checkout with Go:
 
   ```sh
-  curl -fsSO https://instance-registry.ironflock.com/dl/flockos/manifest.json
-  go -C tools/catalog run . verify -pubkey "$PWD/pki/flockos-catalog.pub" "$PWD/manifest.json"
+  curl -fsSO https://instance-registry.ironflock.com/dl/ironflockos/manifest.json
+  go -C tools/catalog run . verify -pubkey "$PWD/pki/ironflockos-catalog.pub" "$PWD/manifest.json"
   ```
 
 - **SLSA Build Level 3.** Every disk image and update bundle of a release after 0.11.0
@@ -127,15 +127,15 @@ the SBOMs and the signed catalog are attached to each
   signs the provenance. To check a file with the GitHub CLI:
 
   ```sh
-  gh attestation verify flockos-amd64-efi-base-<version>.img.gz --repo IronFlock/ironflockos \
+  gh attestation verify ironflockos-amd64-efi-base-<version>.img.gz --repo IronFlock/ironflockos \
     --signer-workflow IronFlock/workflows/.github/workflows/attest-provenance.yml --source-ref refs/heads/main
   ```
 
-  Releases up to 0.12.0 were built when this repository was named `IronFlock/flockos`,
-  and their provenance records that name. Check them with `--repo IronFlock/flockos`.
+  Releases up to 0.12.0 were built when this repository was named `IronFlock/ironflockos`,
+  and their provenance records that name. Check them with `--repo IronFlock/ironflockos`.
   Releases up to 0.11.0 meet Build Level 2: the job that attested them also ran this
   repository's bundle-signing script. Check them with
-  `--signer-workflow IronFlock/flockos/.github/workflows/release.yml`.
+  `--signer-workflow IronFlock/ironflockos/.github/workflows/release.yml`.
 - **SBOMs and vulnerability scans.** Each release attaches a CycloneDX SBOM for each
   image except the installers. A Trivy scan of the images' root filesystems is part of
   the required `security / report` check, which fails on critical and high
@@ -175,7 +175,7 @@ bundles from the same build. CI is the build of record
 Pull requests into `main` are squash-merged and need the checks `ci-ok` and
 `security / report`. CI builds every image and tests the EFI images and installers in
 QEMU. A release is a version bump: `just release-patch` (or `release-minor`,
-`release-major`) opens the pull request `release flockos v<version>`. Its merge runs
+`release-major`) opens the pull request `release ironflockos v<version>`. Its merge runs
 `release.yml`, which builds every image, signs the bundles in Cloud KMS, tests the
 release image in QEMU with Secure Boot on, publishes the images and the signed catalog,
 and sets the tag last ([docs/release.md](docs/release.md)).
@@ -199,5 +199,5 @@ see [license.md](license.md).
 An image is a collection of separate programs, each under its own licence, which
 `/usr/share/doc/<package>/copyright` in the image names. The source code of every package
 in a release's images is on the download server: `SOURCES` next to the images,
-`https://instance-registry.ironflock.com/dl/flockos/<version>/SOURCES`, lists it
+`https://instance-registry.ironflock.com/dl/ironflockos/<version>/SOURCES`, lists it
 ([docs/release.md](docs/release.md#source-code)). Releases up to 0.11.0 have no `SOURCES`.

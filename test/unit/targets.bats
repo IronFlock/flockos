@@ -17,7 +17,7 @@ setup() {
       out=$(render "$repo/targets/$t/grub/grub.cfg")
       [[ "$out" != *"@"*"@"* ]]
       [[ "$out" == *"$CONSOLE_CMDLINE"* ]]
-      COMPATIBLE=flockos-$t-base render "$repo/targets/$t/system.conf" | grep -qx "compatible=flockos-$t-base"
+      COMPATIBLE=ironflockos-$t-base render "$repo/targets/$t/system.conf" | grep -qx "compatible=ironflockos-$t-base"
       for f in "$repo/targets/$t"/repart.d/*.conf; do
         SLOT_SIZE=$(size_bytes "$SLOT_SIZE_BASE") ESP_SIZE=$(size_bytes "$ESP_SIZE") render "$f" >/dev/null
       done
@@ -95,7 +95,7 @@ setup() {
 }
 
 @test "the rt kernel is offered for base on the EFI targets only" {
-  export FLOCKOS_VERSION=0.0.0 FLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
+  export IRONFLOCKOS_VERSION=0.0.0 IRONFLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
   run bash "$repo/build/build.sh" rpi-arm64 base rt
   [ "$status" -ne 0 ] && [[ "$output" == *"the rt kernel is built for the EFI targets only; rpi-arm64 boots with rpi"* ]]
   run bash "$repo/build/build.sh" amd64-efi nvidia rt

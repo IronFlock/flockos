@@ -13,36 +13,36 @@ teardown() { rm -rf "$tmp"; }
 env_of() { sed -n "s/^$1=//p" "$tmp/pki/signing.env"; }
 
 @test "a dev build trusts and signs with one throwaway CA of its own" {
-  FLOCKOS_SIGNING=dev run bash "$repo/build/signing.sh" "$tmp/pki"
+  IRONFLOCKOS_SIGNING=dev run bash "$repo/build/signing.sh" "$tmp/pki"
   [ "$status" -eq 0 ]
   [ "$(env_of KEYRING)" = "$(env_of BUNDLE_KEYRING)" ]
   [ "$(env_of SEALED)" = 0 ]
   openssl verify -purpose any -CAfile "$(env_of KEYRING)" "$(env_of CERT)"
   openssl x509 -in "$(env_of CERT)" -noout -ext extendedKeyUsage | grep -q 'Code Signing'
-  ! cmp -s "$(env_of KEYRING)" "$repo/pki/flockos-root-ca.pem"
+  ! cmp -s "$(env_of KEYRING)" "$repo/pki/ironflockos-root-ca.pem"
 }
 
 @test "a release build trusts the IronFlockOS root CA and seals with a throwaway key" {
-  FLOCKOS_SIGNING=release run bash "$repo/build/signing.sh" "$tmp/pki"
+  IRONFLOCKOS_SIGNING=release run bash "$repo/build/signing.sh" "$tmp/pki"
   [ "$status" -eq 0 ]
-  cmp "$(env_of KEYRING)" "$repo/pki/flockos-root-ca.pem"
+  cmp "$(env_of KEYRING)" "$repo/pki/ironflockos-root-ca.pem"
   [ "$(env_of SEALED)" = 1 ]
   [ "$(env_of BUNDLE_KEYRING)" != "$(env_of KEYRING)" ]
   openssl verify -purpose any -CAfile "$(env_of BUNDLE_KEYRING)" "$(env_of CERT)"
   # The sealing key is no release key: nothing it signs chains to the root CA.
-  ! openssl verify -purpose any -CAfile "$repo/pki/flockos-root-ca.pem" "$(env_of CERT)" 2>/dev/null
+  ! openssl verify -purpose any -CAfile "$repo/pki/ironflockos-root-ca.pem" "$(env_of CERT)" 2>/dev/null
   # The build gets no KMS key: KEY is a file, not a pkcs11: URI.
   [ -f "$(env_of KEY)" ]
 }
 
 @test "two release builds seal with different keys" {
-  FLOCKOS_SIGNING=release bash "$repo/build/signing.sh" "$tmp/a"
-  FLOCKOS_SIGNING=release bash "$repo/build/signing.sh" "$tmp/b"
+  IRONFLOCKOS_SIGNING=release bash "$repo/build/signing.sh" "$tmp/a"
+  IRONFLOCKOS_SIGNING=release bash "$repo/build/signing.sh" "$tmp/b"
   ! cmp -s "$tmp/a/seal/keyring.pem" "$tmp/b/seal/keyring.pem"
 }
 
 @test "signing.sh refuses an unknown mode" {
-  FLOCKOS_SIGNING=kms run bash "$repo/build/signing.sh" "$tmp/pki"
+  IRONFLOCKOS_SIGNING=kms run bash "$repo/build/signing.sh" "$tmp/pki"
   [ "$status" -ne 0 ]
   [[ "$output" == *"dev or release"* ]]
 }
@@ -70,9 +70,9 @@ env_of() { sed -n "s/^$1=//p" "$tmp/pki/signing.env"; }
 }
 
 @test "the newest bundle signer certificate chains to the root CA" {
-  cert=$(printf '%s\n' "$repo"/pki/flockos-bundle-signer-*.pem | sort -V | tail -n 1)
+  cert=$(printf '%s\n' "$repo"/pki/ironflockos-bundle-signer-*.pem | sort -V | tail -n 1)
   [ -f "$cert" ]
-  openssl verify -purpose any -CAfile "$repo/pki/flockos-root-ca.pem" "$cert"
+  openssl verify -purpose any -CAfile "$repo/pki/ironflockos-root-ca.pem" "$cert"
   openssl x509 -in "$cert" -noout -ext extendedKeyUsage | grep -q 'Code Signing'
 }
 
@@ -107,7 +107,7 @@ images() {
 }
 
 @test "each rootfs-matrix entry names the tree just rootfs leaves" {
-  # path is flockos-<name>/rootfs (build.sh: ROOTFS_WORK/<image-id>/rootfs).
+  # path is ironflockos-<name>/rootfs (build.sh: ROOTFS_WORK/<image-id>/rootfs).
   run python3 -I -c '
 import json, re, sys
 text = open(sys.argv[1]).read()
@@ -117,7 +117,7 @@ for e in entries:
     t, v, k = e["args"].split()
     image = t + "-" + v + ("-rt" if k == "rt" else "")
     assert e["name"] == image, e
-    assert e["path"] == "flockos-" + image + "/rootfs", e
+    assert e["path"] == "ironflockos-" + image + "/rootfs", e
     assert e.get("runner", "ubuntu-latest") == ("ubuntu-latest" if t == "amd64-efi" else "ubuntu-24.04-arm"), e
 print(len(entries))
 ' "$repo/.github/workflows/security.yml"

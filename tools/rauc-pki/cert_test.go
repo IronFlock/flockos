@@ -31,7 +31,7 @@ func newKey(t *testing.T, bits int) *rsa.PrivateKey {
 }
 
 func TestCAProfile(t *testing.T) {
-	der, err := selfSign("FlockOS root CA", 20, newKey(t, 2048), now)
+	der, err := selfSign("IronFlockOS root CA", 20, newKey(t, 2048), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,18 +48,18 @@ func TestCAProfile(t *testing.T) {
 	if got := c.NotAfter.Year(); got != 2046 {
 		t.Errorf("CA expires %d, want 2046", got)
 	}
-	if c.Subject.CommonName != "FlockOS root CA" || c.Subject.Organization[0] != "IronFlock" {
+	if c.Subject.CommonName != "IronFlockOS root CA" || c.Subject.Organization[0] != "IronFlock" {
 		t.Errorf("subject %v", c.Subject)
 	}
 }
 
 func TestSignerChainsToTheCAForCodeSigningOnly(t *testing.T) {
 	caKey, signerKey := newKey(t, 2048), newKey(t, 2048)
-	caDER, err := selfSign("FlockOS root CA", 20, caKey, now)
+	caDER, err := selfSign("IronFlockOS root CA", 20, caKey, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	der, err := issue("FlockOS bundle signer 2026", 3, &signerKey.PublicKey, caDER, caKey, now)
+	der, err := issue("IronFlockOS bundle signer 2026", 3, &signerKey.PublicKey, caDER, caKey, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSignerNeverOutlivesTheCA(t *testing.T) {
 
 func TestIssueRefusesAMismatchedCAKeyAndTheCAKeyAsSigner(t *testing.T) {
 	caKey, other := newKey(t, 2048), newKey(t, 2048)
-	caDER, _ := selfSign("FlockOS root CA", 20, caKey, now)
+	caDER, _ := selfSign("IronFlockOS root CA", 20, caKey, now)
 	if _, err := issue("x", 3, &other.PublicKey, caDER, other, now); err == nil || !strings.Contains(err.Error(), "not the key of the CA") {
 		t.Errorf("mismatched CA key: %v", err)
 	}
@@ -147,7 +147,7 @@ func fakeKMS(t *testing.T, key *rsa.PrivateKey, name string, damage bool) *httpt
 
 func TestCAThroughTheKMSRESTClient(t *testing.T) {
 	key := newKey(t, 4096)
-	name := "projects/p/locations/l/keyRings/flockos-rauc-ca/cryptoKeys/root/cryptoKeyVersions/1"
+	name := "projects/p/locations/l/keyRings/ironflockos-rauc-ca/cryptoKeys/root/cryptoKeyVersions/1"
 	srv := fakeKMS(t, key, name, false)
 	defer srv.Close()
 	api := &kmsREST{client: srv.Client(), endpoint: srv.URL + "/v1/"}
@@ -155,7 +155,7 @@ func TestCAThroughTheKMSRESTClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	der, err := selfSign("FlockOS root CA", 20, signer, now)
+	der, err := selfSign("IronFlockOS root CA", 20, signer, now)
 	if err != nil {
 		t.Fatal(err)
 	}

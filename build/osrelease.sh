@@ -32,7 +32,7 @@ detail="$target, $variant"
 
 cat <<OSR
 NAME="IronFlockOS"
-ID=flockos
+ID=ironflockos
 ID_LIKE=$id_like
 PRETTY_NAME="IronFlockOS $version ($detail)"
 VERSION_ID="$version"

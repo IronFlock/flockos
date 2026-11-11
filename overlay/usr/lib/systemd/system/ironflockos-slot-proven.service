@@ -1,0 +1,6 @@
+[Unit]
+Description=IronFlockOS: remember that the booted slot has proven itself
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/slot-proven

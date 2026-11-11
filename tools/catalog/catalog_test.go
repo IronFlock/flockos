@@ -36,7 +36,7 @@ func release(t *testing.T, version, buildID string, ids ...string) string {
 			base := strings.TrimSuffix(id, "-installer") + "-base"
 			must(t, os.WriteFile(filepath.Join(d, name+".payloads"), []byte(base+"\n"), 0o644))
 		}
-		osr := "NAME=\"IronFlockOS\"\nID=flockos\nIMAGE_ID=" + id + "\nIMAGE_VERSION=" + version + "\nBUILD_ID=" + buildID + "\n"
+		osr := "NAME=\"IronFlockOS\"\nID=ironflockos\nIMAGE_ID=" + id + "\nIMAGE_VERSION=" + version + "\nBUILD_ID=" + buildID + "\n"
 		must(t, os.WriteFile(filepath.Join(d, name+".os-release"), []byte(osr), 0o644))
 	}
 	return dir
@@ -57,20 +57,20 @@ func boardDefs(t *testing.T) []BoardDef {
 }
 
 func TestBuildRelease(t *testing.T) {
-	dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "flockos-amd64-efi-base", "flockos-amd64-efi-installer", "flockos-rpi-arm64-base")
-	rel, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/flockos/1.0.0", "1.5.8")
+	dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base")
+	rel, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8")
 	must(t, err)
 	if rel.BuildID != "20261120T095512Z-g1a2b3c4" || rel.BuildTime != "2026-11-20T09:55:12Z" || rel.MinAgent != "1.5.8" {
 		t.Fatalf("release %+v", rel)
 	}
-	base := rel.Images["flockos-amd64-efi-base"]
+	base := rel.Images["ironflockos-amd64-efi-base"]
 	if base.Target != "amd64-efi" || base.Variant != "base" || base.Kernel != "std" || base.Architecture != "amd64" {
 		t.Fatalf("base %+v", base)
 	}
-	if base.Image.URL != "https://dl.example/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.img.gz" || base.Image.Size != int64(len("image of flockos-amd64-efi-base-1.0.0")) {
+	if base.Image.URL != "https://dl.example/ironflockos/1.0.0/ironflockos-amd64-efi-base-1.0.0.img.gz" || base.Image.Size != int64(len("image of ironflockos-amd64-efi-base-1.0.0")) {
 		t.Fatalf("image %+v", base.Image)
 	}
-	if base.Bundle == nil || base.Bundle.Compatible != "flockos-amd64-efi-base" {
+	if base.Bundle == nil || base.Bundle.Compatible != "ironflockos-amd64-efi-base" {
 		t.Fatalf("bundle %+v", base.Bundle)
 	}
 	if base.Image.RawSize != 4564471808 || base.Image.MinDiskSize != 9934209024 {
@@ -81,26 +81,26 @@ func TestBuildRelease(t *testing.T) {
 	if !bytes.Contains(data, []byte(`"raw_size":4564471808,"min_disk_size":9934209024`)) {
 		t.Fatalf("the image's JSON: %s", data)
 	}
-	if a := base.ModulesAlias; a == nil || a.URL != "https://dl.example/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.modules.alias.gz" ||
-		a.Size != int64(len("hardware of flockos-amd64-efi-base-1.0.0")) || !sha256Re.MatchString(a.SHA256) {
+	if a := base.ModulesAlias; a == nil || a.URL != "https://dl.example/ironflockos/1.0.0/ironflockos-amd64-efi-base-1.0.0.modules.alias.gz" ||
+		a.Size != int64(len("hardware of ironflockos-amd64-efi-base-1.0.0")) || !sha256Re.MatchString(a.SHA256) {
 		t.Fatalf("hardware list %+v", a)
 	}
 	data, err = json.Marshal(base)
 	must(t, err)
-	if !bytes.Contains(data, []byte(`"modules_alias":{"url":"https://dl.example/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.modules.alias.gz"`)) {
+	if !bytes.Contains(data, []byte(`"modules_alias":{"url":"https://dl.example/ironflockos/1.0.0/ironflockos-amd64-efi-base-1.0.0.modules.alias.gz"`)) {
 		t.Fatalf("the image entry's JSON: %s", data)
 	}
-	if rel.Images["flockos-amd64-efi-installer"].ModulesAlias == nil {
+	if rel.Images["ironflockos-amd64-efi-installer"].ModulesAlias == nil {
 		t.Fatal("the installer has a hardware list too")
 	}
-	inst := rel.Images["flockos-amd64-efi-installer"]
+	inst := rel.Images["ironflockos-amd64-efi-installer"]
 	if inst.Bundle != nil {
 		t.Fatal("the installer has no bundle")
 	}
-	if len(inst.Payloads) != 1 || inst.Payloads[0] != "flockos-amd64-efi-base" || base.Payloads != nil {
+	if len(inst.Payloads) != 1 || inst.Payloads[0] != "ironflockos-amd64-efi-base" || base.Payloads != nil {
 		t.Fatalf("payloads: installer %v, base %v", inst.Payloads, base.Payloads)
 	}
-	if rel.Images["flockos-rpi-arm64-base"].Architecture != "arm64" {
+	if rel.Images["ironflockos-rpi-arm64-base"].Architecture != "arm64" {
 		t.Fatal("rpi-arm64 is arm64")
 	}
 }
@@ -108,63 +108,63 @@ func TestBuildRelease(t *testing.T) {
 func TestBuildReleaseRefuses(t *testing.T) {
 	cases := map[string]func(dir string){
 		"two builds": func(dir string) {
-			p := filepath.Join(dir, "flockos-rpi-arm64-base", "flockos-rpi-arm64-base-1.0.0.os-release")
+			p := filepath.Join(dir, "ironflockos-rpi-arm64-base", "ironflockos-rpi-arm64-base-1.0.0.os-release")
 			data, _ := os.ReadFile(p)
 			_ = os.WriteFile(p, bytes.ReplaceAll(data, []byte("g1a2b3c4"), []byte("g9999999")), 0o644)
 		},
 		"a base without bundle": func(dir string) {
-			_ = os.Remove(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.raucb"))
+			_ = os.Remove(filepath.Join(dir, "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-base-1.0.0.raucb"))
 		},
 		"an installer with a bundle": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.raucb"), []byte("x"), 0o644)
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-installer", "ironflockos-amd64-efi-installer-1.0.0.raucb"), []byte("x"), 0o644)
 		},
 		"another version's os-release": func(dir string) {
-			p := filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.os-release")
+			p := filepath.Join(dir, "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-base-1.0.0.os-release")
 			data, _ := os.ReadFile(p)
 			_ = os.WriteFile(p, bytes.ReplaceAll(data, []byte("IMAGE_VERSION=1.0.0"), []byte("IMAGE_VERSION=0.9.0")), 0o644)
 		},
 		"not an image directory": func(dir string) {
-			_ = os.MkdirAll(filepath.Join(dir, "flockos-amd64-efi-weird"), 0o755)
+			_ = os.MkdirAll(filepath.Join(dir, "ironflockos-amd64-efi-weird"), 0o755)
 		},
 		"an installer without payloads": func(dir string) {
-			_ = os.Remove(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"))
+			_ = os.Remove(filepath.Join(dir, "ironflockos-amd64-efi-installer", "ironflockos-amd64-efi-installer-1.0.0.payloads"))
 		},
 		"a payload the release does not have": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
-				[]byte("flockos-amd64-efi-base\nflockos-amd64-efi-nvidia\n"), 0o644)
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-installer", "ironflockos-amd64-efi-installer-1.0.0.payloads"),
+				[]byte("ironflockos-amd64-efi-base\nironflockos-amd64-efi-nvidia\n"), 0o644)
 		},
 		"another target's payload": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
-				[]byte("flockos-rpi-arm64-base\n"), 0o644)
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-installer", "ironflockos-amd64-efi-installer-1.0.0.payloads"),
+				[]byte("ironflockos-rpi-arm64-base\n"), 0o644)
 		},
 		"the installer as its own payload": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
-				[]byte("flockos-amd64-efi-installer\n"), 0o644)
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-installer", "ironflockos-amd64-efi-installer-1.0.0.payloads"),
+				[]byte("ironflockos-amd64-efi-installer\n"), 0o644)
 		},
 		"an image without its sizes": func(dir string) {
-			_ = os.Remove(filepath.Join(dir, "flockos-rpi-arm64-base", "flockos-rpi-arm64-base-1.0.0.sizes"))
+			_ = os.Remove(filepath.Join(dir, "ironflockos-rpi-arm64-base", "ironflockos-rpi-arm64-base-1.0.0.sizes"))
 		},
 		"a disk smaller than the image": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.sizes"),
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-base-1.0.0.sizes"),
 				[]byte("raw_size=4564471808\nmin_disk_size=4564471807\n"), 0o644)
 		},
 		"a size that is not in bytes": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.sizes"),
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-base-1.0.0.sizes"),
 				[]byte("raw_size=4G\nmin_disk_size=9934209024\n"), 0o644)
 		},
 		"an image without its hardware list": func(dir string) {
-			_ = os.Remove(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.modules.alias.gz"))
+			_ = os.Remove(filepath.Join(dir, "ironflockos-amd64-efi-installer", "ironflockos-amd64-efi-installer-1.0.0.modules.alias.gz"))
 		},
 		"a size missing": func(dir string) {
-			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.sizes"),
+			_ = os.WriteFile(filepath.Join(dir, "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-base-1.0.0.sizes"),
 				[]byte("raw_size=4564471808\n"), 0o644)
 		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "flockos-amd64-efi-base", "flockos-amd64-efi-installer", "flockos-rpi-arm64-base")
+			dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base")
 			mutate(dir)
-			if _, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/flockos/1.0.0", "1.5.8"); err == nil {
+			if _, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8"); err == nil {
 				t.Fatal("accepted")
 			}
 		})
@@ -173,8 +173,8 @@ func TestBuildReleaseRefuses(t *testing.T) {
 
 func catalogFor(t *testing.T, prev *Catalog, version, channel string, issued time.Time) Catalog {
 	t.Helper()
-	dir := release(t, version, "20261120T095512Z-g1a2b3c4", "flockos-amd64-efi-base", "flockos-amd64-efi-installer", "flockos-rpi-arm64-base")
-	rel, err := buildRelease(dir, repoRoot, version, "https://dl.example/flockos/"+version, "1.5.8")
+	dir := release(t, version, "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base")
+	rel, err := buildRelease(dir, repoRoot, version, "https://dl.example/ironflockos/"+version, "1.5.8")
 	must(t, err)
 	c, err := merge(prev, version, channel, rel, boardDefs(t), issued)
 	must(t, err)
@@ -227,19 +227,19 @@ func TestBoards(t *testing.T) {
 		models[b.Model] = b
 	}
 	pc := models["amd64-efi"]
-	if len(pc.LatestImages) != 2 || pc.LatestImages[0].ImageID != "flockos-amd64-efi-base" || pc.LatestImages[1].Variant != "installer" {
+	if len(pc.LatestImages) != 2 || pc.LatestImages[0].ImageID != "ironflockos-amd64-efi-base" || pc.LatestImages[1].Variant != "installer" {
 		t.Fatalf("pc: %+v", pc.LatestImages)
 	}
 	if pc.LatestImages[1].Update != "" || pc.LatestImages[0].Update == "" {
 		t.Fatal("update is the bundle, empty for the installer")
 	}
-	if p := pc.LatestImages[1].Payloads; len(p) != 1 || p[0] != "flockos-amd64-efi-base" || pc.LatestImages[0].Payloads != nil {
+	if p := pc.LatestImages[1].Payloads; len(p) != 1 || p[0] != "ironflockos-amd64-efi-base" || pc.LatestImages[0].Payloads != nil {
 		t.Fatalf("the installer lists the images it carries: %+v", pc.LatestImages)
 	}
 	if _, ok := models["arm64-efi"]; ok {
 		t.Fatal("a board without an image of the release is left out")
 	}
-	if models["raspberrypi4"].LatestImages[0].File != "flockos-rpi-arm64-base-1.0.0.img.gz" {
+	if models["raspberrypi4"].LatestImages[0].File != "ironflockos-rpi-arm64-base-1.0.0.img.gz" {
 		t.Fatalf("pi: %+v", models["raspberrypi4"].LatestImages)
 	}
 }
@@ -327,7 +327,7 @@ func TestSignRefusesAnInvalidCatalog(t *testing.T) {
 // The message is the device-agent's (updatesig.Subject.Message).
 func TestMessage(t *testing.T) {
 	got := string(message([]byte("{}")))
-	want := "flockos-manifest:v1\nflockos/manifest.json\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+	want := "ironflockos-manifest:v1\nironflockos/manifest.json\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
 	if got != want {
 		t.Fatalf("message %q", got)
 	}
@@ -376,21 +376,21 @@ func TestBuildOnThePublishedCatalog(t *testing.T) {
 	oldNow := now
 	t.Cleanup(func() { now = oldNow })
 
-	dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "flockos-amd64-efi-base")
+	dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base")
 	tmp := t.TempDir()
 	payload, manifest := filepath.Join(tmp, "p1.json"), filepath.Join(tmp, "m1.json")
 	args := func(extra ...string) []string {
-		return append([]string{"build", "-dir", dir, "-repo", repoRoot, "-url", "https://dl.example/flockos/1.0.0",
+		return append([]string{"build", "-dir", dir, "-repo", repoRoot, "-url", "https://dl.example/ironflockos/1.0.0",
 			"-min-agent", "1.5.8", "-boards", filepath.Join(repoRoot, "release", "boards.json")}, extra...)
 	}
 	now = func() time.Time { return t0 }
 	must(t, run(args("-version", "1.0.0", "-o", payload), os.Stdout))
 	must(t, run([]string{"sign", "-payload", payload, "-key-file", key, "-pubkey", pub, "-o", manifest}, os.Stdout))
 
-	dir2 := release(t, "1.0.1", "20261130T141003Z-g5d6e7f8", "flockos-amd64-efi-base")
+	dir2 := release(t, "1.0.1", "20261130T141003Z-g5d6e7f8", "ironflockos-amd64-efi-base")
 	now = func() time.Time { return t0.Add(time.Hour) }
 	var out bytes.Buffer
-	must(t, run([]string{"build", "-dir", dir2, "-repo", repoRoot, "-version", "1.0.1", "-url", "https://dl.example/flockos/1.0.1",
+	must(t, run([]string{"build", "-dir", dir2, "-repo", repoRoot, "-version", "1.0.1", "-url", "https://dl.example/ironflockos/1.0.1",
 		"-min-agent", "1.5.8", "-boards", filepath.Join(repoRoot, "release", "boards.json"), "-previous", manifest, "-pubkey", pub}, &out))
 	var c Catalog
 	must(t, json.Unmarshal(out.Bytes(), &c))
@@ -399,7 +399,7 @@ func TestBuildOnThePublishedCatalog(t *testing.T) {
 	}
 
 	_, other, _ := keyFile(t)
-	if err := run([]string{"build", "-dir", dir2, "-repo", repoRoot, "-version", "1.0.1", "-url", "https://dl.example/flockos/1.0.1",
+	if err := run([]string{"build", "-dir", dir2, "-repo", repoRoot, "-version", "1.0.1", "-url", "https://dl.example/ironflockos/1.0.1",
 		"-min-agent", "1.5.8", "-boards", filepath.Join(repoRoot, "release", "boards.json"), "-previous", manifest, "-pubkey", other}, &out); err == nil {
 		t.Fatal("built on a previous catalog that does not verify")
 	}
@@ -455,15 +455,15 @@ func TestMoveAPublishedReleaseToProduction(t *testing.T) {
 func TestAnInstallerWithoutPayloadsStaysValid(t *testing.T) {
 	t0 := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
 	old := catalogFor(t, nil, "1.0.0", "test", t0)
-	inst := old.Releases["1.0.0"].Images["flockos-amd64-efi-installer"]
+	inst := old.Releases["1.0.0"].Images["ironflockos-amd64-efi-installer"]
 	inst.Payloads = nil
-	old.Releases["1.0.0"].Images["flockos-amd64-efi-installer"] = inst
+	old.Releases["1.0.0"].Images["ironflockos-amd64-efi-installer"] = inst
 	must(t, old.Validate())
 	next := catalogFor(t, &old, "1.0.1", "test", t0.Add(time.Hour))
-	if next.Releases["1.0.0"].Images["flockos-amd64-efi-installer"].Payloads != nil {
+	if next.Releases["1.0.0"].Images["ironflockos-amd64-efi-installer"].Payloads != nil {
 		t.Fatal("the old release changed")
 	}
-	data, err := json.Marshal(next.Releases["1.0.0"].Images["flockos-amd64-efi-installer"])
+	data, err := json.Marshal(next.Releases["1.0.0"].Images["ironflockos-amd64-efi-installer"])
 	must(t, err)
 	if bytes.Contains(data, []byte("payloads")) {
 		t.Fatalf("an installer without payloads gains the key: %s", data)
@@ -488,7 +488,7 @@ func TestAReleaseWithoutSizesStaysValid(t *testing.T) {
 	if bytes.Contains(data, []byte("raw_size")) || bytes.Contains(data, []byte("min_disk_size")) || bytes.Contains(data, []byte("modules_alias")) {
 		t.Fatalf("an old release gains the sizes or a hardware list: %s", data)
 	}
-	if next.Releases["1.0.1"].Images["flockos-amd64-efi-base"].Image.MinDiskSize == 0 {
+	if next.Releases["1.0.1"].Images["ironflockos-amd64-efi-base"].Image.MinDiskSize == 0 {
 		t.Fatal("the new release has no min_disk_size")
 	}
 
@@ -498,19 +498,19 @@ func TestAReleaseWithoutSizesStaysValid(t *testing.T) {
 		"a smaller disk":      {4564471808, 4564471807},
 	} {
 		c := catalogFor(t, nil, "1.0.0", "test", t0)
-		img := c.Releases["1.0.0"].Images["flockos-amd64-efi-base"]
+		img := c.Releases["1.0.0"].Images["ironflockos-amd64-efi-base"]
 		img.Image.RawSize, img.Image.MinDiskSize = sizes[0], sizes[1]
-		c.Releases["1.0.0"].Images["flockos-amd64-efi-base"] = img
+		c.Releases["1.0.0"].Images["ironflockos-amd64-efi-base"] = img
 		if err := c.Validate(); err == nil {
 			t.Fatalf("%s: valid", name)
 		}
 	}
 	c := catalogFor(t, nil, "1.0.0", "test", t0)
-	img := c.Releases["1.0.0"].Images["flockos-amd64-efi-base"]
+	img := c.Releases["1.0.0"].Images["ironflockos-amd64-efi-base"]
 	other := *img.ModulesAlias
-	other.URL = strings.Replace(other.URL, "flockos-amd64-efi-base-1.0.0", "flockos-amd64-efi-nvidia-1.0.0", 1)
+	other.URL = strings.Replace(other.URL, "ironflockos-amd64-efi-base-1.0.0", "ironflockos-amd64-efi-nvidia-1.0.0", 1)
 	img.ModulesAlias = &other
-	c.Releases["1.0.0"].Images["flockos-amd64-efi-base"] = img
+	c.Releases["1.0.0"].Images["ironflockos-amd64-efi-base"] = img
 	if err := c.Validate(); err == nil {
 		t.Fatal("another image's hardware list: valid")
 	}

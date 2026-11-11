@@ -1,0 +1,11 @@
+# systemd applies presets on the first boot of every slot (machine-id
+# "uninitialized"). NVIDIA's 70-nvidia-driver.preset would enable these at
+# boot; the first matching line wins, and this file sorts first.
+#
+# Started by udev on a host with an NVIDIA GPU (71-ironflockos-nvidia.rules).
+disable nvidia-persistenced.service
+# Dynamic Boost is for notebooks.
+disable nvidia-powerd.service
+# NVLink fabric and IMEX are data-centre services IronFlockOS does not carry.
+disable nvidia-fabricmanager.service
+disable nvidia-imex.service

@@ -37,13 +37,13 @@ signed boot chain:
   which starts it when a check fails. shim's fallback (`fb<arch>.efi`) is not: it
   writes boot entries and reboots.
 - **The binaries are packages of the image** (`targets/<target>/packages`), copied to
-  the FLOCKOS partition by `build/mkimage.sh`. `packages.tsv` and the SBOM list them,
+  the IRONFLOCKOS partition by `build/mkimage.sh`. `packages.tsv` and the SBOM list them,
   and the weekly rescans see their CVEs. The build container no longer needs
   `grub-efi-<arch>-bin`.
 - **fwupd's capsule helper** is Debian's signed one (`fwupd-<arch>-signed`), so capsule
   updates (lane 3) also start under Secure Boot.
   fwupd starts it through shim and looks for shim next to it, in `EFI/debian`, so
-  `flockos-fwupd-shim.service` copies the shim the device boots there on every boot. RAUC
+  `ironflockos-fwupd-shim.service` copies the shim the device boots there on every boot. RAUC
   does not write this partition, and it must be that same shim: a newer one could revoke
   the GRUB beside it through SBAT.
 
@@ -57,29 +57,29 @@ The same chain boots with Secure Boot off, without the checks.
   Secure Boot off (`docs/targets/amd64-efi.md`).
 - **NVIDIA.** The open kernel modules of the `nvidia` variant are built with the image
   and signed by no key the machine trusts. A locked-down kernel refuses them: the
-  device boots and enrolls, but the GPU stays unused. `flockos-nvidia-secure-boot`
+  device boots and enrolls, but the GPU stays unused. `ironflockos-nvidia-secure-boot`
   says so on the console and in the journal, for each NVIDIA display controller, and
   the GPU needs Secure Boot off. Signing the modules with a key the kernel trusts
   needs a Machine Owner Key or a shim of IronFlock's own (see Alternatives).
 - **Not a security boundary.** GRUB's configuration, `grubenv` (including
-  `FLOCKOS_CMDLINE` and `FLOCKOS_RT_CMDLINE`), the initramfs and the root filesystem are
+  `IRONFLOCKOS_CMDLINE` and `IRONFLOCKOS_RT_CMDLINE`), the initramfs and the root filesystem are
   not checked, and any other Microsoft-signed boot loader boots on the same machine.
   That keeps the A/B script, the real-time tuning and the QEMU test's debug shell
   working as before.
 - **Devices flashed before this change** keep their unsigned GRUB: RAUC bundles carry
-  the root slot, not the FLOCKOS partition. They boot and update as before with Secure
+  the root slot, not the IRONFLOCKOS partition. They boot and update as before with Secure
   Boot off. Turning Secure Boot on there takes a new flash or installation.
-- **The boot chain is the one of the installation.** Nothing updates the FLOCKOS
+- **The boot chain is the one of the installation.** Nothing updates the IRONFLOCKOS
   partition in the field yet. If a machine's firmware later revokes that shim or GRUB
   (a `dbx` update, or a newer shim's SBAT level, for example from another system booted
   on it), IronFlockOS stops booting with Secure Boot on until it is turned off or the disk
-  is installed again. An update path for the FLOCKOS partition is follow-up work.
+  is installed again. An update path for the IRONFLOCKOS partition is follow-up work.
 - **shim writes its variables.** Like on every Debian system, shim keeps its MOK and
   SBAT state in UEFI variables (`MokListRT`, `SbatLevel`).
 - **Tests.** The QEMU tests boot with Microsoft's keys enrolled and Secure Boot on
   (`test/qemu/run.py --secure-boot`): the image tests except the `-rt` ones, which
   keep the path with Secure Boot off tested, the install tests and the release's
-  end-to-end test. Every run checks that the FLOCKOS partition holds the packaged shim
+  end-to-end test. Every run checks that the IRONFLOCKOS partition holds the packaged shim
   and GRUB and that Secure Boot and lockdown are as asked.
 - **Compute Engine.** The release images can now boot Shielded VMs with Secure Boot
   on, as Debian's own Compute Engine images do; that is not tested yet. The

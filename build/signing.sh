@@ -11,7 +11,7 @@
 #          bundles of one build trust each other and nothing else, so a
 #          pull-request image can never install a release bundle and a
 #          release image never a pull-request bundle.
-# release  the image trusts the IronFlockOS root CA (pki/flockos-root-ca.pem).
+# release  the image trusts the IronFlockOS root CA (pki/ironflockos-root-ca.pem).
 #          The build holds no release key: it seals the bundle with a
 #          throwaway signer, and release.yml's sign job, the only job with the
 #          Cloud KMS identity, re-signs it with the bundle signer
@@ -26,7 +26,7 @@ dir=${1:?usage: signing.sh DIR}
 mkdir -p "$dir"
 chmod 0700 "$dir"
 
-case "${FLOCKOS_SIGNING:-dev}" in
+case "${IRONFLOCKOS_SIGNING:-dev}" in
   dev)
     throwaway_signer "$dir" "IronFlockOS development"
     {
@@ -39,7 +39,7 @@ case "${FLOCKOS_SIGNING:-dev}" in
     log "throwaway CA and signer made (valid 30 days)"
     ;;
   release)
-    ca=$src/pki/flockos-root-ca.pem
+    ca=$src/pki/ironflockos-root-ca.pem
     [ -f "$ca" ] || die "release signing needs $ca (WP-0.5: docs/signing.md)"
     cp "$ca" "$dir/keyring.pem"
     throwaway_signer "$dir/seal" "IronFlockOS release sealing"
@@ -52,5 +52,5 @@ case "${FLOCKOS_SIGNING:-dev}" in
     } >"$dir/signing.env"
     log "release build: the image trusts the IronFlockOS root CA; the bundle is sealed for release.yml's sign job"
     ;;
-  *) die "FLOCKOS_SIGNING must be dev or release" ;;
+  *) die "IRONFLOCKOS_SIGNING must be dev or release" ;;
 esac

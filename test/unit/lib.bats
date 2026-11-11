@@ -52,8 +52,8 @@ teardown() { rm -rf "$tmp"; }
 }
 
 @test "image_id names the RAUC compatible" {
-  [ "$(image_id amd64-efi base std)" = flockos-amd64-efi-base ]
-  [ "$(image_id rpi-arm64 base rt)" = flockos-rpi-arm64-base-rt ]
+  [ "$(image_id amd64-efi base std)" = ironflockos-amd64-efi-base ]
+  [ "$(image_id rpi-arm64 base rt)" = ironflockos-rpi-arm64-base-rt ]
 }
 
 @test "the matrix axes reject unknown names" {
@@ -73,12 +73,12 @@ teardown() { rm -rf "$tmp"; }
 }
 
 @test "uuid_for derives a version-4 UUID from the image id and a name" {
-  IMAGE_ID=flockos-amd64-efi-base
+  IMAGE_ID=ironflockos-amd64-efi-base
   a=$(uuid_for rootfs-a)
   [ "$a" = "$(uuid_for rootfs-a)" ]
   [ "$a" != "$(uuid_for rootfs-b)" ]
   [[ "$a" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$ ]]
-  IMAGE_ID=flockos-rpi-arm64-base
+  IMAGE_ID=ironflockos-rpi-arm64-base
   [ "$a" != "$(uuid_for rootfs-a)" ]
 }
 
@@ -99,7 +99,7 @@ repart() {
 
 @test "min_disk_size: every partition of the device's layout at its least, 1 GiB of /data and 2 MiB for the GPT" {
   gib=$((1 << 30)) mib=$((1 << 20))
-  # amd64-efi base: FLOCKOS, two 4 GiB slots (v0.14.0's image is 4564471808 bytes raw).
+  # amd64-efi base: IRONFLOCKOS, two 4 GiB slots (v0.14.0's image is 4564471808 bytes raw).
   repart amd64-efi base
   [ "$(min_disk_size "$tmp/repart.d" 4564471808)" = $((2 * mib + 256 * mib + 8 * gib + gib)) ]
   repart arm64-efi base
@@ -107,7 +107,7 @@ repart() {
   # nvidia: two 8 GiB slots.
   repart amd64-efi nvidia
   [ "$(min_disk_size "$tmp/repart.d" 8859439104)" = $((2 * mib + 256 * mib + 16 * gib + gib)) ]
-  # The Raspberry Pi: FLOCKOS, boot-a and boot-b besides the slots.
+  # The Raspberry Pi: IRONFLOCKOS, boot-a and boot-b besides the slots.
   repart rpi-arm64 base
   [ "$(min_disk_size "$tmp/repart.d" 4900016128)" = $((2 * mib + 64 * mib + 512 * mib + 8 * gib + gib)) ]
 }

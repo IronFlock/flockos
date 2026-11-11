@@ -32,7 +32,7 @@ example="$repo/docs/manifest.example.json"
 @test "an image's key is its IMAGE_ID, which its bundle names as compatible" {
   run jq -r '.releases[].images | to_entries[] |
     .key as $id | .value as $i |
-    ("flockos-" + $i.target + "-" + $i.variant + (if $i.kernel == "rt" then "-rt" else "" end)) as $want |
+    ("ironflockos-" + $i.target + "-" + $i.variant + (if $i.kernel == "rt" then "-rt" else "" end)) as $want |
     select($id != $want or ($i.bundle != null and $i.bundle.compatible != $id)) | $id' "$example"
   [ "$status" -eq 0 ]
   [ -z "$output" ]

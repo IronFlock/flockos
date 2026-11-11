@@ -1,0 +1,17 @@
+# systemd applies presets on the first boot of every slot (machine-id
+# "uninitialized") and enables what no preset names. build/customize.sh
+# enables these in the image already; they are named here on purpose, so a
+# slot's first boot keeps them on. On the installer stick they are masked,
+# which no preset undoes. ironflockos-proxy-reload.service has no [Install]
+# section: ironflockos-proxy.path starts it.
+#
+# The site's proxy and NTP servers, from /etc/ironflockos/proxy.conf and the
+# IRONFLOCKOS partition (docs/build.md, "Proxy").
+enable ironflockos-proxy.service
+enable ironflockos-proxy.path
+# Network profiles from the IRONFLOCKOS partition, and their trial (docs/build.md,
+# "Network profiles").
+enable ironflockos-network-profiles.service
+enable ironflockos-network-profiles-trial.service
+# Says when /apps is not /data/apps (docs/build.md, "Disk layout on a device").
+enable ironflockos-apps-check.service

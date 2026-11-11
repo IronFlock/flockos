@@ -1,5 +1,5 @@
 # Release of IronFlockOS: the merge of a release pull request (`just
-# release-patch`: version bump, title `release flockos v<version>`) builds
+# release-patch`: version bump, title `release ironflockos v<version>`) builds
 # every image, signs the RAUC bundles in Cloud KMS, publishes images, bundles
 # and the signed catalog, makes the Compute Engine images of the virtual
 # devices, and sets the tag last (a tag means "devices can get it"). Nothing
@@ -98,7 +98,7 @@ jobs:
       prefix: release-image
 
   # The release signature (docs/signing.md). Only a release run gets the
-  # workload identity flockos-release: the pool grants it to a push of
+  # workload identity ironflockos-release: the pool grants it to a push of
   # release.yml on main (a release merge) and to runs on v* tags. This job
   # re-signs every bundle with the bundle signer in Cloud KMS through PKCS#11
   # and checks it against the IronFlockOS root CA (build/sign-bundles.sh). A dry
@@ -124,14 +124,14 @@ jobs:
       - name: one directory per image, as the build left it
         run: |
           mkdir out
-          for d in dl/release-image-*; do mv "$d" "out/flockos-${d#dl/release-image-}"; done
+          for d in dl/release-image-*; do mv "$d" "out/ironflockos-${d#dl/release-image-}"; done
           ls -l out/*/
       - name: authenticate the bundle signer (release only)
         if: env.MODE == 'release'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
       - name: sign the bundles (${{ env.MODE }})
         run: build/sign-in-builder.sh "$MODE" out
       - name: upload the signed images and bundles
@@ -204,25 +204,25 @@ jobs:
           docker save -o "$RUNNER_TEMP/hello-world.tar" hello-world:latest
       - name: QEMU test of the release image (${{ env.MODE }})
         run: |
-          sudo mkdir -p /mnt/flockos-qemu
-          sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
+          sudo mkdir -p /mnt/ironflockos-qemu
+          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-qemu
           only=()
           [ "$MODE" = release ] || only=(--only boot)
           python3 -I test/qemu/run.py --target amd64-efi --variant base "${only[@]}" --secure-boot \
-            --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
+            --work /mnt/ironflockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-logs-${{ env.MODE }}
           path: |
-            /mnt/flockos-qemu/console.log
-            /mnt/flockos-qemu/shell.log
+            /mnt/ironflockos-qemu/console.log
+            /mnt/ironflockos-qemu/shell.log
           if-no-files-found: ignore
           retention-days: 7
 
   # The signed release to the staging tree, as the publisher identity
-  # (flockos-publisher: the IronFlockOS trees of the download bucket only).
+  # (ironflockos-publisher: the IronFlockOS trees of the download bucket only).
   stage:
     needs: [verify, sign, attest]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
@@ -247,7 +247,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: stage (${{ env.MODE }})
@@ -273,7 +273,7 @@ jobs:
   # The release's source code (docs/release.md, "Source code"): apt in the
   # build container finds every file of every source package of the images
   # (build/sources.sh plan; release/sources names those outside the
-  # archives). The files the pool flockos/sources/ lacks go there, and the
+  # archives). The files the pool ironflockos/sources/ lacks go there, and the
   # index SOURCES goes to the staging tree, which promote publishes with the
   # images (build/publish.sh sources). As the publisher. A dry run looks up
   # every source package the same way, so one without source fails it, and
@@ -307,17 +307,17 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: publish the sources (${{ env.MODE }})
         run: build/publish.sh sources sources.plan "$(tr -d '[:space:]' < VERSION)"
 
-  # The live release: the staged files to flockos/<version>/, the release
-  # notes (release-notes/*.md) to flockos/release-notes.json, then the
+  # The live release: the staged files to ironflockos/<version>/, the release
+  # notes (release-notes/*.md) to ironflockos/release-notes.json, then the
   # catalog (tools/catalog), built on the published one with this release on
   # the test channel (the first release is production too), signed with the
-  # catalog key in Cloud KMS as flockos-release, and published last. Then
+  # catalog key in Cloud KMS as ironflockos-release, and published last. Then
   # every file and the catalog must answer through the download proxy, or
   # there is no tag. A dry run signs with a throwaway key and publishes
   # nothing.
@@ -348,7 +348,7 @@ jobs:
         run: |
           # The bucket's public face, not the proxy: a 404 here means there is no catalog yet.
           code=$(curl -sS -o previous.json -w '%{http_code}' --retry 5 \
-            https://storage.googleapis.com/ironflock-downloads/flockos/manifest.json)
+            https://storage.googleapis.com/ironflock-downloads/ironflockos/manifest.json)
           case "$code" in
             200) echo "PREVIOUS=previous.json" >> "$GITHUB_ENV" ;;
             404) rm -f previous.json; echo "no published catalog: this is the first release" ;;
@@ -359,15 +359,15 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
       - name: build and sign the catalog (${{ env.MODE }})
         run: |
           . build/lib.sh
           load_conf build/release.conf
           version=$(tr -d '[:space:]' < VERSION)
           if [ "$MODE" = release ]; then
-            [ -f pki/flockos-catalog.pub ] || { echo "::error::pki/flockos-catalog.pub is missing: tools/release-setup.sh"; exit 1; }
-            pub=$PWD/pki/flockos-catalog.pub
+            [ -f pki/ironflockos-catalog.pub ] || { echo "::error::pki/ironflockos-catalog.pub is missing: tools/release-setup.sh"; exit 1; }
+            pub=$PWD/pki/ironflockos-catalog.pub
             signer=(-kms-key "$CATALOG_KMS_KEY")
           else
             openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/catalog-key.pem"
@@ -376,12 +376,12 @@ jobs:
             signer=(-key-file "$RUNNER_TEMP/catalog-key.pem")
           fi
           previous=()
-          if [ -n "${PREVIOUS:-}" ] && [ -f pki/flockos-catalog.pub ]; then
-            previous=(-previous "$PWD/$PREVIOUS" -pubkey "$PWD/pki/flockos-catalog.pub")
+          if [ -n "${PREVIOUS:-}" ] && [ -f pki/ironflockos-catalog.pub ]; then
+            previous=(-previous "$PWD/$PREVIOUS" -pubkey "$PWD/pki/ironflockos-catalog.pub")
           fi
           cd tools/catalog
           go run . build -dir ../../out -repo ../.. -version "$version" -channel test \
-            -url "$DL_BASE/flockos/$version" -min-agent "$CATALOG_MIN_AGENT" \
+            -url "$DL_BASE/ironflockos/$version" -min-agent "$CATALOG_MIN_AGENT" \
             -boards ../../release/boards.json "${previous[@]}" -o ../../payload.json
           go run . sign -payload ../../payload.json "${signer[@]}" -pubkey "$pub" -o ../../manifest.json
           go run . verify -pubkey "$pub" ../../manifest.json >/dev/null
@@ -401,7 +401,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: promote, publish the catalog, check (${{ env.MODE }})
@@ -418,10 +418,10 @@ jobs:
   # the virtual-device-manager's IronFlockOS VMs, amd64-efi base and nvidia and
   # arm64-efi base (GCE_IMAGES in build/release.conf; no real-time kernel for
   # VMs). Each is made from the published image, which it must match by
-  # SHA256SUMS, into its image family flockos-<target>-<variant>, from which
+  # SHA256SUMS, into its image family ironflockos-<target>-<variant>, from which
   # the manager creates new VMs (build/gce-image.sh). After the promotion, so
   # a family never offers an unpublished release; the tag waits for them. As
-  # the publisher, which may make flockos-* images in record-1283 and nothing
+  # the publisher, which may make ironflockos-* images in record-1283 and nothing
   # else of Compute Engine (tools/release-setup.sh). A dry run makes the
   # tarballs and prints the cloud calls.
   vm-images:
@@ -450,7 +450,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-image-${{ matrix.image }}
-          path: out/flockos-${{ matrix.image }}
+          path: out/ironflockos-${{ matrix.image }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-meta-${{ env.MODE }}
@@ -460,22 +460,22 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: the Compute Engine image of ${{ env.IMAGE }} (${{ env.MODE }})
         env:
-          FLOCKOS_WORK: /mnt/flockos-gce
+          IRONFLOCKOS_WORK: /mnt/ironflockos-gce
         run: |
-          sudo mkdir -p "$FLOCKOS_WORK"
-          sudo chown "$(id -u):$(id -g)" "$FLOCKOS_WORK"
-          build/gce-image.sh "out/flockos-$IMAGE" "$(tr -d '[:space:]' < VERSION)" meta/SHA256SUMS
+          sudo mkdir -p "$IRONFLOCKOS_WORK"
+          sudo chown "$(id -u):$(id -g)" "$IRONFLOCKOS_WORK"
+          build/gce-image.sh "out/ironflockos-$IMAGE" "$(tr -d '[:space:]' < VERSION)" meta/SHA256SUMS
 
   # Production promotion (docs/release.md): run by hand on a release's tag
   # (gh workflow run release.yml --ref v<version> -f promote-production=true).
   # The release's files are published already; the catalog's production
-  # channel moves to it, signed with the catalog key as flockos-release and
-  # published as flockos-publisher, then checked through the download proxy.
+  # channel moves to it, signed with the catalog key as ironflockos-release and
+  # published as ironflockos-publisher, then checked through the download proxy.
   # The workload identity pool gives both identities to runs on v* tags.
   production:
     needs: [verify]
@@ -495,18 +495,18 @@ jobs:
           cache: false
       - name: the published catalog
         run: |
-          curl -fsS --retry 5 -o previous.json https://storage.googleapis.com/ironflock-downloads/flockos/manifest.json
+          curl -fsS --retry 5 -o previous.json https://storage.googleapis.com/ironflock-downloads/ironflockos/manifest.json
       - name: authenticate the catalog signer
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
       - name: move production to this release, sign
         run: |
           . build/lib.sh
           load_conf build/release.conf
           version=$(tr -d '[:space:]' < VERSION)
-          pub=$PWD/pki/flockos-catalog.pub
+          pub=$PWD/pki/ironflockos-catalog.pub
           cd tools/catalog
           go run . build -version "$version" -channel production -boards ../../release/boards.json \
             -previous ../../previous.json -pubkey "$pub" -o ../../payload.json
@@ -518,7 +518,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
       - name: publish the catalog, check
         run: |
@@ -541,7 +541,7 @@ jobs:
 
   # The GitHub Release the tag job made gets the release's checksums, SBOMs
   # and catalog (the images and bundles are on the download server; links in
-  # SHA256SUMS' names below DL_BASE/flockos/<version>/). As the release App,
+  # SHA256SUMS' names below DL_BASE/ironflockos/<version>/). As the release App,
   # like the tag: this workflow's token stays read-only.
   assets:
     needs: [verify, tag]

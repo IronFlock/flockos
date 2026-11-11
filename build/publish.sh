@@ -19,15 +19,15 @@
 #   publish.sh check   VERSION FILE  every file of the release and the catalog
 #                                    answer through the download proxy
 #
-# DIR has one directory per image (out/flockos-<image>/). DRY_RUN=1 prints the
+# DIR has one directory per image (out/ironflockos-<image>/). DRY_RUN=1 prints the
 # storage calls and changes nothing. gcloud runs as the publisher identity.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
 load_conf "$here/release.conf"
-STAGING=$BUCKET/staging/flockos
-LIVE=$BUCKET/flockos
+STAGING=$BUCKET/staging/ironflockos
+LIVE=$BUCKET/ironflockos
 
 # done_ MESSAGE: what a step did, or would have done in a dry run.
 done_() {
@@ -177,26 +177,26 @@ case "$cmd" in
     trap 'rm -rf "$tmp"' EXIT
     # The small files byte for byte; every other file answers with the size
     # of its object in the bucket (the proxy serves the bucket's bytes).
-    curl -fsS --proto '=https' --retry 5 -o "$tmp/SHA256SUMS" "$DL_BASE/flockos/$version/SHA256SUMS" ||
-      die "$DL_BASE/flockos/$version/SHA256SUMS does not answer: does the download proxy serve /dl/flockos/?"
+    curl -fsS --proto '=https' --retry 5 -o "$tmp/SHA256SUMS" "$DL_BASE/ironflockos/$version/SHA256SUMS" ||
+      die "$DL_BASE/ironflockos/$version/SHA256SUMS does not answer: does the download proxy serve /dl/ironflockos/?"
     storage cat "$LIVE/$version/SHA256SUMS" | cmp -s - "$tmp/SHA256SUMS" || die "the proxy's SHA256SUMS is not the live one"
     while read -r _ name; do
       want=$(storage objects describe "$LIVE/$version/$name" --format='value(size)')
-      got=$(curl -fsSI --proto '=https' --retry 5 "$DL_BASE/flockos/$version/$name" | tr -d '\r' |
+      got=$(curl -fsSI --proto '=https' --retry 5 "$DL_BASE/ironflockos/$version/$name" | tr -d '\r' |
         awk 'tolower($1) == "content-length:" { print $2 }' | tail -n 1)
       [ -n "$got" ] && [ "$got" = "$want" ] || die "$name answers with ${got:-no} bytes, the bucket holds $want"
     done <"$tmp/SHA256SUMS"
     # The source code: SOURCES byte for byte, and its first file in the pool.
-    curl -fsS --proto '=https' --retry 5 -o "$tmp/SOURCES" "$DL_BASE/flockos/$version/SOURCES" ||
-      die "$DL_BASE/flockos/$version/SOURCES does not answer"
+    curl -fsS --proto '=https' --retry 5 -o "$tmp/SOURCES" "$DL_BASE/ironflockos/$version/SOURCES" ||
+      die "$DL_BASE/ironflockos/$version/SOURCES does not answer"
     storage cat "$LIVE/$version/SOURCES" | cmp -s - "$tmp/SOURCES" || die "the proxy's SOURCES is not the live one"
     url=$(awk -F'\t' '!/^#/ && $3 != "-" { print $3; exit }' "$tmp/SOURCES")
     [ -n "$url" ] || die "SOURCES lists no source file"
     curl -fsSI --proto '=https' --retry 5 "$url" >/dev/null ||
-      die "$url does not answer: does the download proxy serve /dl/flockos/sources/?"
-    curl -fsS --proto '=https' --retry 5 -o "$tmp/manifest.json" "$DL_BASE/flockos/manifest.json" || die "the catalog does not answer"
+      die "$url does not answer: does the download proxy serve /dl/ironflockos/sources/?"
+    curl -fsS --proto '=https' --retry 5 -o "$tmp/manifest.json" "$DL_BASE/ironflockos/manifest.json" || die "the catalog does not answer"
     cmp -s "$tmp/manifest.json" "$file" || die "the catalog the proxy serves is not the one published"
-    log "every file of $version, its SOURCES and the catalog answer through $DL_BASE/flockos/"
+    log "every file of $version, its SOURCES and the catalog answer through $DL_BASE/ironflockos/"
     ;;
   *) die "usage: publish.sh stage|promote|sources|notes|catalog|check ..." ;;
 esac

@@ -7,7 +7,7 @@ src=$(cd "$here/.." && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
 : "${ROOT:?}" "${WORK:?}" "${OUT:?}" "${TARGET:?}" "${VARIANT:?}" "${KERNEL:?}" "${BOOTLOADER:?}"
-: "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${FLOCKOS_VERSION:?}" "${FLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
+: "${IMAGE_ID:?}" "${SLOT_SIZE:?}" "${NAME:?}" "${IRONFLOCKOS_VERSION:?}" "${IRONFLOCKOS_COMMIT:?}" "${SOURCE_DATE_EPOCH:?}"
 target_dir=$src/targets/$TARGET
 [ -d "$ROOT/usr" ] || die "$ROOT is not a root filesystem"
 
@@ -43,11 +43,11 @@ if [ "$VARIANT" != installer ]; then
 else
   # --- the installer: the images it writes, nothing of a device -------------
   # Each payload with its size (the installer checks the target disk by it).
-  payload_dir=$ROOT/usr/share/flockos/payload
+  payload_dir=$ROOT/usr/share/ironflockos/payload
   mkdir -p "$payload_dir"
-  for p in $FLOCKOS_INSTALLER_PAYLOADS; do
-    base=flockos-$TARGET-$p-$FLOCKOS_VERSION
-    pigz -dc "/out/flockos-$TARGET-$p/$base.img.gz" >"$WORK/payload.img"
+  for p in $IRONFLOCKOS_INSTALLER_PAYLOADS; do
+    base=ironflockos-$TARGET-$p-$IRONFLOCKOS_VERSION
+    pigz -dc "/out/ironflockos-$TARGET-$p/$base.img.gz" >"$WORK/payload.img"
     stat -c %s "$WORK/payload.img" >"$payload_dir/$base.img.zst.size"
     zstd -q -T0 -12 -o "$payload_dir/$base.img.zst" "$WORK/payload.img"
     rm -f "$WORK/payload.img"
@@ -56,13 +56,13 @@ else
   # The image ids the stick carries, for the release catalog (tools/catalog:
   # the installer image's payloads; FlockFlasher writes the chosen one into
   # installer.conf).
-  for p in $FLOCKOS_INSTALLER_PAYLOADS; do printf 'flockos-%s-%s\n' "$TARGET" "$p"; done >"$OUT/$NAME.payloads"
+  for p in $IRONFLOCKOS_INSTALLER_PAYLOADS; do printf 'ironflockos-%s-%s\n' "$TARGET" "$p"; done >"$OUT/$NAME.payloads"
 fi
 
 # --- identity --------------------------------------------------------------
-commit=${FLOCKOS_COMMIT}
-bash "$here/osrelease.sh" "$FLOCKOS_VERSION" "$TARGET" "$VARIANT" "$KERNEL" "${commit:0:12}" "$SOURCE_DATE_EPOCH" >"$ROOT/usr/lib/os-release"
-if [ -n "${FLOCKOS_DIRTY:-}" ]; then
+commit=${IRONFLOCKOS_COMMIT}
+bash "$here/osrelease.sh" "$IRONFLOCKOS_VERSION" "$TARGET" "$VARIANT" "$KERNEL" "${commit:0:12}" "$SOURCE_DATE_EPOCH" >"$ROOT/usr/lib/os-release"
+if [ -n "${IRONFLOCKOS_DIRTY:-}" ]; then
   sed -i 's/^BUILD_ID=\(.*\)$/BUILD_ID=\1-dirty/' "$ROOT/usr/lib/os-release"
 fi
 ln -sf ../usr/lib/os-release "$ROOT/etc/os-release"
@@ -70,7 +70,7 @@ ln -sf ../usr/lib/os-release "$ROOT/etc/os-release"
 # post-install handler carries it into the other slot.
 printf 'uninitialized\n' >"$ROOT/etc/machine-id"
 rm -f "$ROOT/var/lib/dbus/machine-id"
-# SSH host keys are made per device, on /data (flockos-ssh-hostkeys.service).
+# SSH host keys are made per device, on /data (ironflockos-ssh-hostkeys.service).
 rm -f "$ROOT"/etc/ssh/ssh_host_*
 
 # --- accounts: no default user, root locked (section 3.9) ------------------
@@ -143,16 +143,16 @@ case "$BOOTLOADER" in
       die "the L4T preinstall marker is still in the tree"
     # --- /boot/efi is NVIDIA's ESP --------------------------------------------
     # flash.sh makes the ESP's image only for a partition named "esp", so the
-    # layout keeps that name; it is the device's /boot/efi, as FLOCKOS is on
+    # layout keeps that name; it is the device's /boot/efi, as IRONFLOCKOS is on
     # the other targets (the .flock to enroll with goes there).
-    grep -q '^PARTLABEL=FLOCKOS  /boot/efi ' "$ROOT/etc/fstab" || die "/etc/fstab has no FLOCKOS line to point at the ESP"
-    sed -i 's|^PARTLABEL=FLOCKOS  /boot/efi |PARTLABEL=esp      /boot/efi |' "$ROOT/etc/fstab"
+    grep -q '^PARTLABEL=IRONFLOCKOS  /boot/efi ' "$ROOT/etc/fstab" || die "/etc/fstab has no IRONFLOCKOS line to point at the ESP"
+    sed -i 's|^PARTLABEL=IRONFLOCKOS  /boot/efi |PARTLABEL=esp          /boot/efi |' "$ROOT/etc/fstab"
     ;;
   *) die "unknown BOOTLOADER $BOOTLOADER in target.conf" ;;
 esac
 
 # --- mount points of /etc/fstab --------------------------------------------
-mkdir -p "$ROOT/boot/efi" "$ROOT/data" "$ROOT/opt/ironflock" "$ROOT/var/cache/flockos" \
+mkdir -p "$ROOT/boot/efi" "$ROOT/data" "$ROOT/opt/ironflock" "$ROOT/var/cache/ironflockos" \
   "$ROOT/var/lib/fwupd" "$ROOT/var/lib/systemd/pstore" "$ROOT/var/log/journal" \
   "$ROOT/etc/NetworkManager/system-connections" "$ROOT/apps"
 chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
@@ -160,54 +160,54 @@ chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
 # --- units -----------------------------------------------------------------
 if [ "$VARIANT" = installer ]; then
   # The installer runs on the console and nothing else: no device services,
-  # no /data, no slots, no SSH. flockos-proxy would take the stick's
+  # no /data, no slots, no SSH. ironflockos-proxy would take the stick's
   # proxy.conf, which the installer copies to the installed disk.
-  systemctl --root="$ROOT" enable flockos-installer.service NetworkManager.service
-  systemctl --root="$ROOT" disable flockos-ssh-hostkeys.service \
-    flockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
-  systemctl --root="$ROOT" mask flockos-enroll.service \
-    flockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
-    systemd-repart.service flockos-proxy.service flockos-proxy.path flockos-proxy-reload.service
+  systemctl --root="$ROOT" enable ironflockos-installer.service NetworkManager.service
+  systemctl --root="$ROOT" disable ironflockos-ssh-hostkeys.service \
+    ironflockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
+  systemctl --root="$ROOT" mask ironflockos-enroll.service \
+    ironflockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
+    systemd-repart.service ironflockos-proxy.service ironflockos-proxy.path ironflockos-proxy-reload.service
   # The installer has no /data to put the stick's network profiles on.
-  systemctl --root="$ROOT" mask flockos-network-profiles.service flockos-network-profiles-trial.service
+  systemctl --root="$ROOT" mask ironflockos-network-profiles.service ironflockos-network-profiles-trial.service
   # Its own fstab has no /apps on /data either: the check would only fail.
-  systemctl --root="$ROOT" mask flockos-apps-check.service
+  systemctl --root="$ROOT" mask ironflockos-apps-check.service
   # A factory reset (ADR-0015) is an installed device's: a request on the
-  # stick's FLOCKOS partition must not run on the stick, and the installer
+  # stick's IRONFLOCKOS partition must not run on the stick, and the installer
   # carries none to the disk it writes. Nothing wants these units on a stick
   # (its fstab has no /data); the mask makes sure.
-  systemctl --root="$ROOT" mask flockos-factory-reset.service flockos-data-missing.service
+  systemctl --root="$ROOT" mask ironflockos-factory-reset.service ironflockos-data-missing.service
 else
-  # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
+  # ironflockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
   # chrony keeps the time; the PTP units run only when ptp.conf names an
-  # interface (docs/build.md, "Time"). flockos-proxy hands the site's proxy
+  # interface (docs/build.md, "Time"). ironflockos-proxy hands the site's proxy
   # to the agent and Docker (docs/build.md, "Proxy").
-  systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
-    flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
-    NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service \
-    flockos-proxy.service
-  # NetworkManager profiles from the FLOCKOS partition (docs/build.md,
+  systemctl --root="$ROOT" enable ironflockos-ssh-hostkeys.service \
+    ironflockos-enroll.service ironflockos-gce-flock.service ssh.service ironflockos-fwupd-shim.service docker.service \
+    NetworkManager.service chrony.service ironflockos-ptp.service ironflockos-ptp4l.service ironflockos-phc2sys.service \
+    ironflockos-proxy.service
+  # NetworkManager profiles from the IRONFLOCKOS partition (docs/build.md,
   # "Network profiles"), on trial until the agent has connected with them.
-  systemctl --root="$ROOT" enable flockos-network-profiles.service flockos-network-profiles-trial.service
+  systemctl --root="$ROOT" enable ironflockos-network-profiles.service ironflockos-network-profiles-trial.service
   # /apps is /data/apps (/etc/fstab); the check says when it is not.
-  systemctl --root="$ROOT" enable flockos-apps-check.service
+  systemctl --root="$ROOT" enable ironflockos-apps-check.service
   # GRUB counts every boot as a try; the Pi's tryboot counts only the first
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then
-    systemctl --root="$ROOT" enable flockos-slot-proven.path flockos-slot-keep.timer
+    systemctl --root="$ROOT" enable ironflockos-slot-proven.path ironflockos-slot-keep.timer
   fi
   # The device's own enroll, PTP and proxy settings live on /data, so they
   # outlive updates.
-  mkdir -p "$ROOT/etc/flockos"
-  ln -sfn /data/flockos/enroll.conf "$ROOT/etc/flockos/enroll.conf"
-  ln -sfn /data/flockos/ptp.conf "$ROOT/etc/flockos/ptp.conf"
-  ln -sfn /data/flockos/proxy.conf "$ROOT/etc/flockos/proxy.conf"
+  mkdir -p "$ROOT/etc/ironflockos"
+  ln -sfn /data/ironflockos/enroll.conf "$ROOT/etc/ironflockos/enroll.conf"
+  ln -sfn /data/ironflockos/ptp.conf "$ROOT/etc/ironflockos/ptp.conf"
+  ln -sfn /data/ironflockos/proxy.conf "$ROOT/etc/ironflockos/proxy.conf"
 fi
 if [ "$KERNEL" = rt ]; then
-  systemctl --root="$ROOT" enable flockos-rt-tuning.service
-  mkdir -p "$ROOT/etc/flockos"
-  ln -sfn /data/flockos/rt.conf "$ROOT/etc/flockos/rt.conf"
+  systemctl --root="$ROOT" enable ironflockos-rt-tuning.service
+  mkdir -p "$ROOT/etc/ironflockos"
+  ln -sfn /data/ironflockos/rt.conf "$ROOT/etc/ironflockos/rt.conf"
 fi
 # Nothing changes the OS behind RAUC's back, nothing asks questions on the
 # console, nothing fetches firmware metadata on its own (sections 3.9, 3.10).
@@ -225,10 +225,10 @@ systemctl --root="$ROOT" mask apt-daily.timer apt-daily-upgrade.timer fwupd-refr
 mkdir -p "$ROOT/etc/systemd/system-generators"
 ln -sfn /dev/null "$ROOT/etc/systemd/system-generators/systemd-ssh-generator"
 if [ "$VARIANT" = installer ]; then
-  systemctl --root="$ROOT" is-enabled flockos-installer.service >/dev/null || die "flockos-installer.service is not enabled"
+  systemctl --root="$ROOT" is-enabled ironflockos-installer.service >/dev/null || die "ironflockos-installer.service is not enabled"
 else
-  for unit in flockos-ssh-hostkeys.service flockos-enroll.service flockos-gce-flock.service flockos-fwupd-shim.service \
-    flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
+  for unit in ironflockos-ssh-hostkeys.service ironflockos-enroll.service ironflockos-gce-flock.service ironflockos-fwupd-shim.service \
+    ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
     systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
   done
   [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||
@@ -236,8 +236,8 @@ else
 fi
 if [ "$VARIANT" = nvidia ]; then
   # nvidia-persistenced fails without a GPU: udev starts it where the nvidia
-  # module loads (71-flockos-nvidia.rules). nvidia-powerd is for notebooks.
-  # 10-flockos-nvidia.preset keeps both off on each slot's first boot.
+  # module loads (71-ironflockos-nvidia.rules). nvidia-powerd is for notebooks.
+  # 10-ironflockos-nvidia.preset keeps both off on each slot's first boot.
   systemctl --root="$ROOT" disable nvidia-persistenced.service nvidia-powerd.service
   compgen -G "$ROOT/usr/lib/modules/$kver/updates/nvidia/nvidia.ko*" >/dev/null ||
     die "no NVIDIA kernel module for $kver in the image"

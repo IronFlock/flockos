@@ -7,11 +7,11 @@
 # 1. Installs the headers of the image's kernel and nvidia-kernel-open-dkms
 #    at DRIVER_VERSION; DKMS builds the modules for that kernel (not for the
 #    build host's).
-# 2. Wraps the built modules in a package, flockos-nvidia-modules, so dpkg
+# 2. Wraps the built modules in a package, ironflockos-nvidia-modules, so dpkg
 #    owns them and packages.tsv lists them.
 # 3. Purges everything step 1 installed: DKMS, the module sources, the
 #    headers, the compiler. The image ends with the package set it started
-#    with plus flockos-nvidia-modules, or the build fails.
+#    with plus ironflockos-nvidia-modules, or the build fails.
 set -euo pipefail
 [ "$#" -eq 1 ] || {
   echo "usage: nvidia-modules.sh DRIVER_VERSION" >&2
@@ -41,7 +41,7 @@ if ! dkms status -m nvidia -v "$modver" -k "$kver" | grep -q ': installed'; then
 fi
 
 built=/lib/modules/$kver/updates/dkms
-pkg=/tmp/flockos-nvidia-modules
+pkg=/tmp/ironflockos-nvidia-modules
 rm -rf "$pkg"
 mkdir -p "$pkg/DEBIAN" "$pkg/usr/lib/modules/$kver/updates/nvidia"
 for m in nvidia nvidia-modeset nvidia-drm nvidia-uvm nvidia-peermem; do
@@ -56,13 +56,13 @@ vermagic=$(modinfo -F vermagic "$pkg/usr/lib/modules/$kver/updates/nvidia/"nvidi
 # The licence of the modules is their source's: nvidia-kernel-open-dkms's
 # copyright file (MIT; a kernel module linked from it is MIT/GPL-2.0). The
 # release publishes the source (release/sources).
-doc=$pkg/usr/share/doc/flockos-nvidia-modules
+doc=$pkg/usr/share/doc/ironflockos-nvidia-modules
 mkdir -p "$doc"
 [ -f /usr/share/doc/nvidia-kernel-open-dkms/copyright ] || die "nvidia-kernel-open-dkms $driver has no copyright file"
 cp /usr/share/doc/nvidia-kernel-open-dkms/copyright "$doc/copyright"
 
 cat >"$pkg/DEBIAN/control" <<CONTROL
-Package: flockos-nvidia-modules
+Package: ironflockos-nvidia-modules
 Version: $driver
 Architecture: $(dpkg --print-architecture)
 Maintainer: IronFlock <security@ironflock.com>
@@ -80,18 +80,18 @@ set -e
 depmod -a $kver
 POSTINST
 chmod 0755 "$pkg/DEBIAN/postinst"
-dpkg-deb --root-owner-group --build "$pkg" /tmp/flockos-nvidia-modules.deb >/dev/null
-dpkg -i /tmp/flockos-nvidia-modules.deb
-rm -rf "$pkg" /tmp/flockos-nvidia-modules.deb
+dpkg-deb --root-owner-group --build "$pkg" /tmp/ironflockos-nvidia-modules.deb >/dev/null
+dpkg -i /tmp/ironflockos-nvidia-modules.deb
+rm -rf "$pkg" /tmp/ironflockos-nvidia-modules.deb
 
 # Everything the build installed goes again.
-mapfile -t added < <(comm -13 <(echo "$before") <(installed) | grep -vx flockos-nvidia-modules)
+mapfile -t added < <(comm -13 <(echo "$before") <(installed) | grep -vx ironflockos-nvidia-modules)
 log "purging the build tools: ${added[*]}"
 apt-get purge -y -q "${added[@]}"
 rm -rf /var/lib/dkms /etc/dkms /usr/src/nvidia-*
-expected=$(printf '%s\nflockos-nvidia-modules\n' "$before" | sort)
+expected=$(printf '%s\nironflockos-nvidia-modules\n' "$before" | sort)
 if [ "$(installed)" != "$expected" ]; then
-  die "the package set changed beyond flockos-nvidia-modules: $(diff <(echo "$expected") <(installed) | grep '^[<>]' | tr '\n' ' ')"
+  die "the package set changed beyond ironflockos-nvidia-modules: $(diff <(echo "$expected") <(installed) | grep '^[<>]' | tr '\n' ' ')"
 fi
 for tool in cc gcc g++ make dkms; do
   ! command -v "$tool" >/dev/null || die "$tool is still in the image"
@@ -101,4 +101,4 @@ depmod -a "$kver"
 # The initramfs applies nvidia-kernel-support's blacklist of nouveau and
 # nova-core.
 update-initramfs -u -k "$kver"
-log "flockos-nvidia-modules $driver for $kver installed"
+log "ironflockos-nvidia-modules $driver for $kver installed"

@@ -34,12 +34,12 @@ setup() {
   [ "$(sed -n '/^\[all\]/,/^\[/p' "$t/boot/autoboot.txt" | grep '^boot_partition=')" = boot_partition=2 ]
   [ "$(sed -n '/^\[tryboot\]/,$p' "$t/boot/autoboot.txt" | grep '^boot_partition=')" = boot_partition=3 ]
   grep -qx 'tryboot_a_b=1' "$t/boot/autoboot.txt"
-  run env IMAGE_NAME=x.img DISK_UUID=d FLOCKOS_UUID=f BOOT_A_UUID=a BOOT_B_UUID=b ROOT_A_UUID=r \
+  run env IMAGE_NAME=x.img DISK_UUID=d IRONFLOCKOS_UUID=f BOOT_A_UUID=a BOOT_B_UUID=b ROOT_A_UUID=r \
     SLOT_SIZE=4G bash -c ". '$repo/build/lib.sh'; load_conf '$t/target.conf'; render '$t/genimage.cfg'"
   [ "$status" -eq 0 ]
   ! printf '%s\n' "$output" | grep -v '^#' | grep -q '@[A-Z_]*@'
   order=$(printf '%s\n' "$output" | sed -n 's/^\tpartition \([^ ]*\) {$/\1/p' | tr '\n' ' ')
-  [ "$order" = "FLOCKOS boot-a boot-b rootfs-a " ]
+  [ "$order" = "IRONFLOCKOS boot-a boot-b rootfs-a " ]
 }
 
 @test "repart.d matches the image's four partitions in order and adds rootfs-b and data" {
@@ -48,20 +48,20 @@ setup() {
     out=$(SLOT_SIZE=4G render "$f")
     labels="$labels $(printf '%s\n' "$out" | sed -n 's/^Label=//p')"
   done
-  [ "$labels" = " FLOCKOS boot-a boot-b rootfs-a rootfs-b data" ]
+  [ "$labels" = " IRONFLOCKOS boot-a boot-b rootfs-a rootfs-b data" ]
 }
 
 @test "RAUC: the tryboot backend, boot and root slots grouped by GPT name" {
-  run env COMPATIBLE=flockos-rpi-arm64-base bash -c ". '$repo/build/lib.sh'; render '$t/system.conf'"
+  run env COMPATIBLE=ironflockos-rpi-arm64-base bash -c ". '$repo/build/lib.sh'; render '$t/system.conf'"
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qx 'bootloader=custom'
-  printf '%s\n' "$output" | grep -qx 'bootloader-custom-backend=/usr/lib/flockos/rpi-tryboot'
+  printf '%s\n' "$output" | grep -qx 'bootloader-custom-backend=/usr/lib/ironflockos/rpi-tryboot'
   printf '%s\n' "$output" | grep -qx 'use-bundle-signing-time=true'
   # each boot partition belongs to the root slot of its letter
   groups=$(printf '%s\n' "$output" | awk '/^\[slot\./ { s = $0 } /^device=/ { d[s] = $0 } /^parent=/ { print s, d[s], $0 }')
   [ "$groups" = "$(printf '%s\n' '[slot.boot.0] device=/dev/disk/by-partlabel/boot-a parent=rootfs.0' '[slot.boot.1] device=/dev/disk/by-partlabel/boot-b parent=rootfs.1')" ]
   printf '%s\n' "$output" | grep -A3 '^\[slot.rootfs.1\]' | grep -qx 'bootname=B'
-  [ -x "$t/overlay/usr/lib/flockos/rpi-tryboot" ]
+  [ -x "$t/overlay/usr/lib/ironflockos/rpi-tryboot" ]
 }
 
 @test "the Raspberry Pi archive key is the pinned one" {

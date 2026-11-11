@@ -48,10 +48,10 @@ jobs:
       rootfs-recipe: rootfs
       rootfs-matrix: >-
         [
-          {"name": "amd64-efi-base", "args": "amd64-efi base std", "path": "flockos-amd64-efi-base/rootfs"},
-          {"name": "amd64-efi-base-rt", "args": "amd64-efi base rt", "path": "flockos-amd64-efi-base-rt/rootfs"},
-          {"name": "amd64-efi-nvidia", "args": "amd64-efi nvidia std", "path": "flockos-amd64-efi-nvidia/rootfs"},
-          {"name": "arm64-efi-base", "args": "arm64-efi base std", "path": "flockos-arm64-efi-base/rootfs", "runner": "ubuntu-24.04-arm"},
-          {"name": "arm64-efi-base-rt", "args": "arm64-efi base rt", "path": "flockos-arm64-efi-base-rt/rootfs", "runner": "ubuntu-24.04-arm"},
-          {"name": "rpi-arm64-base", "args": "rpi-arm64 base std", "path": "flockos-rpi-arm64-base/rootfs", "runner": "ubuntu-24.04-arm"}
+          {"name": "amd64-efi-base", "args": "amd64-efi base std", "path": "ironflockos-amd64-efi-base/rootfs"},
+          {"name": "amd64-efi-base-rt", "args": "amd64-efi base rt", "path": "ironflockos-amd64-efi-base-rt/rootfs"},
+          {"name": "amd64-efi-nvidia", "args": "amd64-efi nvidia std", "path": "ironflockos-amd64-efi-nvidia/rootfs"},
+          {"name": "arm64-efi-base", "args": "arm64-efi base std", "path": "ironflockos-arm64-efi-base/rootfs", "runner": "ubuntu-24.04-arm"},
+          {"name": "arm64-efi-base-rt", "args": "arm64-efi base rt", "path": "ironflockos-arm64-efi-base-rt/rootfs", "runner": "ubuntu-24.04-arm"},
+          {"name": "rpi-arm64-base", "args": "rpi-arm64 base std", "path": "ironflockos-rpi-arm64-base/rootfs", "runner": "ubuntu-24.04-arm"}
         ]

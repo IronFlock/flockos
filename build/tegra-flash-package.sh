@@ -39,10 +39,10 @@ l4t=$(cd "$1" && pwd) slot_image=$2 board=$3 board_id=$4 board_sku=$5
 require zstd debugfs e2fsck python3
 load_conf "$src/targets/jetson-orin/target.conf"
 case "$(basename "$slot_image")" in
-  flockos-jetson-orin-*-*.rootfs.ext4.zst) ;;
+  ironflockos-jetson-orin-*-*.rootfs.ext4.zst) ;;
   *) die "$slot_image is not a jetson-orin slot image" ;;
 esac
-IMAGE_ID=$(basename "$slot_image" | sed -E 's/^(flockos-jetson-orin-[a-z]+(-rt)?)-[0-9].*$/\1/')
+IMAGE_ID=$(basename "$slot_image" | sed -E 's/^(ironflockos-jetson-orin-[a-z]+(-rt)?)-[0-9].*$/\1/')
 export IMAGE_ID
 uuid_a=$(uuid_for rootfs-a)
 uuid_b=$(uuid_for rootfs-b)
@@ -68,7 +68,7 @@ fix_reuse_option l4t_initrd_flash.func "u:p:P:v:c:r:-:S:k:i:" "u:p:P:v:c:r-:S:k:
 fix_reuse_option l4t_create_images_for_kernel_flash.sh "k:u:p:v:c:r:-:S:i:" "k:u:p:v:c:r-:S:i:"
 
 # --- layout ----------------------------------------------------------------
-layout=$kf/flockos_t234_nvme_rootfs_ab.xml
+layout=$kf/ironflockos_t234_nvme_rootfs_ab.xml
 python3 -I "$here/tegra-layout.py" "$kf/flash_l4t_t234_nvme_rootfs_ab.xml" "$layout"
 log "layout: $layout"
 
@@ -80,7 +80,7 @@ debugfs -R "dump $ext $work/extlinux.conf" "$bl/system.img.raw" 2>/dev/null
 grep -q " root=PARTUUID=$uuid_a " "$work/extlinux.conf" ||
   die "the slot image's extlinux.conf does not boot slot A ($uuid_a)"
 cp --sparse=always "$bl/system.img.raw" "$bl/system.img_b.raw"
-sh "$src/targets/jetson-orin/overlay/usr/lib/flockos/tegra-extlinux" "$work/extlinux.conf" "$uuid_b" B
+sh "$src/targets/jetson-orin/overlay/usr/lib/ironflockos/tegra-extlinux" "$work/extlinux.conf" "$uuid_b" B
 debugfs -w -R "rm $ext" "$bl/system.img_b.raw" >/dev/null 2>&1
 debugfs -w -R "write $work/extlinux.conf $ext" "$bl/system.img_b.raw" >/dev/null 2>&1
 debugfs -R "cat $ext" "$bl/system.img_b.raw" 2>/dev/null | grep -q " root=PARTUUID=$uuid_b .*rauc.slot=B" ||

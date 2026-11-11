@@ -1,0 +1,14 @@
+[Unit]
+Description=IronFlockOS: real-time tuning from /etc/ironflockos/rt.conf
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
+After=local-fs.target boot-efi.mount ironflockos-data-layout.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ironflockos/rt-tuning
+
+[Install]
+WantedBy=multi-user.target
+Also=ironflockos-rt-tuning.path

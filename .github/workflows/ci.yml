@@ -134,7 +134,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: image-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
-          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
+          path: out/ironflockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
       - name: install QEMU, UEFI firmware and mtools
         env:
           QEMU_PACKAGES: ${{ matrix.qemu }}
@@ -156,19 +156,19 @@ jobs:
           docker save -o "$RUNNER_TEMP/hello-world.tar" hello-world:latest
       - name: QEMU image test
         run: |
-          sudo mkdir -p /mnt/flockos-qemu
-          sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
+          sudo mkdir -p /mnt/ironflockos-qemu
+          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-qemu
           # shellcheck disable=SC2086 # SECURE_BOOT is one flag or nothing
           python3 -I test/qemu/run.py --target "$TARGET" --variant "$VARIANT" --kernel "$KERNEL" \
-            --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar" $SECURE_BOOT
+            --work /mnt/ironflockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar" $SECURE_BOOT
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qemu-logs-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
           path: |
-            /mnt/flockos-qemu/console.log
-            /mnt/flockos-qemu/shell.log
+            /mnt/ironflockos-qemu/console.log
+            /mnt/ironflockos-qemu/shell.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -203,7 +203,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: image-${{ env.TARGET }}-installer
-          path: out/flockos-${{ env.TARGET }}-installer
+          path: out/ironflockos-${{ env.TARGET }}-installer
       - name: install QEMU, UEFI firmware and mtools
         env:
           QEMU_PACKAGES: ${{ matrix.qemu }}
@@ -219,19 +219,19 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: QEMU install test
         run: |
-          sudo mkdir -p /mnt/flockos-install
-          sudo chown "$(id -u):$(id -g)" /mnt/flockos-install
-          python3 -I test/qemu/run.py --target "$TARGET" --variant installer --work /mnt/flockos-install --keep --secure-boot
+          sudo mkdir -p /mnt/ironflockos-install
+          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-install
+          python3 -I test/qemu/run.py --target "$TARGET" --variant installer --work /mnt/ironflockos-install --keep --secure-boot
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qemu-logs-${{ env.TARGET }}-installer
           path: |
-            /mnt/flockos-install/console-installer.log
-            /mnt/flockos-install/console.log
-            /mnt/flockos-install/shell.log
-            /mnt/flockos-install/flockos-installer.log
+            /mnt/ironflockos-install/console-installer.log
+            /mnt/ironflockos-install/console.log
+            /mnt/ironflockos-install/shell.log
+            /mnt/ironflockos-install/ironflockos-installer.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -294,20 +294,20 @@ jobs:
         run: '"$HARNESS/scripts/install-tool.sh" just'
       - name: scratch space on the runner's second disk
         run: |
-          sudo mkdir -p /mnt/flockos-work
+          sudo mkdir -p /mnt/ironflockos-work
           df -h / /mnt
       - name: just build jetson-orin base
         env:
-          FLOCKOS_WORK: /mnt/flockos-work
+          IRONFLOCKOS_WORK: /mnt/ironflockos-work
         run: just build jetson-orin base
       - name: jetson-rootfs-check
-        run: sudo test/image/jetson-rootfs-check.sh /mnt/flockos-work/flockos-jetson-orin-base/rootfs
+        run: sudo test/image/jetson-rootfs-check.sh /mnt/ironflockos-work/ironflockos-jetson-orin-base/rootfs
       - name: upload the slot image, bundle, package list and os-release
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-jetson-orin-base
-          path: out/flockos-jetson-orin-base/
+          path: out/ironflockos-jetson-orin-base/
           if-no-files-found: ignore
           compression-level: 0
           retention-days: 3
@@ -329,13 +329,13 @@ jobs:
           persist-credentials: false
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/flockos-bsp-cache
+          path: ~/ironflockos-bsp-cache
           key: l4t-bsp-${{ hashFiles('targets/jetson-orin/bsp.conf') }}
       - name: fetch and unpack the BSP
         run: |
           sudo mkdir -p /mnt/l4t
-          sudo build/fetch-bsp.sh "$HOME/flockos-bsp-cache" /mnt/l4t
-          sudo chown -R "$(id -u):$(id -g)" "$HOME/flockos-bsp-cache"
+          sudo build/fetch-bsp.sh "$HOME/ironflockos-bsp-cache" /mnt/l4t
+          sudo chown -R "$(id -u):$(id -g)" "$HOME/ironflockos-bsp-cache"
           df -h / /mnt
       - name: NVIDIA's flashing prerequisites
         run: sudo /mnt/l4t/Linux_for_Tegra/tools/l4t_flash_prerequisites.sh
@@ -349,8 +349,8 @@ jobs:
       - name: tegra-flash-package (offline, Orin Nano 8GB developer kit)
         run: |
           # shellcheck disable=SC2016 # "$@" belongs to the inner bash
-          sudo unshare -m bash -c 'mount -t tmpfs flockos-no-usb /sys/bus/usb/devices && mkdir /sys/bus/usb/devices/usb1 && exec "$@"' bash \
-            build/tegra-flash-package.sh /mnt/l4t/Linux_for_Tegra image/flockos-jetson-orin-base-*.rootfs.ext4.zst \
+          sudo unshare -m bash -c 'mount -t tmpfs ironflockos-no-usb /sys/bus/usb/devices && mkdir /sys/bus/usb/devices/usb1 && exec "$@"' bash \
+            build/tegra-flash-package.sh /mnt/l4t/Linux_for_Tegra image/ironflockos-jetson-orin-base-*.rootfs.ext4.zst \
             jetson-orin-nano-devkit 3767 0003
       - name: what the package holds
         if: ${{ always() }}
@@ -363,7 +363,7 @@ jobs:
     uses: IronFlock/workflows/.github/workflows/workflows-lint.yml@v1
 
   # The version decides: a bump makes a release PR (`just release-patch`,
-  # title `release flockos v<version>`), an unchanged version a no-release PR
+  # title `release ironflockos v<version>`), an unchanged version a no-release PR
   # (`just merge`) whose merge releases nothing.
   intent:
     uses: IronFlock/workflows/.github/workflows/release-intent.yml@v1

@@ -76,7 +76,7 @@ jobs:
       VARIANT: ${{ matrix.variant }}
       KERNEL: ${{ matrix.kernel }}
       SUFFIX: ${{ matrix.kernel == 'rt' && '-rt' || '' }}
-      FLOCKOS_SIGNING: ${{ inputs.signing }}
+      IRONFLOCKOS_SIGNING: ${{ inputs.signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,11 +99,11 @@ jobs:
         run: '"$HARNESS/scripts/install-tool.sh" just'
       - name: scratch space on the runner's second disk
         run: |
-          sudo mkdir -p /mnt/flockos-work
+          sudo mkdir -p /mnt/ironflockos-work
           df -h / /mnt
-      - name: just build ${{ env.TARGET }} ${{ env.VARIANT }} ${{ env.KERNEL }} (${{ env.FLOCKOS_SIGNING }})
+      - name: just build ${{ env.TARGET }} ${{ env.VARIANT }} ${{ env.KERNEL }} (${{ env.IRONFLOCKOS_SIGNING }})
         env:
-          FLOCKOS_WORK: /mnt/flockos-work
+          IRONFLOCKOS_WORK: /mnt/ironflockos-work
         run: just build "$TARGET" "$VARIANT" "$KERNEL"
       # The release's SBOM of the image (CycloneDX, from the tree the build
       # left in its scratch space), published with it.
@@ -111,16 +111,16 @@ jobs:
         if: inputs.signing == 'release'
         run: |
           "$HARNESS/scripts/install-tool.sh" trivy
-          image=flockos-$TARGET-$VARIANT$SUFFIX
+          image=ironflockos-$TARGET-$VARIANT$SUFFIX
           version=$(tr -d '[:space:]' < VERSION)
           sudo env "PATH=$PATH" trivy rootfs --quiet --scanners vuln --format cyclonedx \
-            --output "out/$image/$image-$version.cdx.json" "/mnt/flockos-work/$image/rootfs"
+            --output "out/$image/$image-$version.cdx.json" "/mnt/ironflockos-work/$image/rootfs"
           sudo chown "$(id -u):$(id -g)" "out/$image/$image-$version.cdx.json"
       - name: upload the image and bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.prefix }}-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
-          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}/
+          path: out/ironflockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}/
           if-no-files-found: error
           compression-level: 0
           retention-days: 3
@@ -145,7 +145,7 @@ jobs:
             runner: ubuntu-24.04-arm
     env:
       TARGET: ${{ matrix.target }}
-      FLOCKOS_SIGNING: ${{ inputs.signing }}
+      IRONFLOCKOS_SIGNING: ${{ inputs.signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -175,19 +175,19 @@ jobs:
           PREFIX: ${{ inputs.prefix }}
         run: |
           mkdir -p out
-          for d in dl/"$PREFIX-$TARGET"-*; do mv "$d" "out/flockos-${d#dl/"$PREFIX"-}"; done
+          for d in dl/"$PREFIX-$TARGET"-*; do mv "$d" "out/ironflockos-${d#dl/"$PREFIX"-}"; done
           ls out/
-      - name: just build ${{ env.TARGET }} installer (${{ env.FLOCKOS_SIGNING }})
+      - name: just build ${{ env.TARGET }} installer (${{ env.IRONFLOCKOS_SIGNING }})
         env:
-          FLOCKOS_WORK: /mnt/flockos-work
+          IRONFLOCKOS_WORK: /mnt/ironflockos-work
         run: |
-          sudo mkdir -p /mnt/flockos-work
+          sudo mkdir -p /mnt/ironflockos-work
           just build "$TARGET" installer
       - name: upload the installer image
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.prefix }}-${{ env.TARGET }}-installer
-          path: out/flockos-${{ env.TARGET }}-installer/
+          path: out/ironflockos-${{ env.TARGET }}-installer/
           if-no-files-found: error
           compression-level: 0
           retention-days: 3

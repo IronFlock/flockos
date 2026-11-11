@@ -27,8 +27,8 @@ load_conf "$here/builder.conf"
 creds=()
 if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
   [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] || die "GOOGLE_APPLICATION_CREDENTIALS names no file"
-  creds=(-v "$GOOGLE_APPLICATION_CREDENTIALS:/run/flockos/gcp-credentials.json:ro"
-    -e GOOGLE_APPLICATION_CREDENTIALS=/run/flockos/gcp-credentials.json)
+  creds=(-v "$GOOGLE_APPLICATION_CREDENTIALS:/run/ironflockos/gcp-credentials.json:ro"
+    -e GOOGLE_APPLICATION_CREDENTIALS=/run/ironflockos/gcp-credentials.json)
 fi
 
 log "signing the bundles in $out ($mode) in $BUILDER_IMAGE"
@@ -38,8 +38,8 @@ docker run --rm \
   -v "$repo:/src:ro" \
   -v "$out:/out" \
   ${creds[@]+"${creds[@]}"} \
-  -e FLOCKOS_HOST_UID="$(id -u)" \
-  -e FLOCKOS_HOST_GID="$(id -g)" \
+  -e IRONFLOCKOS_HOST_UID="$(id -u)" \
+  -e IRONFLOCKOS_HOST_GID="$(id -g)" \
   -e DEBIAN_FRONTEND=noninteractive \
   "$BUILDER_IMAGE" \
   bash -c 'set -e

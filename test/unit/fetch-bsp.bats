@@ -22,9 +22,9 @@ teardown() { rm -rf "$dir"; }
 
 # conf SHA256 SHA1 HASHES_URL
 conf() {
-  export FLOCKOS_BSP_CONF=$dir/bsp.conf
+  export IRONFLOCKOS_BSP_CONF=$dir/bsp.conf
   printf 'L4T_VERSION=39.2.1\nBSP_URL=file://%s/www/%s\nBSP_HASHES_URL=%s\nBSP_SHA1=%s\nBSP_SHA256=%s\n' \
-    "$dir" "$name" "$3" "$2" "$1" >"$FLOCKOS_BSP_CONF"
+    "$dir" "$name" "$3" "$2" "$1" >"$IRONFLOCKOS_BSP_CONF"
 }
 
 @test "downloads, verifies and unpacks the BSP" {
@@ -67,7 +67,7 @@ conf() {
 }
 
 @test "the target's pin is complete" {
-  unset FLOCKOS_BSP_CONF
+  unset IRONFLOCKOS_BSP_CONF
   . "$repo/build/lib.sh"
   load_conf "$repo/targets/jetson-orin/bsp.conf"
   [[ "$BSP_SHA256" =~ ^[0-9a-f]{64}$ ]] && [[ "$BSP_SHA1" =~ ^[0-9a-f]{40}$ ]]

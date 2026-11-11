@@ -1,6 +1,0 @@
-[Unit]
-Description=IronFlockOS: apply a changed /etc/flockos/rt.conf
-
-[Service]
-Type=oneshot
-ExecStart=/usr/lib/flockos/rt-tuning

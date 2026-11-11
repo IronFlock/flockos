@@ -1,4 +1,4 @@
 
 IronFlockOS installer. It writes IronFlockOS to an internal disk on its own
-(flockos-installer.service); its log is on the stick's FLOCKOS partition.
+(ironflockos-installer.service); its log is on the stick's IRONFLOCKOS partition.
 

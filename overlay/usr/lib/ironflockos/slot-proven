@@ -1,0 +1,19 @@
+#!/bin/sh
+# Remembers that the system in the booted slot has proven itself: the
+# device-agent has marked the slot good, so it reached the platform. The mark
+# is a file in the slot's own root filesystem, so an update, which rewrites the
+# slot, removes it and the new system has to prove itself again.
+# (ironflockos-slot-proven.path runs this when grubenv changes.)
+set -eu
+# IRONFLOCKOS_GRUBENV, IRONFLOCKOS_PROC_CMDLINE, IRONFLOCKOS_SLOT_PROVEN: for the unit tests only.
+grubenv=${IRONFLOCKOS_GRUBENV:-/boot/efi/EFI/BOOT/grubenv}
+cmdline=${IRONFLOCKOS_PROC_CMDLINE:-/proc/cmdline}
+mark=${IRONFLOCKOS_SLOT_PROVEN:-/var/lib/ironflockos/slot-proven}
+
+slot=$(tr ' ' '\n' <"$cmdline" | sed -n 's/^rauc\.slot=//p')
+[ -n "$slot" ] || exit 0
+state=$(grub-editenv "$grubenv" list)
+printf '%s\n' "$state" | grep -qx "${slot}_OK=1" || exit 0
+printf '%s\n' "$state" | grep -qx "${slot}_TRY=0" || exit 0
+mkdir -p "$(dirname "$mark")"
+: >"$mark"

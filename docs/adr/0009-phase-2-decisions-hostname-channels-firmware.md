@@ -15,17 +15,17 @@ of Phase 2 (section 7). Three teams read the catalog, so its shape is agreed her
 
 ### 1. Hostname from the `.flock` by default
 
-On IronFlockOS, `flockos-enroll` runs `ironflock-init enroll --hostname-from-flock`: every
+On IronFlockOS, `ironflockos-enroll` runs `ironflock-init enroll --hostname-from-flock`: every
 device is named after its device name in the platform, as ReswarmOS devices were.
 `ironflock-init` makes the name a valid hostname (an RFC 1123 label) and keeps the
 current hostname when nothing valid is left. A device keeps its hostname with
-`hostname-from-flock=no` in `/etc/flockos/enroll.conf`, which links to
-`/data/flockos/enroll.conf` and so outlives updates. device-init on other Linux systems
+`hostname-from-flock=no` in `/etc/ironflockos/enroll.conf`, which links to
+`/data/ironflockos/enroll.conf` and so outlives updates. device-init on other Linux systems
 keeps leaving the hostname alone: there the machine was named by its owner.
 
 ### 2. Two release channels: production and test
 
-`dl/flockos/manifest.json` names a version for `production` and, optionally, for `test`.
+`dl/ironflockos/manifest.json` names a version for `production` and, optionally, for `test`.
 Devices marked as test devices in the platform follow `test`; all others `production`.
 A release goes to `test` first; promoting it moves `production` to its version, without
 a rebuild. This mirrors the device-agent's own manifest (`channels.production`,
@@ -72,15 +72,15 @@ One document serves both readers ([schema](../manifest.schema.json),
 
 The document is published in the device-agent's envelope (`{"payload": "<base64>",
 "signature": "<Ed25519 .sig>"}`, at most 64 KiB), signed over
-`flockos-manifest:v1`, `flockos/manifest.json` and the payload's SHA-256, with an
+`ironflockos-manifest:v1`, `ironflockos/manifest.json` and the payload's SHA-256, with an
 Ed25519 key in Cloud KMS that only IronFlockOS release runs may use (WP-2.6). The
 device-agent and FlockFlasher compile its public key in. `issued_at` lets a reader
 refuse a document older than the last one it accepted.
 
 ### 5. Real-time tuning (open question 5, settled by WP-4b.1)
 
-The platform sets it per device: it writes `/data/flockos/rt.conf`, which
-`flockos-rt-tuning` applies. Without the file an `-rt` image limits C-states and
+The platform sets it per device: it writes `/data/ironflockos/rt.conf`, which
+`ironflockos-rt-tuning` applies. Without the file an `-rt` image limits C-states and
 isolates nothing.
 
 ## Consequences

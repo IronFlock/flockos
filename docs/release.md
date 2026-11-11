@@ -2,7 +2,7 @@
 
 An IronFlockOS release is the merge of a release pull request (`just release-patch`,
 `just release-minor`, `just release-major`: a `VERSION` bump with the title
-`release flockos v<version>`). Its push to `main` runs `release.yml`, which
+`release ironflockos v<version>`). Its push to `main` runs `release.yml`, which
 builds every image, signs the bundles, tests the release image, publishes the
 images and the signed catalog, and sets the tag last. Nothing is built, signed
 or published from a laptop.
@@ -13,31 +13,31 @@ or published from a laptop.
 |-----|--------------|----------|
 | `verify` | Decides what the run is: a release, a re-run after the tag, or a dry run (harness `release.sh mode`) | none |
 | `build` | Every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM | none |
-| `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)) | `flockos-release` |
+| `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)) | `ironflockos-release` |
 | `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code; `stage` waits for it | the harness workflow (Sigstore) |
 | `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
-| `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
-| `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |
-| `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `flockos/release-notes.json`. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
-| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates IronFlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
+| `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/ironflockos/<version>/` (`build/publish.sh stage`) | `ironflockos-publisher` |
+| `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/ironflockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `ironflockos-publisher` |
+| `promote` | The staged files to `gs://ironflock-downloads/ironflockos/<version>/`; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `ironflockos/release-notes.json`. Then the catalog, built on the published one and signed with the catalog key, to `ironflockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `ironflockos-release` (the catalog), `ironflockos-publisher` (the files) |
+| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `ironflockos-<target>-<variant>`, from which the virtual-device-manager creates IronFlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-ironflockos-images-for-virtual-devices.md)) | `ironflockos-publisher` |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
-| `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `flockos-release`, `flockos-publisher` |
+| `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `ironflockos-release`, `ironflockos-publisher` |
 
 The workload identity pool gives the two IronFlockOS identities only to a push of
-`release.yml` on `main` and to runs on `v*` tags. `flockos-publisher` can write
+`release.yml` on `main` and to runs on `v*` tags. `ironflockos-publisher` can write
 the two IronFlockOS trees of the download bucket and make Compute Engine images named
-`flockos-*`, and nothing else.
+`ironflockos-*`, and nothing else.
 
-**The VM images.** An image is `flockos-<target>-<variant>-v<x-y-z>` in
-`record-1283`, stored in `eu`, in the family `flockos-<target>-<variant>`. The
+**The VM images.** An image is `ironflockos-<target>-<variant>-v<x-y-z>` in
+`record-1283`, stored in `eu`, in the family `ironflockos-<target>-<variant>`. The
 family serves the newest release, the test channel's. Its disk is the smallest
 the IronFlockOS layout fits (10 GiB for base, 18 GiB for nvidia), so a product's
 `minDiskSize_GB` must be at least that. The tarball Compute Engine reads goes to
-`staging/flockos/<version>/gce/` and is removed once the image exists. A re-run
+`staging/ironflockos/<version>/gce/` and is removed once the image exists. A re-run
 keeps an image made from the same file.
 
-**The catalog.** `tools/catalog` builds `dl/flockos/manifest.json`
+**The catalog.** `tools/catalog` builds `dl/ironflockos/manifest.json`
 ([manifest.schema.json](manifest.schema.json), ADR-0009):
 
 - The release goes to the **test** channel. The first release is
@@ -62,22 +62,22 @@ keeps an image made from the same file.
   have no `payloads`: their sticks carry the base image only, and readers take
   it so.
 - **The device-agent downloads a bundle from its own update base**, at
-  `<update base>/flockos/<version>/<file>`, where `<file>` is the last part of
+  `<update base>/ironflockos/<version>/<file>`, where `<file>` is the last part of
   the bundle's `url` (from device-agent 1.6.3). The `url`s
   name the copy on the download server; the catalog is signed, so no mirror
   can change them. On the cloud both are the same file. A device behind an
   IronFlock appliance reaches only the appliance, whose OS mirror serves the
   catalog unchanged and the bundles of the images its devices run, under the
   same paths. Size and sha256 still come from the signed catalog. The layout
-  `flockos/<version>/<file>` is therefore part of the contract with readers.
+  `ironflockos/<version>/<file>` is therefore part of the contract with readers.
 - FlockFlasher (from the release after v2.2.4) reloads the catalog when its
   board list is shown, at most every five minutes, so a new release appears
   without restarting it.
 - Each image names what `ironflock os install` needs of a disk
   ([below](#what-ironflock-os-install-reads)). Releases up to 0.14.0 do not.
 - The catalog is signed in the device-agent's envelope with the Cloud KMS key
-  `ironflock-release/flockos-catalog`. The tool verifies its own output, and
-  `catalog verify -pubkey pki/flockos-catalog.pub manifest.json` checks a
+  `ironflock-release/ironflockos-catalog`. The tool verifies its own output, and
+  `catalog verify -pubkey pki/ironflockos-catalog.pub manifest.json` checks a
   published one.
 
 **Dry runs** run every job on release pull requests (`ci.yml` calls
@@ -136,7 +136,7 @@ devices, with the sections `## Security`, `## New`, `## Fixed` and
 `## Changed`, in that order, the empty ones left out, and no heading of its
 own (`just check-release-notes`, part of `just lint`). They are optional.
 Commit the file before `just release-patch`: `promote` publishes every
-file of the release's commit as `flockos/release-notes.json`
+file of the release's commit as `ironflockos/release-notes.json`
 (`{version: markdown}`, `{}` without any; `build/publish.sh notes`) before
 the catalog names the release. Moving production does not publish them.
 
@@ -170,15 +170,15 @@ source of every package in its images next to them:
   no source, with the reason (Apache-2.0, MIT, NVIDIA's binary driver).
   A source package in neither the archives nor that file fails the release,
   so a new repository needs a decision there first.
-- The files go to the pool `flockos/sources/<archive>/<source>/<file>`
+- The files go to the pool `ironflockos/sources/<archive>/<source>/<file>`
   (`debian`, `raspberrypi`, `upstream`), which every release shares: a file
   there is never replaced, and only new ones are uploaded. The first release
   uploads about 1.7 GB.
-- `flockos/<version>/SOURCES` lists every file of the release, with the
+- `ironflockos/<version>/SOURCES` lists every file of the release, with the
   reason for each package without source. `dget <URL of a .dsc>` fetches a
   Debian source package. `check` makes sure `SOURCES` and the pool answer
   through the download proxy.
-- Each image says where `SOURCES` is in `/usr/share/doc/flockos/copyright`, so
+- Each image says where `SOURCES` is in `/usr/share/doc/ironflockos/copyright`, so
   a copy that is passed on carries the directions too.
 - Releases up to 0.11.0 have no `SOURCES`: their images record no source
   packages.
@@ -202,11 +202,11 @@ gh workflow run release.yml --ref v<version> -f promote-production=true
 That run of `release.yml` on the release's tag (mode `tag`) runs only the
 `production` job:
 
-1. It reads the published catalog and verifies it with `pki/flockos-catalog.pub`.
+1. It reads the published catalog and verifies it with `pki/ironflockos-catalog.pub`.
 2. It moves `production` to the tag's version, which must already be in the
    catalog: the same files, the same bundles. FlockFlasher's boards follow.
-3. It signs the catalog with the catalog key as `flockos-release`.
-4. It publishes the catalog as `flockos-publisher`.
+3. It signs the catalog with the catalog key as `ironflockos-release`.
+4. It publishes the catalog as `ironflockos-publisher`.
 5. It checks the catalog through the download proxy.
 
 The pool gives both identities to runs on `v*` tags. Nothing else of
@@ -215,24 +215,24 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
 ## Before the first release (once)
 
 1. **The RAUC PKI:** `tools/rauc-pki/ceremony.sh --yes` ([signing.md](signing.md)).
-   Done 2026-11-05.
+   Done 2026-11-05 under the old names, again 2026-11-11 under the names of ADR-0017.
 2. **The catalog key and the publisher:** `tools/release-setup.sh --yes`, by a
-   project owner on a branch. It creates the key, the `flockos-publisher`
-   identity and its bucket permissions, and writes `pki/flockos-catalog.pub`
+   project owner on a branch. It creates the key, the `ironflockos-publisher`
+   identity and its bucket permissions, and writes `pki/ironflockos-catalog.pub`
    for a pull request. Run it first without `--yes`: that shows every step and
    changes nothing. At the end it prints the line for step 5. Done
-   2026-11-05 (`pki/flockos-catalog.pub`, [pki/README.md](../pki/README.md)).
-3. **The download proxy** serves `gs://ironflock-downloads/flockos/` under
-   `https://instance-registry.ironflock.com/dl/flockos/` (registry-proxy
-   v0.2.9, 2026-11-05). Without it, `promote` would stop before the tag.
-   Done.
+   2026-11-11 (`pki/ironflockos-catalog.pub`, key id `036ef3bd`, [pki/README.md](../pki/README.md)).
+3. **The download proxy** serves `gs://ironflock-downloads/ironflockos/` under
+   `https://instance-registry.ironflock.com/dl/ironflockos/` (registry-proxy,
+   the release after its `ironflockos-names` branch). Without it, `promote` would stop
+   before the tag. Open: until then only `dl/flockos/` is served.
 4. **The VM images:** `tools/release-setup.sh --yes` again, after it has gained
-   the role `flockosVmImagePublisher` (ADR-0010). It keeps everything that
-   exists and adds the role and its binding for `flockos-publisher`. Until
+   the role `ironflockosVmImagePublisher` (ADR-0010). It keeps everything that
+   exists and adds the role and its binding for `ironflockos-publisher`. Until
    then `vm-images` fails, and with it the tag; re-run the failed jobs after
    it.
 5. **The device-agent** trusts the catalog key: the line from step 2 goes into
-   `FLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
+   `IRONFLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
    an agent release. `CATALOG_MIN_AGENT` names that release: device-agent
    1.6.1 (#204).
 

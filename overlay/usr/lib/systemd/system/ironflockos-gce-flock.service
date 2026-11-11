@@ -1,0 +1,20 @@
+# The .flock of a Compute Engine VM from its instance metadata (ADR-0010):
+# on the first boot of each slot, before the enrollment. On any other machine
+# the firmware condition skips it at once, and as it is ordered after nothing
+# that waits for the network, an offline device still enrolls without delay.
+[Unit]
+Description=IronFlockOS: the .flock of a Compute Engine VM from its metadata
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0010-ironflockos-images-for-virtual-devices.md
+After=NetworkManager.service boot-efi.mount local-fs.target
+Before=ironflockos-enroll.service
+Wants=NetworkManager.service
+ConditionFirmware=smbios-field(product_name = "Google Compute Engine")
+ConditionPathExists=!/var/lib/ironflockos/enrolled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/gce-flock
+TimeoutStartSec=5min
+
+[Install]
+WantedBy=multi-user.target

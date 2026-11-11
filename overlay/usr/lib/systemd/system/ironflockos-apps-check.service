@@ -1,0 +1,18 @@
+# Says loudly when /apps is not /data/apps (docs/build.md, "Disk layout on a
+# device"): /etc/fstab mounts it nofail, so a failed mount keeps nothing from
+# starting, and the apps' data would be lost at the next update. Ordered after
+# the mount and before Docker and the agent; nothing needs it.
+[Unit]
+Description=IronFlockOS: the apps' data is on /data
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+After=apps.mount
+Before=docker.service ironflock-device-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ironflockos/apps-check
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
