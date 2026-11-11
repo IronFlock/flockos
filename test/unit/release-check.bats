@@ -103,6 +103,10 @@ run_check() {
   [ "$status" -eq 0 ]
   run_check release false source=failure
   [ "$status" -eq 0 ]
+  run_check release false source=cancelled
+  [ "$status" -eq 0 ]
+  run_check release false source=cancelled build=cancelled
+  [ "$status" -ne 0 ]
   run_check release false build=skipped manifest=skipped
   [ "$status" -ne 0 ]
   run_check release false source=skipped

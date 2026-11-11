@@ -52,7 +52,9 @@ want() {
     release | dry-run)
       if [ "$(result source)" = success ] && [ "$reuse" = true ]; then reused=true; fi
       case "$1" in
-        source) if [ "$reused" = true ]; then echo success; else echo "success failure"; fi ;;
+        # A source job that ran into its time limit may be reported as
+        # cancelled; the run built its images then, like after a failure.
+        source) if [ "$reused" = true ]; then echo success; else echo "success failure cancelled"; fi ;;
         build | manifest) if [ "$reused" = true ]; then echo skipped; else echo success; fi ;;
         attest-build | would-reuse)
           if [ "$mode" = dry-run ] && [ "$event" = pull_request ] && [ "$reused" = false ]; then echo success; else echo skipped; fi
