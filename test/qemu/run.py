@@ -367,6 +367,10 @@ class VM:
             if self._read_until(rb"__PING_" + tag.encode(), 5):
                 self.run("stty -echo; PS1=; PS2=; export PS1 PS2 SYSTEMD_PAGER= PAGER=cat SYSTEMD_COLORS=0 "
                          "COLUMNS=1000 TERM=dumb", timeout=10, check=False)
+                # run() puts its command into a subshell, so the exports above
+                # never reach the shell: a pager would wait for a key on any
+                # line longer than the terminal. This line is the shell's own.
+                self._send("export SYSTEMD_PAGER= PAGER=cat\r")
                 return self.run("cat /proc/sys/kernel/random/boot_id", timeout=30).strip()
         raise TestFailure(f"no shell on the second serial port after {timeout}s (see console.log)")
 
@@ -581,7 +585,7 @@ class Runner:
         self.vm.run("test ! -e /run/flockos/apps-not-persistent")
         ordered = ["docker.service"] + (["ironflock-device-agent.service"] if self.flock else [])
         for unit in ordered:
-            after = self.vm.run(f"systemctl show -p After --value {unit}").split()
+            after = self.vm.run(f"systemctl show --no-pager -p After --value {unit}").split()
             if "apps.mount" not in after:
                 raise TestFailure(f"{unit} is not ordered after apps.mount: {after}\n{self.explain(*units)}")
 
@@ -634,7 +638,7 @@ class Runner:
         self.vm.run(f"grep -qx '\\[{nic}\\]' /run/flockos/ptp/ptp4l.conf")
         self.vm.run("grep -qx 'domainNumber 24' /run/flockos/ptp/ptp4l.conf")
         for unit in ("flockos-ptp4l.service", "flockos-phc2sys.service"):
-            started = self.vm.run(f"systemctl show -p InvocationID --value {unit}").strip()
+            started = self.vm.run(f"systemctl show --no-pager -p InvocationID --value {unit}").strip()
             if not started:
                 raise TestFailure(f"{unit} did not start for ptp.conf")
         # role=server: master on the interface, from the system clock; chrony
@@ -674,7 +678,7 @@ class Runner:
         self.vm.run("test \"$(stat -c %a /run/flockos/proxy.env)\" = 600")
         self.wait_for("chronyc -n sources | grep -q ' 10\\.0\\.2\\.2 '", 60, "chrony's NTP server from proxy.conf")
         # The agent runs on an enrolled slot; it gets the proxy when it restarts.
-        self.wait_for("pid=$(systemctl show -p MainPID --value ironflock-device-agent.service); "
+        self.wait_for("pid=$(systemctl show --no-pager -p MainPID --value ironflock-device-agent.service); "
                       "[ \"${pid:-0}\" = 0 ] || tr '\\0' '\\n' </proc/$pid/environ | "
                       "grep -qx HTTPS_PROXY=http://10.0.2.2:3128", 60, "the agent to take the proxy")
         # For the next boot: the FLOCKOS partition's proxy.conf replaces the device's.
