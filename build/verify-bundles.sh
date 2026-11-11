@@ -21,7 +21,13 @@
 # the image's, as an install requires.
 #
 # release  every bundle must verify against its image's keyring.
-# dry-run  the stand-in's bundles must not: a release image refuses them.
+# dry-run  the stand-in's bundles must not: a release image refuses them, and
+#          the refusal must be rauc's signature check. First, as a positive
+#          control, the bundle must verify with the stand-in's CA in place
+#          of the image's keyring and otherwise the image's settings: it
+#          shows that rauc, the copy of the bundle and its format work here,
+#          as a release needs them to. IRONFLOCKOS_STANDIN_KEYRING names that
+#          CA, which build/sign-bundles.sh leaves outside DIR.
 #
 # In both modes the newest bundle signer certificate of pki/ must chain to the
 # image's keyring, so a dry run shows that the release signer's bundles will
@@ -43,6 +49,13 @@ case "$mode" in
 esac
 [ -d "$dir" ] || die "usage: verify-bundles.sh release|dry-run DIR ($dir is no directory)"
 require rauc openssl sfdisk debugfs jq gzip dd awk
+standin=""
+if [ "$mode" = dry-run ]; then
+  standin=${IRONFLOCKOS_STANDIN_KEYRING:-}
+  if [ -z "$standin" ] || ! openssl x509 -in "$standin" -noout 2>/dev/null; then
+    die "a dry run needs the stand-in's CA from build/sign-bundles.sh (IRONFLOCKOS_STANDIN_KEYRING) for its positive control"
+  fi
+fi
 
 # The certificate the release signs with (build/sign-bundles.sh).
 signer=$(printf '%s\n' "$src"/pki/ironflockos-bundle-signer-*.pem | sort -V | tail -n 1)
@@ -117,6 +130,19 @@ check() {
   rauc --conf="$1" info "$2" >"$work/info" 2>&1
 }
 
+# accepted CONF WHAT: the bundle (its copy) verifies with CONF, whose keyring
+# is WHAT, and is compatible as its image is; or the run fails.
+accepted() {
+  check "$1" "$work/bundle.raucb" || {
+    cat "$work/info" >&2
+    die "$name.raucb does not verify against $2"
+  }
+  grep -q "Compatible:.*'$compatible'" "$work/info" || {
+    cat "$work/info" >&2
+    die "$name.raucb is not compatible $compatible, as its image is"
+  }
+}
+
 n=0
 for bundle in "$dir"/*/*.raucb; do
   [ -f "$bundle" ] || continue
@@ -138,22 +164,22 @@ for bundle in "$dir"/*/*.raucb; do
   # file meanwhile: a copy of root's own, not the bind-mounted original.
   cp "$bundle" "$work/bundle.raucb"
   if [ "$mode" = release ]; then
-    check "$work/image.conf" "$work/bundle.raucb" || {
-      cat "$work/info" >&2
-      die "$name.raucb does not verify against the keyring of $name.img.gz ($ca)"
-    }
-    grep -q "Compatible:.*'$compatible'" "$work/info" || {
-      cat "$work/info" >&2
-      die "$name.raucb is not compatible $compatible, as its image is"
-    }
+    accepted "$work/image.conf" "the keyring of $name.img.gz ($ca)"
     log "$name.raucb verifies against the keyring of $name.img.gz ($ca)"
   else
+    # The positive control (see the top), then the refusal.
+    rauc_conf "$work/system.conf" "$standin" >"$work/standin.conf"
+    accepted "$work/standin.conf" "the dry run's stand-in CA, in the positive control: the check cannot work here"
     if check "$work/image.conf" "$work/bundle.raucb"; then
       die "$name.raucb, signed by the dry-run stand-in, verifies against the keyring of $name.img.gz ($ca)"
     fi
-    log "$name.raucb (dry-run stand-in) is refused by the keyring of $name.img.gz ($ca), which accepts the bundle signer"
+    grep -q 'signature verification failed' "$work/info" || {
+      cat "$work/info" >&2
+      die "$name.raucb is refused with the keyring of $name.img.gz, but not by rauc's signature check (above)"
+    }
+    log "$name.raucb (dry-run stand-in) verifies with the stand-in's CA and is refused by the signature check against the keyring of $name.img.gz ($ca), which accepts the bundle signer"
   fi
-  rm -f "$work/bundle.raucb" "$keyring" "$work/system.conf" "$work/image.conf"
+  rm -f "$work/bundle.raucb" "$keyring" "$work/system.conf" "$work/image.conf" "$work/standin.conf"
   n=$((n + 1))
 done
 [ "$n" -gt 0 ] || die "no bundles in $dir/*/"

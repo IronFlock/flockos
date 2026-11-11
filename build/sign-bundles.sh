@@ -17,7 +17,10 @@
 # dry-run  a throwaway stand-in for the bundle signer: the same steps without
 #          the release identity, for dry runs of release.yml and local checks.
 #          The bundles verify against the stand-in only, never against the
-#          IronFlockOS root CA.
+#          IronFlockOS root CA. With IRONFLOCKOS_STANDIN_KEYRING set, the
+#          stand-in's CA is copied there once every bundle is signed, for the
+#          positive control of build/verify-bundles.sh. That file must lie
+#          outside DIR: nothing of the stand-in may reach an artifact.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
@@ -31,6 +34,15 @@ case "$mode" in
   *) die "usage: sign-bundles.sh release|dry-run DIR" ;;
 esac
 [ -d "$dir" ] || die "usage: sign-bundles.sh release|dry-run DIR ($dir is no directory)"
+standin_out=""
+if [ "$mode" = dry-run ] && [ -n "${IRONFLOCKOS_STANDIN_KEYRING:-}" ]; then
+  standin_out=$(cd "$(dirname "$IRONFLOCKOS_STANDIN_KEYRING")" && pwd) ||
+    die "IRONFLOCKOS_STANDIN_KEYRING names no file in an existing directory"
+  standin_out=$standin_out/$(basename "$IRONFLOCKOS_STANDIN_KEYRING")
+  case "$standin_out" in
+    "$(cd "$dir" && pwd)"/*) die "IRONFLOCKOS_STANDIN_KEYRING must lie outside $dir: nothing of the stand-in may reach an artifact" ;;
+  esac
+fi
 require rauc openssl sha256sum
 load_conf "$here/release.conf"
 root_ca=$src/pki/ironflockos-root-ca.pem
@@ -125,4 +137,8 @@ for bundle in "$dir"/*/*.raucb; do
 done
 [ "$n" -gt 0 ] || die "no bundles in $dir/*/"
 chown -R "${IRONFLOCKOS_HOST_UID:-0}:${IRONFLOCKOS_HOST_GID:-0}" "$dir"
+if [ -n "$standin_out" ]; then
+  cp "$keyring" "$standin_out"
+  log "the stand-in's CA for the check's positive control: $standin_out"
+fi
 log "$n bundles signed; they verify against $(openssl x509 -in "$keyring" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"

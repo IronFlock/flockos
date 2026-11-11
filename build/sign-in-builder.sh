@@ -15,6 +15,9 @@
 # (gha-creds-*.json, a token for the release identity). IRONFLOCKOS_WORK,
 # when set, is the scratch space of the check, which unpacks each image
 # there. Always linux/amd64: Google's PKCS#11 library exists for amd64 only.
+# A dry run hands the stand-in's CA from the first container to the check's
+# positive control through a directory of its own outside DIR, removed when
+# this script ends: nothing of the stand-in reaches DIR, and so no artifact.
 # Each container installs its packages from deb.debian.org, each apt-get call
 # with its retries limited to 5 minutes: a stalled mirror fails the job
 # instead of using up its time.
@@ -46,6 +49,14 @@ if [ -n "${IRONFLOCKOS_WORK:-}" ]; then
   [ -d "$IRONFLOCKOS_WORK" ] || die "IRONFLOCKOS_WORK names no directory"
   scratch=(-v "$(cd "$IRONFLOCKOS_WORK" && pwd):/work" -e IRONFLOCKOS_WORK=/work)
 fi
+handover_rw=() handover_ro=()
+if [ "$mode" = dry-run ]; then
+  handover=$(mktemp -d "${TMPDIR:-/tmp}/ironflockos-standin.XXXXXX")
+  trap 'rm -rf "$handover"' EXIT
+  case "$handover/" in "$out"/*) die "the stand-in's directory $handover lies in $out" ;; esac
+  handover_rw=(-v "$handover:/handover" -e IRONFLOCKOS_STANDIN_KEYRING=/handover/standin-ca.pem)
+  handover_ro=(-v "$handover:/handover:ro" -e IRONFLOCKOS_STANDIN_KEYRING=/handover/standin-ca.pem)
+fi
 
 log "signing the bundles in $out ($mode) in $BUILDER_IMAGE"
 # shellcheck disable=SC2016 # expanded by the container's shell
@@ -54,6 +65,7 @@ docker run --rm \
   -v "$repo:/src:ro" \
   -v "$out:/out" \
   ${creds[@]+"${creds[@]}"} \
+  ${handover_rw[@]+"${handover_rw[@]}"} \
   -e IRONFLOCKOS_HOST_UID="$(id -u)" \
   -e IRONFLOCKOS_HOST_GID="$(id -g)" \
   -e DEBIAN_FRONTEND=noninteractive \
@@ -73,6 +85,7 @@ docker run --rm \
   -v "$repo/pki:/src/pki:ro" \
   -v "$out:/out:ro" \
   ${scratch[@]+"${scratch[@]}"} \
+  ${handover_ro[@]+"${handover_ro[@]}"} \
   -e DEBIAN_FRONTEND=noninteractive \
   "$BUILDER_IMAGE" \
   bash -c 'set -e

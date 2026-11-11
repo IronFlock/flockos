@@ -22,6 +22,7 @@ setup() {
   # Another CA, and the dry run's stand-in signer.
   throwaway_signer "$tmp/other" "other"
   throwaway_signer "$tmp/standin" "IronFlockOS release dry run"
+  export STANDIN=$tmp
   stand_ins
   partitions rootfs-a
   export PATH="$tmp/bin:$PATH" IRONFLOCKOS_WORK="$tmp/work"
@@ -29,17 +30,21 @@ setup() {
 
 teardown() { rm -rf "$tmp"; }
 
-# stand_ins: sfdisk --json DISK answers $tmp/sfdisk.json for a stand-in disk;
-# debugfs -R "cat PATH" FS prints PATH of a stand-in file system (and, as
-# debugfs does, reports a missing file on stderr only); rauc --conf=CONF info
-# BUNDLE succeeds when the bundle's certificate chains to CONF's keyring and
-# CONF has the device's keyring settings; it appends CONF to $tmp/rauc.confs.
+# stand_ins: sfdisk --json DISK answers $STANDIN/sfdisk.json for a stand-in
+# disk; debugfs -R "cat PATH" FS prints PATH of a stand-in file system (and,
+# as debugfs does, reports a missing file on stderr only). rauc --conf=CONF
+# info BUNDLE succeeds when the bundle's certificate chains to CONF's keyring
+# and CONF has the device's keyring settings, and otherwise fails with rauc's
+# signature error; rauc --conf=CONF resign ... IN OUT checks IN so, writes OUT
+# with the certificate of --cert= and checks it against --signing-keyring=.
+# rauc appends each CONF to $STANDIN/rauc.confs. With $STANDIN/rauc.broken it
+# fails at once, with $STANDIN/rauc.odd it refuses with another error.
 stand_ins() {
-  cat >"$tmp/bin/sfdisk" <<STANDIN
+  cat >"$tmp/bin/sfdisk" <<'STANDIN'
 #!/bin/bash
-[ "\$1" = --json ] && [ -f "\$2" ] || exit 2
-[ "\$(head -c 8 "\$2")" = "FAKE GPT" ] || { echo "sfdisk: \$2: no partition table" >&2; exit 1; }
-cat "$tmp/sfdisk.json"
+[ "$1" = --json ] && [ -f "$2" ] || exit 2
+[ "$(head -c 8 "$2")" = "FAKE GPT" ] || { echo "sfdisk: $2: no partition table" >&2; exit 1; }
+cat "$STANDIN/sfdisk.json"
 STANDIN
   cat >"$tmp/bin/debugfs" <<'STANDIN'
 #!/bin/bash
@@ -54,21 +59,47 @@ files=$(tr -s '\0' '\n' <"$fs" | awk 'NR > 1 && /^FAKE / { exit } { print }')
 awk -v p="== $path" '$0 == p { f = 1; next } /^== / { f = 0 } f' <<<"$files"
 grep -qx -- "== $path" <<<"$files" || echo "$path: File not found by ext2_lookup" >&2
 STANDIN
-  cat >"$tmp/bin/rauc" <<STANDIN
+  cat >"$tmp/bin/rauc" <<'STANDIN'
 #!/bin/bash
-conf=\${1#--conf=}
-[ "\$2" = info ] && [ -f "\$3" ] || exit 2
-cat "\$conf" >>"$tmp/rauc.confs"
-grep -qx 'check-purpose=codesign' "\$conf" && grep -qx 'use-bundle-signing-time=true' "\$conf" ||
+conf=${1#--conf=} cmd=$2
+shift 2
+cat "$conf" >>"$STANDIN/rauc.confs"
+if [ -e "$STANDIN/rauc.broken" ]; then
+  echo "rauc: error while loading shared libraries: libcrypto.so.3" >&2
+  exit 127
+fi
+grep -qx 'check-purpose=codesign' "$conf" && grep -qx 'use-bundle-signing-time=true' "$conf" ||
   { echo "stand-in rauc: not the device's keyring settings" >&2; exit 2; }
-keyring=\$(sed -n 's/^path=//p' "\$conf")
-[ "\$(head -n 1 "\$3")" = "FAKE RAUCB" ] || { echo "not a bundle" >&2; exit 1; }
-sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' "\$3" >"\$conf.signer"
-openssl verify -purpose any -CAfile "\$keyring" "\$conf.signer" >/dev/null 2>&1 || {
-  echo "Failed to verify bundle signature: signature verification failed: unable to get local issuer certificate" >&2
-  exit 1
+# verify KEYRING BUNDLE
+verify() {
+  [ "$(head -n 1 "$2")" = "FAKE RAUCB" ] || { echo "not a bundle" >&2; return 1; }
+  sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' "$2" >"$conf.signer"
+  openssl verify -purpose any -CAfile "$1" "$conf.signer" >/dev/null 2>&1 && return 0
+  if [ -e "$STANDIN/rauc.odd" ]; then
+    echo "Failed to open bundle: unsupported bundle format" >&2
+  else
+    echo "Failed to verify bundle signature: signature verification failed: unable to get local issuer certificate" >&2
+  fi
+  return 1
 }
-echo "Compatible:     '\$(sed -n 's/^compatible=//p' "\$3")'"
+keyring=$(sed -n 's/^path=//p' "$conf")
+case "$cmd" in
+  info)
+    [ -f "$1" ] || exit 2
+    verify "$keyring" "$1" || exit 1
+    echo "Compatible:     '$(sed -n 's/^compatible=//p' "$1")'"
+    ;;
+  resign)
+    files=()
+    for a in "$@"; do
+      case "$a" in --signing-keyring=*) signing=${a#*=} ;; --cert=*) cert=${a#*=} ;; --key=*) ;; *) files+=("$a") ;; esac
+    done
+    verify "$keyring" "${files[0]}" || exit 1
+    { head -n 2 "${files[0]}" && cat "$cert"; } >"${files[1]}"
+    verify "$signing" "${files[1]}" || exit 1
+    ;;
+  *) exit 2 ;;
+esac
 STANDIN
   chmod +x "$tmp/bin/sfdisk" "$tmp/bin/debugfs" "$tmp/bin/rauc"
 }
@@ -79,7 +110,7 @@ STANDIN
 partitions() {
   jq -n --arg second "$1" '{partitiontable: {label: "gpt", sectorsize: 512, partitions: [
     {node: "disk.img1", start: 4, size: 4, name: "IRONFLOCKOS"},
-    {node: "disk.img2", start: 8, size: 32, name: $second}]}}' >"$tmp/sfdisk.json"
+    {node: "disk.img2", start: 8, size: 32, name: $second}]}}' >"$STANDIN/sfdisk.json"
 }
 
 # system_conf [COMPATIBLE]: the image's /etc/rauc/system.conf as the build
@@ -167,7 +198,7 @@ bundle() {
   image "$tmp/other/keyring.pem"
   bundle "$signer"
   for mode in release dry-run; do
-    run bash "$verify" "$mode" "$tmp/out"
+    IRONFLOCKOS_STANDIN_KEYRING=$tmp/standin/keyring.pem run bash "$verify" "$mode" "$tmp/out"
     [ "$status" -ne 0 ]
     [[ "$output" == *"the keyring of $name.img.gz (CN=other CA (throwaway),O=IronFlock) does not accept the bundle signer"* ]]
   done
@@ -199,16 +230,16 @@ bundle() {
   [ "$status" -eq 0 ]
   # what rauc got: the image's compatible and formats, its keyring settings
   # with the keyring read from the image, and none of its slots or bootloader
-  conf=$(sed 's|^path=.*/keyring.pem$|path=KEYRING|' "$tmp/rauc.confs")
+  conf=$(sed 's|^path=.*/keyring.pem$|path=KEYRING|' "$STANDIN/rauc.confs")
   [ "$conf" = "$(printf '%s\n' '[system]' "compatible=$id" bootloader=noop bundle-formats=verity '' \
     '[keyring]' path=KEYRING use-bundle-signing-time=true check-purpose=codesign)" ] || { echo "$conf"; return 1; }
   # a setting the image adds goes along
   system_conf | sed 's/^check-purpose=codesign$/&\nallow-partial-chain=true/' >"$tmp/partial.conf"
   image "$root_ca" "$tmp/partial.conf"
-  : >"$tmp/rauc.confs"
+  : >"$STANDIN/rauc.confs"
   run bash "$verify" release "$tmp/out"
   [ "$status" -eq 0 ]
-  grep -qx allow-partial-chain=true "$tmp/rauc.confs"
+  grep -qx allow-partial-chain=true "$STANDIN/rauc.confs"
 }
 
 @test "an image without system.conf, of another compatible, or with a keyring directory fails the run" {
@@ -235,18 +266,85 @@ bundle() {
   [[ "$output" == *"$name.raucb is not compatible $id, as its image is"* ]]
 }
 
-@test "dry run: the image refuses the stand-in's bundle and accepts the bundle signer" {
+@test "dry run: the bundle verifies with the stand-in's CA, the image's keyring refuses it by its signature, and accepts the bundle signer" {
   image "$root_ca"
   bundle "$tmp/standin/signer.pem"
-  run bash "$verify" dry-run "$tmp/out"
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/standin/keyring.pem run bash "$verify" dry-run "$tmp/out"
   echo "$output"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"refused by the keyring of $name.img.gz (CN=IronFlockOS root CA,O=IronFlock), which accepts the bundle signer"* ]]
-  # a dry-run bundle the image would install
+  [[ "$output" == *"verifies with the stand-in's CA and is refused by the signature check against the keyring of $name.img.gz (CN=IronFlockOS root CA,O=IronFlock), which accepts the bundle signer"* ]]
+  # the positive control ran with the image's settings and the stand-in's CA
+  grep -qx "path=$tmp/standin/keyring.pem" "$STANDIN/rauc.confs"
+  [ "$(grep -c '^bundle-formats=verity$' "$STANDIN/rauc.confs")" = 2 ]
+  # a dry-run bundle the image would install (here a stand-in that is the
+  # root CA)
   bundle "$signer"
-  run bash "$verify" dry-run "$tmp/out"
+  IRONFLOCKOS_STANDIN_KEYRING=$root_ca run bash "$verify" dry-run "$tmp/out"
   [ "$status" -ne 0 ]
   [[ "$output" == *"signed by the dry-run stand-in, verifies against the keyring of $name.img.gz"* ]]
+}
+
+@test "dry run: no stand-in CA, a rauc that cannot verify, or a refusal for another reason fails the run" {
+  image "$root_ca"
+  bundle "$tmp/standin/signer.pem"
+  # without the stand-in's CA there is no positive control
+  run bash "$verify" dry-run "$tmp/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"a dry run needs the stand-in's CA"* ]]
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/missing.pem run bash "$verify" dry-run "$tmp/out"
+  [ "$status" -ne 0 ]
+  # a rauc that fails whatever it gets: the refusal would mean nothing
+  touch "$STANDIN/rauc.broken"
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/standin/keyring.pem run bash "$verify" dry-run "$tmp/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"does not verify against the dry run's stand-in CA, in the positive control: the check cannot work here"* ]]
+  rm "$STANDIN/rauc.broken"
+  # refused, but not by the signature check
+  touch "$STANDIN/rauc.odd"
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/standin/keyring.pem run bash "$verify" dry-run "$tmp/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is refused with the keyring of $name.img.gz, but not by rauc's signature check"* ]]
+  [[ "$output" == *"unsupported bundle format"* ]]
+  # and in a release, a rauc that cannot verify fails it too
+  rm "$STANDIN/rauc.odd"
+  touch "$STANDIN/rauc.broken"
+  bundle "$signer"
+  run bash "$verify" release "$tmp/out"
+  [ "$status" -ne 0 ]
+}
+
+@test "sign-bundles.sh, dry run: the stand-in's CA goes only where IRONFLOCKOS_STANDIN_KEYRING says, never into DIR" {
+  export IRONFLOCKOS_HOST_UID IRONFLOCKOS_HOST_GID
+  IRONFLOCKOS_HOST_UID=$(id -u) IRONFLOCKOS_HOST_GID=$(id -g)
+  # a release build's image: the bundle sealed with the build's throwaway key
+  throwaway_signer "$tmp/seal" "IronFlockOS release sealing"
+  image "$root_ca"
+  bundle "$tmp/seal/signer.pem"
+  cp "$tmp/seal/keyring.pem" "$tmp/out/$id/$name.seal-ca.pem"
+  mkdir "$tmp/handover"
+  # inside DIR it refuses, before it signs anything
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/out/$id/standin.pem run bash "$repo/build/sign-bundles.sh" dry-run "$tmp/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must lie outside"* ]]
+  [ ! -e "$tmp/out/$id/standin.pem" ]
+  cmp -s <(sed -n '/BEGIN/,/END/p' "$tmp/out/$id/$name.raucb") "$tmp/seal/signer.pem"
+  # outside it
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/handover/standin-ca.pem run bash "$repo/build/sign-bundles.sh" dry-run "$tmp/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # DIR holds the image's files and nothing of the stand-in's CA
+  [ "$(ls "$tmp/out/$id" | sort | tr '\n' ' ')" = "SHA256SUMS $name.img.gz $name.raucb " ]
+  ca_body=$(grep -v -- '-----' "$tmp/handover/standin-ca.pem" | tr -d '\n')
+  [ -n "$ca_body" ]
+  ! grep -rqF "$(head -c 64 <<<"$ca_body")" "$tmp/out"
+  # the bundle is the stand-in's, which that CA accepts and the root CA does not
+  sed -n '/BEGIN/,/END/p' "$tmp/out/$id/$name.raucb" >"$tmp/signed.pem"
+  openssl verify -purpose any -CAfile "$tmp/handover/standin-ca.pem" "$tmp/signed.pem"
+  ! openssl verify -purpose any -CAfile "$root_ca" "$tmp/signed.pem" 2>/dev/null
+  # and the check passes on what sign-bundles.sh left
+  IRONFLOCKOS_STANDIN_KEYRING=$tmp/handover/standin-ca.pem run bash "$verify" dry-run "$tmp/out"
+  echo "$output"
+  [ "$status" -eq 0 ]
 }
 
 @test "the installer has no bundle; a directory without any bundle fails" {
@@ -287,6 +385,14 @@ bundle() {
   # ... and the script reads nothing else of it: lib.sh, and pki/ through $src
   [ "$(grep -o '"\$\(src\|here\)"[^ )]*\|\$\(src\|here\)/[^" )]*' "$repo/build/verify-bundles.sh" | sort -u | tr '\n' ' ')" = \
     '"$src"/pki/ironflockos-bundle-signer-*.pem $here/.. $here/lib.sh ' ]
+  # a dry run hands the stand-in's CA over outside DIR: written by the
+  # signing container, read-only for the check, removed at the end
+  [[ "$signs" == *'${handover_rw[@]+"${handover_rw[@]}"}'* ]]
+  [[ "$checks" == *'${handover_ro[@]+"${handover_ro[@]}"}'* ]]
+  grep -q '^  handover=$(mktemp -d "${TMPDIR:-/tmp}/ironflockos-standin.XXXXXX")$' "$sib"
+  grep -q "^  trap 'rm -rf \"\$handover\"' EXIT$" "$sib"
+  grep -q '^  handover_rw=(-v "$handover:/handover" -e IRONFLOCKOS_STANDIN_KEYRING=/handover/standin-ca.pem)$' "$sib"
+  grep -q '^  handover_ro=(-v "$handover:/handover:ro" -e IRONFLOCKOS_STANDIN_KEYRING=/handover/standin-ca.pem)$' "$sib"
   # every apt-get of both containers with a time limit
   [ "$(grep -v '^#' "$sib" | grep -c 'apt-get')" = 4 ]
   [ "$(grep -c '^    timeout -k 30s 5m apt-get ' "$sib")" = 4 ]
