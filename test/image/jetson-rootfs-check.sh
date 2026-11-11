@@ -118,6 +118,10 @@ for unit in rauc-mark-good.service nv-l4t-bootloader-config.service nv-rootfs-va
   check "$unit is masked" bash -c "[ \"\$(systemctl --root='$root' is-enabled $unit)\" = masked ]"
 done
 check "the agent is baked in" test -x "$root/usr/lib/ironflock/device-agent"
+check "ironflock is baked in as /usr/bin/ironflock" test -x "$root/usr/bin/ironflock"
+check "image.json names ironflock_version, not the init_version of ironflock-init" \
+  jq -e '(.ironflock_version | type == "string" and length > 0) and (has("init_version") | not)' "$root/usr/lib/ironflock/image.json"
+check "nothing named ironflock-init in the tree" bash -c "! find '$root' -xdev -name '*ironflock-init*' | grep -q ."
 check "Docker has the nvidia runtime" \
   jq -e '.runtimes.nvidia.path == "/usr/bin/nvidia-container-runtime"' "$root/etc/docker/daemon.json"
 check "NVIDIA's container CSVs (the host files a GPU container gets)" \
@@ -135,7 +139,7 @@ check "chroot: systemd runs" in_root /usr/bin/systemctl --version
 check "chroot: Docker's CLI runs" in_root /usr/bin/docker --version
 check "chroot: containerd runs" in_root /usr/bin/containerd --version
 check "chroot: RAUC runs" in_root /usr/bin/rauc --version
-check "chroot: ironflock-init runs" in_root /usr/sbin/ironflock-init version
+check "chroot: ironflock runs" in_root /usr/bin/ironflock version
 check "chroot: nvidia-ctk runs" in_root /usr/bin/nvidia-ctk --version
 check "chroot: nvidia-container-cli runs" in_root /usr/bin/nvidia-container-cli --version
 check "nvbootctrl is there (the RAUC backend's tool, WP-6.3)" test -x "$root/usr/sbin/nvbootctrl"

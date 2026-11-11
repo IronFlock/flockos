@@ -11,7 +11,7 @@
 #   key ring ironflockos-rauc,    key bundle-signer  HSM, RSA_SIGN_PKCS1_4096_SHA256
 #   service account ironflockos-release, allowed to sign with bundle-signer only,
 #     usable only by IronFlock/ironflockos release runs (workload identity
-#     attribute release=<repo id>:release, as device-init's signer)
+#     attribute release=<repo id>:release, as the CLI's signer)
 # then issues the root CA certificate (20 years) and the signer certificate
 # (3 years) with rauc-pki, and disables the CA key version: it is enabled
 # again only to issue the next signer certificate.

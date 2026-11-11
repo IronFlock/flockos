@@ -17,7 +17,10 @@ kernel have to pass its checks, and the kernel runs locked down.
 
 Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (boot chain and Secure Boot
 state, partitions grown, /data layout, identity, SSH policy, RAUC slot A good,
-Docker, fwupd); for nvidia
+Docker, fwupd, enrolled through `ironflock enroll`); ironflock in the image
+(WP-5.1 of the CLI's plan: /usr/bin/ironflock, `ironflock status`, its refusals, a .flock that
+is not accepted); enrolled, the device changes hands with `sudo ironflock
+agent configure -c` run by its owner over SSH, and back; for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
 (state persists, a proxy.conf and a static network profile on the IRONFLOCKOS
 partition are taken); update into slot B with the bundle of the same build;
@@ -158,12 +161,15 @@ TEST_FLOCK_NAME = "ironflockos-ci"
 # The device the factory reset enrolls it as.
 RESET_OWNER = "ironflockosreset"
 RESET_FLOCK_NAME = "ironflockos-ci-reset"
+# The device it becomes for a while with `ironflock agent configure -c`.
+OTHER_OWNER = "ironflockosother"
+OTHER_FLOCK_NAME = "ironflockos-ci-other"
 # The static network profile the IRONFLOCKOS partition hands over (ADR-0016).
 STATIC_PROFILE = "ironflockos-ci-static"
 
 
 def test_flock(name, owner, device_key):
-    """A .flock with a throwaway key: enough for ironflock-init enroll (SSH
+    """A .flock with a throwaway key: enough for ironflock enroll (SSH
     user, agent unit), useless to the platform."""
     key = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519"], check=True,
                          capture_output=True, text=True).stdout
@@ -735,6 +741,159 @@ class Runner:
         if first:
             self.vm.run(f"test ! -e /boot/efi/{flock or self.flock}")
 
+    def exit_code(self, command, timeout=120):
+        """The exit code of command and what it wrote (stdout and stderr, through
+        a file: no terminal)."""
+        out = "/run/ironflockos-ci-out"
+        lines = self.vm.run(f"{command} >{out} 2>&1; rc=$?; cat {out}; rm -f {out}; echo __rc=$rc",
+                            timeout=timeout, check=False).rstrip().splitlines()
+        if not lines or not lines[-1].startswith("__rc="):
+            raise TestFailure(f"no exit code from `{command}`:\n{lines}")
+        return int(lines[-1][len("__rc="):]), "\n".join(lines[:-1])
+
+    def device_state(self):
+        """What the refused commands must leave as it is: the agent's .flock and
+        unit, the accounts, the sudo rules, the hostname."""
+        return self.vm.run("sha256sum /opt/ironflock/device-agent/device-config.flock 2>&1; "
+                           "systemctl is-enabled ironflock-device-agent.service 2>&1; "
+                           "cut -d: -f1 /etc/passwd | sort | sha256sum; ls /etc/sudoers.d; hostname", check=False)
+
+    def ironflock_cli(self):
+        """WP-5.1 of the CLI's plan: the image carries ironflock (IronFlock/ironflock-cli) as
+        /usr/bin/ironflock, nothing named ironflock-init, and image.json names
+        its version. `ironflock status --json` describes this device. The agent
+        commands IronFlockOS has no use for refuse (exit code 3) and change
+        nothing, as root and not. `ironflock enroll` does not accept a .flock
+        that is not JSON (exit code 4) and leaves it where it is. Enrolled: such
+        a .flock, the newest on the IRONFLOCKOS partition, is kept as .rejected
+        and the enrolment takes the agent's copy; agent configure -c refuses
+        while a factory reset is requested, and with a proxy flag."""
+        where = self.vm.run("command -v ironflock").strip()
+        if where != "/usr/bin/ironflock":
+            raise TestFailure(f"ironflock is {where!r}, not /usr/bin/ironflock")
+        self.vm.run("test ! -e /usr/sbin/ironflock-init && ! find / -xdev -name '*ironflock-init*' | grep .", timeout=300)
+        image = json.loads(self.vm.run("cat /usr/lib/ironflock/image.json"))
+        version = self.vm.run("ironflock version </dev/null 2>/dev/null | cat").split()
+        if "init_version" in image or version[:1] != ["ironflock"] or version[1:2] != [image.get("ironflock_version")]:
+            raise TestFailure(f"ironflock version says {' '.join(version)!r}; image.json: {image}")
+
+        osr = self.vm.run("cat /etc/os-release").splitlines()
+        image_version = next((line.split("=", 1)[1].strip('"') for line in osr if line.startswith("IMAGE_VERSION=")), None)
+        status = json.loads(self.vm.run("ironflock status --json </dev/null 2>/dev/null | cat"))
+        system, agent = status.get("os") or {}, status.get("agent") or {}
+        want = {"ironflockos": True, "image": self.image_id, "version": image_version, "booted_slot": self.booted()}
+        got = {key: system.get(key) for key in want}
+        if got != want:
+            raise TestFailure(f"ironflock status: the system is {got}, expected {want}:\n{status}")
+        if self.flock:
+            # The test's agent never reaches a platform: whether it runs just
+            # now is not this test's; that ironflock finds its unit is.
+            service = agent.get("service") or {}
+            if (not agent.get("installed") or agent.get("layout") != "current" or agent.get("device") != TEST_FLOCK_NAME
+                    or not agent.get("version") or service.get("unit") != "ironflock-device-agent.service"
+                    or service.get("state") not in ("running", "starting", "stopping", "stopped", "failed")):
+                raise TestFailure(f"ironflock status: the agent of an enrolled device is {agent}")
+        elif agent.get("installed"):
+            raise TestFailure(f"ironflock status: the agent of a device that did not enroll is {agent}")
+
+        other = "/tmp/ironflockos-ci-other.flock"
+        data = base64.b64encode(json.dumps(test_flock(OTHER_FLOCK_NAME, OTHER_OWNER, "4713")).encode()).decode()
+        self.vm.run(f"echo {data} | base64 -d > {other} && chmod 644 {other}")
+        before = self.device_state()
+        for user in ("", "runuser -u nobody -- "):
+            for command in (f"/usr/bin/ironflock agent install -c {other} --yes", "/usr/bin/ironflock agent remove --yes"):
+                rc, out = self.exit_code(f"{user}{command} </dev/null")
+                if rc != 3 or f"this device runs IronFlockOS {image_version} ({self.image_id})" not in out:
+                    raise TestFailure(f"`{user}{command}` ended with {rc}, expected 3 and IronFlockOS named:\n{out}")
+        self.vm.run(f"rm -f {other}")
+
+        broken = "/boot/efi/ironflockos-ci-broken.flock"
+        self.vm.run(f"printf 'not json' > {broken} && sync")
+        rc, out = self.exit_code(f"ironflock enroll -c {broken} --shred-source </dev/null")
+        if rc != 4 or self.exit_code(f"test -f {broken}")[0] != 0:
+            raise TestFailure(f"ironflock enroll with a .flock that is not JSON ended with {rc}, expected 4, "
+                              f"and the file there:\n{out}")
+        if self.device_state() != before:
+            raise TestFailure(f"a refused command changed the device:\n{before}\n{self.device_state()}")
+        if not self.flock:
+            self.vm.run(f"rm -f {broken} && sync")
+            return
+
+        # The enrolment with it as the newest .flock on the partition: kept as
+        # .rejected, the agent's copy taken instead.
+        rc, out = self.exit_code("systemctl start ironflockos-enroll.service", timeout=600)
+        if rc != 0:
+            raise TestFailure(f"the enrolment with a .flock that is not accepted failed:\n{out}\n"
+                              f"{self.explain('ironflockos-enroll.service')}")
+        self.vm.run(f"test -f {broken}.rejected && test ! -e {broken}")
+        journal = self.vm.run("journalctl -b --no-pager -o cat -u ironflockos-enroll.service")
+        for want in ("kept as ironflockos-ci-broken.flock.rejected", "enrolled from device-config.flock"):
+            if want not in journal:
+                raise TestFailure(f"the enrolment's journal lacks {want!r}:\n{journal}")
+        self.enrolled(first=False)
+        self.vm.run(f"rm -f {broken}.rejected && sync")
+
+        first = "/root/ironflockos-ci-first.flock"
+        self.vm.run(f"install -m 600 /opt/ironflock/device-agent/device-config.flock {first}")
+        before = self.device_state()
+        self.vm.run("printf 'keep-network=yes\\n' > /boot/efi/factory-reset.conf && sync")
+        try:
+            rc, out = self.exit_code(f"ironflock agent configure -c {first} </dev/null")
+        finally:
+            self.vm.run("rm -f /boot/efi/factory-reset.conf && sync")
+        if rc != 3 or "factory reset is requested" not in out:
+            raise TestFailure(f"agent configure -c with a factory reset requested ended with {rc}, expected 3:\n{out}")
+        rc, out = self.exit_code(f"ironflock agent configure -c {first} --https-proxy http://10.0.2.2:3129 </dev/null")
+        if rc != 3:
+            raise TestFailure(f"agent configure -c --https-proxy ended with {rc}, expected 3:\n{out}")
+        if self.device_state() != before:
+            raise TestFailure(f"a refused agent configure changed the device:\n{before}\n{self.device_state()}")
+        self.vm.run(f"rm -f {first}")
+
+    def change_hands(self):
+        """The device changes hands as the platform's device terminal would do
+        it: the first owner, logged in over SSH, runs `sudo ironflock agent
+        configure -c` with the .flock of another owner. The device enrolls as
+        the other device (the agent's copy, the hostname, the other owner's
+        account and sudo rule) and the first owner's account and sudo rule go,
+        with its sessions, the one that runs the command among them: the
+        command finishes all the same. Then back, as root, for the rest of the
+        test. The device key in a .flock is PKCS#8, which ssh does not read: the
+        login uses a key of the test's own, added for the first owner."""
+        first, other = "/root/ironflockos-ci-first.flock", "/root/ironflockos-ci-other.flock"
+        key = "/root/ironflockos-ci-ssh"
+        data = base64.b64encode(json.dumps(test_flock(OTHER_FLOCK_NAME, OTHER_OWNER, "4713")).encode()).decode()
+        self.vm.run(f"install -m 600 /opt/ironflock/device-agent/device-config.flock {first}")
+        self.vm.run(f"echo {data} | base64 -d > {other} && chmod 600 {other}")
+        self.vm.run(f"rm -f {key} {key}.pub && ssh-keygen -q -t ed25519 -N '' -f {key}")
+        self.vm.run(f"cat {key}.pub >> /home/{TEST_OWNER}/.ssh/authorized_keys")
+        ssh = (f"timeout 300 ssh -F /dev/null -i {key} -o BatchMode=yes -o StrictHostKeyChecking=no "
+               f"-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR {TEST_OWNER}@127.0.0.1")
+        out = self.vm.run(f"{ssh} 'id -un && sudo -n true && echo sudo-ok' </dev/null", timeout=120)
+        if f"{TEST_OWNER}\n" not in out or "sudo-ok" not in out:
+            raise TestFailure(f"the first owner's SSH login with sudo:\n{out}")
+        rc, out = self.exit_code(f"{ssh} 'sudo -n /usr/bin/ironflock agent configure -c {other} --yes' </dev/null",
+                                 timeout=360)
+        log(f"change hands: the first owner's session ended with exit code {rc}:\n{out}")
+        changed = (f"! id {TEST_OWNER} && id {OTHER_OWNER} && test -f /etc/sudoers.d/ironflock-{OTHER_OWNER}"
+                   f" && test ! -e /etc/sudoers.d/ironflock-{TEST_OWNER} && [ \"$(hostname)\" = {OTHER_FLOCK_NAME} ]"
+                   f" && grep -q ironflock-device-4713 /home/{OTHER_OWNER}/.ssh/authorized_keys")
+        try:
+            self.wait_for(changed, 300, "the device to change hands")
+        except TestFailure as e:
+            raise TestFailure(f"{e}\n{self.vm.run('journalctl -b --no-pager -o cat -n 80; ' + changed, check=False)}") from None
+        copy = json.loads(self.vm.run("cat /opt/ironflock/device-agent/device-config.flock"))
+        if copy.get("device_key") != "4713" or copy.get("name") != OTHER_FLOCK_NAME:
+            raise TestFailure(f"the agent's .flock is not the other device's: device_key {copy.get('device_key')!r}")
+        self.vm.run("systemctl is-enabled ironflock-device-agent.service")
+
+        rc, out = self.exit_code(f"ironflock agent configure -c {first} --yes </dev/null", timeout=300)
+        if rc != 0:
+            raise TestFailure(f"agent configure -c back to the first device ended with {rc}:\n{out}")
+        self.vm.run(f"! id {OTHER_OWNER} && test ! -e /etc/sudoers.d/ironflock-{OTHER_OWNER}")
+        self.enrolled(first=False)
+        self.vm.run(f"rm -f {first} {other} {key} {key}.pub")
+
     def nvidia(self):
         """An nvidia image (WP-4.1) on a VM without a GPU: the driver and the
         open modules at the pinned version, built for the image's kernel; no
@@ -1304,6 +1463,11 @@ def main():
         runner.step("first boot: boot chain, Secure Boot "
                     + ("on" if args.secure_boot else "off")
                     + ", partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
+        runner.step("ironflock: /usr/bin/ironflock, status, refusals, a .flock that is not accepted",
+                    runner.ironflock_cli)
+        if flock:
+            runner.step("change hands: sudo ironflock agent configure -c over SSH by the owner, and back",
+                        runner.change_hands)
         if args.kernel == "rt":
             runner.step("rt kernel: PREEMPT_RT, tuning from rt.conf into grubenv", runner.rt_kernel)
         if args.variant == "nvidia":

@@ -94,9 +94,9 @@ flock='{"device_key": 42, "secret": "s3cret", "name": "vm one"}'
   run bash "$lib/gce-flock"
   [ "$status" -eq 0 ]
   mkdir -p "$tmp/agent" "$tmp/state"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
-  IRONFLOCKOS_AGENT_DIR=$tmp/agent IRONFLOCKOS_STATE=$tmp/state IRONFLOCKOS_INIT=$tmp/ironflock-init \
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock"
+  chmod +x "$tmp/ironflock"
+  IRONFLOCKOS_AGENT_DIR=$tmp/agent IRONFLOCKOS_STATE=$tmp/state IRONFLOCKOS_IRONFLOCK=$tmp/ironflock \
     IRONFLOCKOS_ENROLL_CONF=$tmp/enroll.conf run bash "$lib/enroll"
   [ "$status" -eq 0 ]
   grep -qx "enroll -c $tmp/esp/compute-engine.flock --shred-source --hostname-from-flock" "$tmp/init-calls"

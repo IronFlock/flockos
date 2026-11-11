@@ -20,7 +20,7 @@ vim-tiny
 sudo
 tzdata
 
-# the package set device-init installs (ironflock-init bake does it from
+# the package set ironflock installs (`ironflock bake` does it from
 # Phase 2 on; listed here so the image is complete before that)
 jq
 ca-certificates

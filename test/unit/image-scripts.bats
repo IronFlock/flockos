@@ -186,14 +186,34 @@ slot_proven() {
   [ "$(cat "$tmp/home/file")" = keep ]
 }
 
-# enroll runs a fake ironflock-init that records its arguments.
+# enroll runs a fake ironflock that records its arguments (enroll -c FILE
+# [--shred-source] [--hostname-from-flock]) and ends as the .flock says, as
+# `ironflock enroll` does: "bad" is not accepted (exit code 4, nothing
+# changed); "agent-fails" fails the agent's step (exit code 1, the .flock
+# stays); "host-step-fails" fails a step after the agent's (exit code 1, the
+# .flock shredded with --shred-source); anything else enrolls (exit code 0;
+# the fake leaves the shredding out).
 enroll_env() {
-  mkdir -p "$tmp/esp" "$tmp/agent" "$tmp/state"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
+  mkdir -p "$tmp/esp" "$tmp/agent" "$tmp/state" "$tmp/run"
+  cat >"$tmp/ironflock" <<'EOF'
+#!/bin/bash
+echo "$*" >>"$(dirname "$0")/init-calls"
+case "$(cat "$3" 2>/dev/null)" in
+  bad) exit 4 ;;
+  agent-fails) exit 1 ;;
+  host-step-fails)
+    case " $* " in *" --shred-source "*) rm -f "$3" ;; esac
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$tmp/ironflock"
   export IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_AGENT_DIR=$tmp/agent IRONFLOCKOS_STATE=$tmp/state \
-    IRONFLOCKOS_INIT=$tmp/ironflock-init IRONFLOCKOS_ENROLL_CONF=$tmp/enroll.conf
+    IRONFLOCKOS_IRONFLOCK=$tmp/ironflock IRONFLOCKOS_ENROLL_CONF=$tmp/enroll.conf IRONFLOCKOS_RUN=$tmp/run
 }
+
+# calls: the files the fake was called with, one per line.
+calls() { sed 's/^enroll -c \([^ ]*\).*/\1/' "$tmp/init-calls"; }
 
 @test "enroll without any .flock leaves the device unenrolled" {
   enroll_env
@@ -207,7 +227,7 @@ enroll_env() {
 @test "enroll uses the newest .flock on the IRONFLOCKOS partition and shreds it" {
   enroll_env
   echo old >"$tmp/esp/old.flock"
-  touch -d '2020-01-01' "$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
   echo new >"$tmp/esp/new.flock"
   echo agent >"$tmp/agent/device-config.flock"
   run bash "$lib/enroll"
@@ -224,7 +244,7 @@ enroll_env() {
   run bash "$lib/enroll"
   [ "$status" -eq 0 ]
   [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --shred-source --hostname-from-flock" ]
-  # The one it used is ironflock-init's to shred; the other would enroll the
+  # The one it used is ironflock's to shred; the other would enroll the
   # device again at the next boot.
   [ ! -e "$tmp/esp/old.flock" ] && [ -e "$tmp/esp/new.flock" ]
   [[ "$output" == *"removed old.flock"* ]]
@@ -251,13 +271,168 @@ enroll_env() {
   [[ "$(cat "$tmp/init-calls")" == *"--hostname-from-flock"* ]]
 }
 
-@test "enroll fails when ironflock-init fails, and does not mark the slot" {
+@test "enroll fails when ironflock fails, and does not mark the slot" {
   enroll_env
   echo x >"$tmp/esp/a.flock"
-  printf '#!/bin/bash\nexit 3\n' >"$tmp/ironflock-init"
+  printf '#!/bin/bash\nexit 3\n' >"$tmp/ironflock"
   run bash "$lib/enroll"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 3 ]
   [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: exit codes 2 and 3 end the script with them; nothing else is tried or removed" {
+  enroll_env
+  echo x >"$tmp/esp/new.flock"
+  echo y >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  for code in 2 3; do
+    printf '#!/bin/bash\necho "$*" >>%s/init-calls\nexit %s\n' "$tmp" "$code" >"$tmp/ironflock"
+    rm -f "$tmp/init-calls"
+    run bash "$lib/enroll"
+    [ "$status" -eq "$code" ]
+    [ "$(calls)" = "$tmp/esp/new.flock" ]
+    [ -e "$tmp/esp/new.flock" ] && [ -e "$tmp/esp/old.flock" ] && [ ! -e "$tmp/state/enrolled" ]
+    [[ "$output" == *"ended with exit code $code"* ]]
+  done
+}
+
+@test "enroll without ironflock in the image fails and leaves everything as it is" {
+  enroll_env
+  echo x >"$tmp/esp/a.flock"
+  rm "$tmp/ironflock"
+  # (bats takes a run that ends with 127 for a typo in the test)
+  run bash -c 'bash "$1" || echo "exit code $?"' _ "$lib/enroll"
+  [[ "$output" == *"exit code 127" ]]
+  [ -e "$tmp/esp/a.flock" ] && [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: a newest .flock that is not accepted is kept as .rejected, and the next newest enrolls" {
+  enroll_env
+  echo bad >"$tmp/esp/newest.flock"
+  echo good >"$tmp/esp/middle.flock"
+  touch -t 202101010000 "$tmp/esp/middle.flock"
+  echo old >"$tmp/esp/oldest.flock"
+  touch -t 202001010000 "$tmp/esp/oldest.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" = "$tmp/esp/newest.flock
+$tmp/esp/middle.flock" ]
+  # The bad one is kept under a name nothing takes; the one used is
+  # ironflock's to shred; the older one goes.
+  [ "$(cat "$tmp/esp/newest.flock.rejected")" = bad ] && [ ! -e "$tmp/esp/newest.flock" ]
+  [ -e "$tmp/esp/middle.flock" ] && [ ! -e "$tmp/esp/oldest.flock" ]
+  [[ "$output" == *"newest.flock on the IRONFLOCKOS partition was not accepted: kept as newest.flock.rejected"* ]]
+  [[ "$output" == *"enrolled from middle.flock"* ]]
+  [ -s "$tmp/state/enrolled" ]
+  # The next boot does not take it again.
+  rm "$tmp/init-calls" "$tmp/state/enrolled" "$tmp/esp/middle.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" = "$tmp/agent/device-config.flock" ]
+}
+
+@test "enroll: the only .flock not accepted, the agent's copy enrolls the slot" {
+  enroll_env
+  echo bad >"$tmp/esp/device.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/device.flock --shred-source --hostname-from-flock
+enroll -c $tmp/agent/device-config.flock --shred-source --hostname-from-flock" ]
+  [ -e "$tmp/esp/device.flock.rejected" ] && [ ! -e "$tmp/esp/device.flock" ]
+  [ "$(cat "$tmp/agent/device-config.flock")" = agent ]
+  [[ "$output" == *"enrolled from device-config.flock"* ]]
+  [ -s "$tmp/state/enrolled" ]
+}
+
+@test "enroll: the only .flock not accepted and no agent's copy: unenrolled, the unit fails once" {
+  enroll_env
+  echo bad >"$tmp/esp/device.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"no .flock was accepted: the device stays unenrolled"* ]]
+  [ -e "$tmp/esp/device.flock.rejected" ] && [ ! -e "$tmp/esp/device.flock" ]
+  [ ! -e "$tmp/state/enrolled" ]
+  # The next boot finds nothing to take.
+  rm "$tmp/init-calls"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stays unenrolled"* ]]
+  [ ! -e "$tmp/init-calls" ]
+}
+
+@test "enroll: the agent's own copy not accepted is left as it is" {
+  enroll_env
+  echo bad >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 4 ]
+  [ "$(cat "$tmp/agent/device-config.flock")" = bad ] && [ ! -e "$tmp/agent/device-config.flock.rejected" ]
+  [[ "$output" == *"the agent's own .flock"*"was not accepted"* ]]
+  [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: a step after the agent's fails with the newest .flock gone: the older ones go too" {
+  enroll_env
+  echo host-step-fails >"$tmp/esp/new.flock"
+  echo old >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 1 ]
+  # The agent took the newest; the next boot repeats the enrolment from its
+  # copy, not from an older .flock.
+  [ "$(calls)" = "$tmp/esp/new.flock" ]
+  [ ! -e "$tmp/esp/new.flock" ] && [ ! -e "$tmp/esp/old.flock" ]
+  [[ "$output" == *"removed old.flock"* ]]
+  [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: the agent's step fails: the .flock files stay for the next boot, nothing else is tried" {
+  enroll_env
+  echo agent-fails >"$tmp/esp/new.flock"
+  echo old >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 1 ]
+  [ "$(calls)" = "$tmp/esp/new.flock" ]
+  [ -e "$tmp/esp/new.flock" ] && [ -e "$tmp/esp/old.flock" ]
+  [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll matches .flock without regard to case, as ironflock does; dot files, folders and .rejected are not taken" {
+  enroll_env
+  echo up >"$tmp/esp/Device.FLOCK"
+  echo mixed >"$tmp/esp/other.Flock"
+  touch -t 202001010000 "$tmp/esp/other.Flock"
+  echo hidden >"$tmp/esp/.part.flock"
+  mkdir "$tmp/esp/folder.flock"
+  echo kept >"$tmp/esp/x.flock.rejected"
+  touch -t 203001010000 "$tmp/esp/.part.flock" "$tmp/esp/x.flock.rejected"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" = "$tmp/esp/Device.FLOCK" ]
+  [ ! -e "$tmp/esp/other.Flock" ] && [ -e "$tmp/esp/.part.flock" ] && [ -d "$tmp/esp/folder.flock" ]
+  [ -e "$tmp/esp/x.flock.rejected" ]
+  # The unit runs for such a file too.
+  grep -qx 'ConditionPathExistsGlob=|/boot/efi/\*.\[Ff\]\[Ll\]\[Oo\]\[Cc\]\[Kk\]' \
+    "$BATS_TEST_DIRNAME/../../overlay/usr/lib/systemd/system/ironflockos-enroll.service"
+}
+
+@test "enroll while a factory reset is to come (copy): a .flock not accepted stays, the next one enrolls, nothing is removed" {
+  enroll_env
+  echo copy >"$tmp/run/factory-reset-hold"
+  echo bad >"$tmp/esp/new.flock"
+  echo good >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --hostname-from-flock
+enroll -c $tmp/esp/old.flock --hostname-from-flock" ]
+  [ "$(cat "$tmp/esp/new.flock")" = bad ] && [ ! -e "$tmp/esp/new.flock.rejected" ] && [ -e "$tmp/esp/old.flock" ]
+  [[ "$output" == *"stays there for the factory reset still to come"* ]]
 }
 
 @test "fwupd-shim puts the booted shim where fwupd looks for it" {

@@ -115,6 +115,8 @@ check "rauc-mark-good is masked" bash -c "[ \"\$(systemctl --root='$work/root' i
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
   test ! -e "$work/root/usr/lib/systemd/system/ironflockos-mark-good.service"
 check "the agent is baked in" test -x "$work/root/usr/lib/ironflock/device-agent"
+check "ironflock is baked in as /usr/bin/ironflock" test -x "$work/root/usr/bin/ironflock"
+check "nothing named ironflock-init in the image" bash -c "! find '$work/root' -xdev -name '*ironflock-init*' | grep -q ."
 # shellcheck disable=SC2016 # an awk program
 check "no account has a password" awk -F: '$2 !~ /^[!*]/ { bad = 1 } END { exit bad }' "$work/root/etc/shadow"
 
@@ -125,7 +127,9 @@ check "chroot: systemd runs" in_root /usr/bin/systemctl --version
 check "chroot: Docker's CLI runs" in_root /usr/bin/docker --version
 check "chroot: RAUC runs" in_root /usr/bin/rauc --version
 check "rpi-eeprom-update is there" test -x "$work/root/usr/bin/rpi-eeprom-update"
-check "chroot: ironflock-init runs" in_root /usr/sbin/ironflock-init version
+check "chroot: ironflock runs" in_root /usr/bin/ironflock version
+check "chroot: image.json names ironflock_version, not the init_version of ironflock-init" \
+  in_root jq -e '(.ironflock_version | type == "string" and length > 0) and (has("init_version") | not)' /usr/lib/ironflock/image.json
 check "chroot: the WiFi firmware has the Pi 4's NVRAM file" \
   bash -c "ls '$work/root/usr/lib/firmware/brcm/' | grep -q 'brcmfmac43455-sdio.raspberrypi,4-model-b'"
 

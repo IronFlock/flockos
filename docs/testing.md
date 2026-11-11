@@ -28,8 +28,11 @@ with a reason and an expiry date.
 `test/unit/*.bats` cover the build library (`build/lib.sh`: configuration
 parsing that never runs code, templates without holes, sizes, the matrix axes),
 the os-release contract, the target templates (GRUB A/B contract, RAUC
-`system.conf`, slot sizes) and the image's own scripts in
-`overlay/usr/lib/ironflockos` run against a temporary directory. The factory reset
+`system.conf`, slot sizes), `build/bake.sh` against a fake download base (the
+pinned `ironflock`, its signature, what `ironflock bake` must leave), and the
+image's own scripts in `overlay/usr/lib/ironflockos` run against a temporary
+directory, the enrolment with a fake `ironflock` that ends with each of its
+exit codes. The factory reset
 (`factory-reset.bats`) runs against folders that stand for the data partition
 and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk`, `blkid`,
 `findmnt`, `grub-editenv`, `sync` and `timeout`: a power loss at each call of
@@ -86,6 +89,22 @@ Sequence:
    the platform; `--no-flock` leaves it out) the slot is enrolled: SSH user, sudo
    rule and agent unit exist, the hostname is the `.flock`'s name, the `.flock` has
    left the IRONFLOCKOS partition and the agent's copy is 0600.
+   Then `ironflock` (IronFlock/ironflock-cli) in the image: it is
+   `/usr/bin/ironflock`, nothing named `ironflock-init` is left, and
+   `ironflock version` is the `ironflock_version` of `image.json`;
+   `ironflock status --json` names the image, its version and the booted slot
+   and, enrolled, the agent with the `.flock`'s device; `agent install` and
+   `agent remove` refuse (exit code 3), as root and not; `ironflock enroll` does
+   not accept a `.flock` that is not JSON (exit code 4) and leaves it where it
+   is; none of them changes anything. Enrolled, the same file as the newest
+   `.flock` on the IRONFLOCKOS partition is kept as `.rejected` and the
+   enrolment takes the agent's copy; `agent configure -c` refuses while a
+   factory reset is requested and with a proxy flag. Then the device changes
+   hands: its owner, logged in over SSH, runs `sudo ironflock agent configure -c`
+   with the `.flock` of another owner; the command outlives the owner's session,
+   which it ends, and the device is the other device (the agent's copy, the
+   hostname, the other owner's account and sudo rule; the first owner's are
+   gone). Configured back as root, it goes on as the first device.
    For `nvidia`, on a VM without a GPU: the `nvidia` module and the driver
    packages are at the pinned versions and the module is built for the running
    kernel; no compiler, DKMS or kernel headers are left; nouveau is blacklisted

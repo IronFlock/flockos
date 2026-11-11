@@ -9,7 +9,8 @@ Version 2.0. Its full text is in /usr/share/common-licenses/Apache-2.0.
 
 Every Debian package on this system comes with its own licence, which
 /usr/share/doc/<package>/copyright names. The IronFlock device-agent and
-ironflock-init, which device-init installs, are not covered by this file.
+ironflock (/usr/bin/ironflock), which the image build installs from
+IronFlock/ironflock-cli, are not covered by this file.
 
 Source code: VERSION_ID in /etc/os-release is this system's release. The
 file https://instance-registry.ironflock.com/dl/ironflockos/<VERSION_ID>/SOURCES

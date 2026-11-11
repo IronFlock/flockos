@@ -1,7 +1,7 @@
 # IronFlockOS master plan
 
 Status: draft v1.1, 2026-11-04 (v1.1 adds firmware updates and the real-time kernel option). Owner: Marko Petzold. Scope: this repository and the
-cross-repo changes it needs in device-init, device-agent, flasher, workflows and
+cross-repo changes it needs in device-init (now IronFlock/ironflock-cli), device-agent, flasher, workflows and
 the GCP project.
 ****
 This document is the plan of record for turning the ReswarmOS repository into the
@@ -18,7 +18,7 @@ are recorded as ADRs in [adr/](adr/).
 | G1 | Working, reproducible OS images for **amd64** and **arm64** | A release produces every image in the target matrix from one commit, in CI |
 | G2 | Support **Raspberry Pi** (64-bit models), **generic AMD/ARM edge PCs**, **NVIDIA GPU in containers** on x86, and **Jetson Orin** | Each target boots, enrolls into IronFlock, runs a GPU container where applicable |
 | G3 | **RAUC A/B updates** triggered by the device-agent, including kernel updates and automatic rollback | A device updates from release N to N+1 over the platform and falls back to N when N+1 fails to boot |
-| G4 | **Reuse device-init** instead of duplicating host setup; ship in the image what device-init would install anyway | The image contains no setup logic of its own beyond calling `ironflock-init`; first boot works offline |
+| G4 | **Reuse device-init** (now the `ironflock` CLI, IronFlock/ironflock-cli) instead of duplicating host setup; ship in the image what it would install anyway | The image contains no setup logic of its own beyond calling `ironflock`; first boot works offline |
 | G5 | Images are **installable by FlockFlasher** | FlockFlasher lists IronFlockOS images from the signed catalog, flashes them, and injects the `.flock` file; PCs get an installer USB that writes the image to any internal disk |
 | G6 | **CI and security harness** like every other IronFlock repo; all building happens in GitHub Actions | `ci.yml`, `security.yml`, `release.yml` call `IronFlock/workflows@v1`; `main` is protected by `ci-ok` and `security / report`; release artefacts are signed and carry SBOM and provenance |
 | G7 | **Firmware updates** for the hardware the OS runs on are delivered and tracked through the same system | Boot firmware an OS release depends on ships inside the RAUC bundle; component firmware is inventoried and updatable from the platform through fwupd (section 3.10) |
@@ -49,7 +49,7 @@ bundle version is mangled, both signing certificates are expired, the in-image u
 units use shell syntax systemd never executes, the x86 GRUB fallback script has a typo
 that disables fallback, and the OS-side update poller the device-agent depends on was
 deleted from this repo in October 2026. The device setup tool (`reswarmify`) was
-extracted to `IronFlock/device-init` and is current; the image does not use it. A
+extracted to `IronFlock/device-init` (now `IronFlock/ironflock-cli`) and is current; the image does not use it. A
 private `IronFlock/ironflockos` repo contains a second, abandoned Buildroot attempt with a
 committed RAUC private key. There is no CI, no branch protection, and "IronFlockOS" appears
 nowhere in the code.
@@ -89,7 +89,7 @@ release. See [ADR-0001](adr/0001-debian-based-image-for-all-targets.md).
 
 | Variant | Content | Targets |
 |---------|---------|---------|
-| `base` | Debian stable, systemd, NetworkManager, OpenSSH, Docker CE, RAUC, device-agent, `ironflock-init` | all |
+| `base` | Debian stable, systemd, NetworkManager, OpenSSH, Docker CE, RAUC, device-agent, `ironflock` | all |
 | `nvidia` | `base` + NVIDIA open kernel modules, driver userspace, `nvidia-container-toolkit`, persistence daemon | `amd64-efi` (Jetson has NVIDIA userspace in `base` by construction) |
 | `installer` | `base` + the installer program + an embedded payload image; no RAUC | `amd64-efi`, `arm64-efi` |
 
@@ -108,7 +108,7 @@ directory name under `targets/`.
 `release ironflockos v<version>`, exactly like the other repos. One release = every
 target×variant image built from the same commit.
 
-**`/etc/os-release` contract** (what the agent, device-init and the platform read):
+**`/etc/os-release` contract** (what the agent, `ironflock` and the platform read):
 
 ```
 NAME="IronFlockOS"
@@ -174,20 +174,20 @@ RAUC `custom` backend; UEFI falls back to the other slot after three failed warm
 See section 3.7.
 
 **The `data` partition** is mounted at `/data`. The image bakes in the redirections so
-device-init and the agent need no knowledge of it:
+`ironflock` and the agent need no knowledge of it:
 
 | Path in root | Lives at | Why |
 |--------------|----------|-----|
-| `/opt/ironflock` | `/data/ironflock` | agent binary, `device-config.flock`, `installed.json`, Docker data-root chosen by device-init (`/opt/ironflock/device-agent/docker-apps`) |
-| `/home` | `/data/home` | the SSH user device-init creates |
-| `/etc/NetworkManager/system-connections` | `/data/network/connections` | WiFi profile written by device-init |
+| `/opt/ironflock` | `/data/ironflock` | agent binary, `device-config.flock`, `installed.json`, Docker data-root chosen by `ironflock` (`/opt/ironflock/device-agent/docker-apps`) |
+| `/home` | `/data/home` | the SSH user `ironflock enroll` creates |
+| `/etc/NetworkManager/system-connections` | `/data/network/connections` | WiFi profile written by `ironflock enroll` |
 | `/etc/ssh/ssh_host_*` | `/data/etc/ssh` | stable host identity across slots |
 | `/etc/machine-id` | `/data/etc/machine-id` | stable `/etc/machine-id` for journald and NetworkManager |
 | `/var/log/journal` | `/data/log/journal` | persistent journal |
 | `/var/cache/ironflockos` | `/data/cache` | downloaded RAUC bundles |
 | `/var/lib/fwupd` | `/data/fwupd` | fwupd history and pending offline firmware updates |
 | `/etc/ironflockos/rt.conf` | `/data/ironflockos/rt.conf` | platform-managed real-time CPU set and tuning (section 3.11) |
-| `/etc/hostname`, user accounts, sudoers | re-applied on each first boot of a slot by `ironflock-init enroll` from `/data/ironflock/.../device-config.flock` | keeps the rootfs stateless |
+| `/etc/hostname`, user accounts, sudoers | re-applied on each first boot of a slot by `ironflock enroll` from `/data/ironflock/.../device-config.flock` | keeps the rootfs stateless |
 
 The root filesystem is read-write in the first releases. Read-only root with dm-verity
 is listed under later hardening (section 8).
@@ -201,7 +201,7 @@ Pipeline per target×variant:
 
 1. **rootfs**: `mmdebstrap --mode=unshare --arch=<arch> --variant=minbase` with the
    profile's package list, apt sources (Debian, download.docker.com, Raspberry Pi,
-   NVIDIA), hooks that run the overlay copy and `ironflock-init bake`. Produces a
+   NVIDIA), hooks that run the overlay copy and `ironflock bake`. Produces a
    reproducible tar given `SOURCE_DATE_EPOCH`. Runs unprivileged; cross-arch via
    `qemu-user-static` when the runner is not native.
 2. **slot images**: `mke2fs -d` from the tar into `rootfs.ext4` of the fixed slot size;
@@ -237,16 +237,17 @@ with the harness skeleton: they cannot pass the gate, and the security scan woul
 their embedded credentials. The git history keeps them; the last commit with them is
 `82b9a03`.
 
-### 3.4 Provisioning: reuse device-init
+### 3.4 Provisioning: reuse the IronFlock CLI (formerly device-init)
 
-Principle: **the image never implements host setup; it calls `ironflock-init`.** The
+Principle: **the image never implements host setup; it calls `ironflock`** (IronFlock/ironflock-cli;
+`ironflock-init` of IronFlock/device-init until the CLI's WP-5.1). The
 image only adds (a) a bake step at build time so that first boot needs no network and
 (b) a first-boot unit that enrolls from the `.flock` file. See
 [ADR-0001](adr/0001-debian-based-image-for-all-targets.md) for why this requires a
 Debian-style base.
 
-**At build time**, inside the mmdebstrap chroot: `ironflock-init bake --arch <arch>
---channel production` installs the package set device-init would install (`jq
+**At build time**, inside the mmdebstrap chroot: `ironflock bake --arch <arch>`
+(`build/bake.sh`) installs the package set `ironflock` would install (`jq
 ca-certificates curl gnupg lsb-release net-tools iproute2 dnsutils network-manager
 openssh-server`), Docker CE from the Docker apt repo (pinned version from the profile),
 the agent binary of the manifest's production channel (verified via `.sha256` and
@@ -256,7 +257,7 @@ create users, or prompt.
 
 **At first boot** of a slot (fresh flash or after an A/B switch), `ironflockos-enroll.service`
 (`After=docker.service network-pre.target`, `ConditionPathExists=!/data/ironflock/enrolled`)
-runs `ironflock-init enroll -c <file>` where `<file>` is the newest `*.flock` on the
+runs `ironflock enroll -c <file>` where `<file>` is the newest `*.flock` on the
 `IRONFLOCKOS` partition or, if none, the persisted `/data/ironflock/device-agent/device-config.flock`.
 Enroll creates the SSH user, authorized key, sudoers, WiFi profile, hostname (from the
 `.flock` `name`, opt-in), installs and starts `ironflock-device-agent.service`, and
@@ -383,7 +384,7 @@ QEMU with OVMF in CI. Generic enough for any UEFI x86 IPC; legacy BIOS is not su
 build time** in the chroot against the image's exact kernel, then headers and compiler
 are purged, so no device compiles anything. `nvidia-container-toolkit` from NVIDIA's
 `libnvidia-container` apt repo; `nvidia-ctk runtime configure --runtime=docker` is
-unnecessary because device-init already adds the `nvidia` runtime when
+unnecessary because `ironflock bake` already adds the `nvidia` runtime when
 `/usr/bin/nvidia-container-runtime` exists. `nouveau` blacklisted, `nvidia-persistenced`
 enabled. Acceptance: `docker run --rm --gpus all nvidia/cuda:12-base nvidia-smi` on a
 real GPU host (no GPU in CI; a self-hosted or manual gate). Kernel bumps rebuild the
@@ -470,7 +471,7 @@ away (builds are 10 to 20 minutes). Jetson builds pull a 2 GB BSP; cache it with
 ### 3.9 Security posture of the image
 
 - No root password, no default user, no password SSH. The only account is the one
-  device-init creates from the `.flock` key. `PermitRootLogin no`.
+  `ironflock enroll` creates from the `.flock` key. `PermitRootLogin no`.
 - `.flock` secrets leave the FAT partition after enrollment; copies are 0600 on `/data`.
 - Nothing in the image logs passwords or keys (the legacy scripts did).
 - No telemetry calls from login shells (the legacy motd called `ipinfo.io` three times

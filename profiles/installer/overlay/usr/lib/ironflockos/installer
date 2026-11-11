@@ -49,8 +49,10 @@ payload=$(installer_payload "$payload_dir" "$CONF_PAYLOAD") || fail "no image to
 payload_bytes=$(cat "$payload.size" 2>/dev/null || echo 0)
 [[ "$payload_bytes" =~ ^[0-9]+$ ]] || payload_bytes=0
 
+# The newest .flock, whatever the case of its name (as the device's enrolment
+# takes it).
 flock=""
-for f in "$esp"/*.flock; do
+for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk]; do
   [ -f "$f" ] || continue
   if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
 done

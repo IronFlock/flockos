@@ -140,7 +140,7 @@ installer makes no partitions: its smallest disk is its raw size.
 The raw image of `base` holds the IRONFLOCKOS partition and slot A: 4,564,471,808
 bytes in 0.14.0. The Compute Engine images of a release have the smallest
 disk rounded up to whole GiB, 10 GiB and 18 GiB for nvidia ([release.md](release.md),
-"The VM images"), the numbers ADR-0008 of device-init gives.
+"The VM images"), the numbers ADR-0008 of IronFlock/ironflock-cli gives.
 
 ## Boot and A/B
 
@@ -179,26 +179,46 @@ installer USB uses its own names.
 
 ## IronFlock in the image
 
-`build/bake.sh` fetches `ironflock-init` at the version pinned in
-`profiles/base/versions`, checks its OpenPGP signature against device-init's
-bootstrap key (`profiles/base/keys`, pinned by SHA-256), and runs
-`ironflock-init bake` on the tree: the verified agent of the production channel,
-Docker's `daemon.json`, the NetworkManager and dbus restart drop-ins, the login
-banner, and `ironflock-init` itself. The agent version goes into
+`build/bake.sh` fetches `ironflock`, the IronFlock command of IronFlock/ironflock-cli,
+at the version pinned in `profiles/base/versions` (`IRONFLOCK_VERSION`), from
+`cli/linux/<arch>/<version>/ironflock` below the download base, checks its OpenPGP
+signature (`.asc`) against the IronFlock bootstrap key (`profiles/base/keys`, pinned
+by SHA-256) as the CLI's `install.sh` does, and runs `ironflock bake` on the tree:
+the verified agent of the production channel, Docker's `daemon.json`, the
+NetworkManager and dbus restart drop-ins, the login banner, and `ironflock` itself as
+`/usr/bin/ironflock`. The build fails unless `/usr/bin/ironflock` is the verified
+download and `/usr/lib/ironflock/image.json` names the pinned version as
+`ironflock_version`; that record, with the agent version, goes into
 `<image-id>-<version>.ironflock.json`.
 
-On the device `ironflockos-enroll.service` runs `ironflock-init enroll` on the first
+On the device `ironflockos-enroll.service` runs `ironflock enroll` on the first
 boot of every slot and whenever a `.flock` lies on the IRONFLOCKOS partition: with
 the newest `.flock` there (removed afterwards, and every other `.flock` there
 with it, as each would enroll the device again), else with the agent's own copy
-on `/data`. While a factory reset may still find the old owner's data on
+on `/data`. The name's case does not count (`Device.FLOCK` is a `.flock`), as for
+`ironflock`. A `.flock` that `ironflock enroll` does not accept (exit code 4: not
+readable, not JSON, no `device_key` or `secret`; nothing changed) is renamed to
+`<name>.rejected` on the partition, where it is kept and enrolls nothing, and the
+next one is taken: the next newest, at last the agent's copy. Each is tried once
+per boot: the device comes online with what there is, and nothing loops. When a
+step after the agent's fails (exit code 1), the agent runs all the same; the
+`.flock` it took has left the partition, so the other ones go too. A slot that did
+not enroll stays unmarked, and the next boot tries again (a `.rejected` file is not
+taken again). While a factory reset may still find the old owner's data on
 `/data`, a `.flock` there waits; once it has begun to erase, or without
 `/data`, enroll takes it and leaves it there ("Factory reset"). An A/B update
 brings a slot without the SSH user and the agent's unit; enroll puts them back without network. Enroll also sets the hostname
 from the device name in the `.flock` (ADR-0009), made into a valid hostname by
-`ironflock-init`. A device keeps its hostname with `hostname-from-flock=no` in
+`ironflock`. A device keeps its hostname with `hostname-from-flock=no` in
 `/etc/ironflockos/enroll.conf`, which links to `/data/ironflockos/enroll.conf` and so
 outlives updates.
+
+`ironflock` on the device is the same command as elsewhere, with what fits an
+IronFlockOS device: `ironflock status` shows the system, its slots and the agent;
+`ironflock agent configure -c <file>` enrolls the device with another `.flock` the
+way the image does (it becomes the agent's copy); `agent install`, `agent remove`
+and the proxy flags of `agent configure` refuse (exit code 3), as the image brings
+the agent and keeps its proxy in `/etc/ironflockos/proxy.conf`.
 
 The device-agent marks the booted slot good once it has reached the platform
 (WP-2.4, device-agent 1.6.0); a slot it never marks falls back.
@@ -416,7 +436,7 @@ console and in the journal; `factory-reset.log` keeps the result.
 
 ### The contract for the CLI
 
-`ironflock os reset [-c new.flock] [--keep-network]` (device-init) is written
+`ironflock os reset [-c new.flock] [--keep-network]` (IronFlock/ironflock-cli) is written
 from this section.
 
 - **Support.** The device can reset when `/usr/lib/ironflockos/factory-reset`
@@ -548,7 +568,7 @@ master plan, section 3.7), in 8 GiB slots, with the RAUC compatible
   package set afterwards differs from the one before by anything but
   `ironflockos-nvidia-modules`.
 - `nvidia-container-toolkit` from NVIDIA's libnvidia-container repository;
-  `ironflock-init bake` sees `nvidia-container-runtime` and adds the `nvidia`
+  `ironflock bake` sees `nvidia-container-runtime` and adds the `nvidia`
   runtime to Docker's `daemon.json`.
 
 Both repositories stay in the image's apt sources with their keys embedded

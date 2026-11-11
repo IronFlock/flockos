@@ -3,7 +3,7 @@
 # RAUC has just written:
 # - a root slot (class rootfs) gets the device's identity, so the new slot
 #   boots as the same machine: machine-id keeps the journal and the DHCP
-#   client id; hostname is what device-init or the platform set; and a
+#   client id; hostname is what ironflock enroll or the platform set; and a
 #   factory reset's state, so a request done or given up stays so; on Jetson
 #   its /boot/extlinux/extlinux.conf gets root= and rauc.slot= of that slot
 #   (WP-6.2), as the bundle's names slot A;

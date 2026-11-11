@@ -64,7 +64,7 @@ The status of each work package is in [docs/implementation-plan.md](docs/impleme
 | `jetson-orin` | NVIDIA Jetson Orin | NVIDIA UEFI and `nvbootctrl`, RAUC | none yet: the root tree and layout are done, the A/B backend and images are not |
 
 - **`base`**: Debian 13 with systemd, NetworkManager, OpenSSH, Docker CE, RAUC, fwupd,
-  the device-agent and `ironflock-init`.
+  the device-agent and `ironflock` (`/usr/bin/ironflock`).
 - **`base-rt`**: `base` with Debian's PREEMPT_RT kernel and a tuning service. EFI
   targets only.
 - **`nvidia`**: `base` with NVIDIA's open kernel modules, driver and container toolkit,

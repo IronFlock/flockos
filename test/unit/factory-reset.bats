@@ -977,12 +977,14 @@ outside() {
   rm "$data/ironflockos/factory-reset.done"
   boot
   [ "$status" -eq 0 ] && [[ "$output" == *"given up before"* ]] && ! grep -q mkfs "$tmp/calls"
-  # IRONFLOCKOS writable again: the request is retired and the files go.
+  # IRONFLOCKOS writable again: the request is retired and the files go,
+  # every .flock enroll would take (the case of its name does not count).
   chmod 755 "$esp"
+  echo '{}' >"$esp/Other.FLOCK"
   boot
   [ "$status" -eq 0 ]
   [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
-  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
+  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/Other.FLOCK" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
   # An update carries the state into the new slot.
   grep -q 'reset_state=${IRONFLOCKOS_RESET_STATE:-/var/lib/ironflockos/factory-reset.state}' "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
   grep -q 'cp -p "$reset_state" "$mnt$reset_state"' "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
@@ -991,9 +993,9 @@ outside() {
 @test "after a give-up with the old data, a .flock put on IRONFLOCKOS later enrolls as on any device; while held, it waits" {
   lib=$repo/overlay/usr/lib/ironflockos
   mkdir -p "$tmp/agent" "$tmp/state" "$tmp/run"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
-  enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_INIT="$tmp/ironflock-init"
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock"
+  chmod +x "$tmp/ironflock"
+  enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_IRONFLOCK="$tmp/ironflock"
     IRONFLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
   echo gave-up >"$hold_file"
   : >"$tmp/state/enrolled"
@@ -1019,14 +1021,14 @@ outside() {
 @test "enroll and ironflockos-proxy: wait leaves the IRONFLOCKOS partition's .flock and proxy.conf, copy takes them and leaves them there" {
   lib=$repo/overlay/usr/lib/ironflockos
   mkdir -p "$tmp/agent" "$tmp/state" "$tmp/pdata" "$tmp/run"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock"
+  chmod +x "$tmp/ironflock"
   echo '{"appliance_domain": "old.example"}' >"$tmp/agent/device-config.flock"
   printf 'http_proxy=http://old:3128\n' >"$tmp/pdata/proxy.conf"
   echo '{"appliance_domain": "new.example"}' >"$esp/new-device.flock"
   echo '{"appliance_domain": "other.example"}' >"$esp/other.flock"
   touch -t 202001010000 "$esp/other.flock"
-  enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_INIT="$tmp/ironflock-init"
+  enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_IRONFLOCK="$tmp/ironflock"
     IRONFLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
   proxy_env=(IRONFLOCKOS_PROXY_CONF="$tmp/pdata/proxy.conf" IRONFLOCKOS_AGENT_FLOCK="$tmp/agent/device-config.flock")
 

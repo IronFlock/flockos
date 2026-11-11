@@ -138,7 +138,7 @@ repart() {
   [[ "$output" == *"2 partitions without SizeMinBytes"* ]]
 }
 
-@test "the Compute Engine images get the same disk, rounded up to whole GiB (ADR-0008 of device-init: 10 and 18 GiB)" {
+@test "the Compute Engine images get the same disk, rounded up to whole GiB (ADR-0008 of IronFlock/ironflock-cli: 10 and 18 GiB)" {
   load_conf "$BATS_TEST_DIRNAME/../../build/release.conf"
   [ "$GCE_DATA_MIN" = 1G ]
   gib=$((1 << 30))

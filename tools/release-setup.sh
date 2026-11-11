@@ -17,7 +17,7 @@
 #     object admin on gs://ironflock-downloads/staging/ironflockos/ and
 #     gs://ironflock-downloads/ironflockos/ only (an IAM condition), object
 #     viewer on the bucket for listing (its objects are public anyway), as
-#     device-init's publisher; and the custom role ironflockosVmImagePublisher on
+#     the CLI's publisher; and the custom role ironflockosVmImagePublisher on
 #     the project for images named ironflockos-* only (an IAM condition): it makes
 #     the Compute Engine images of the releases (ADR-0010) and nothing else of
 #     Compute Engine

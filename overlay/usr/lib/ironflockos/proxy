@@ -159,9 +159,10 @@ fi
 
 env=""
 if [ -n "$http_proxy$https_proxy" ]; then
-  # The .flock that enroll takes on this boot, else the agent's copy.
+  # The .flock that enroll takes on this boot (the newest, whatever the case
+  # of its name), else the agent's copy.
   flock=""
-  for f in "$esp"/*.flock; do
+  for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk]; do
     if [ ! -f "$f" ] || [ "$reset_hold" = wait ]; then continue; fi
     if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
   done

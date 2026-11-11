@@ -3,7 +3,7 @@
 
 osr="$BATS_TEST_DIRNAME/../../build/osrelease.sh"
 
-@test "carries the fields the agent, device-init and the platform read" {
+@test "carries the fields the agent, ironflock and the platform read" {
   run bash "$osr" 1.2.3 amd64-efi base std 1a2b3c4d5e6f7a8b 1793000000
   [ "$status" -eq 0 ]
   [[ "$output" == *$'\nID=ironflockos\n'* ]]

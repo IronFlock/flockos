@@ -17,7 +17,7 @@ off for now to save CI time, until the Jetson work continues. Still to come:
 | A/B | NVIDIA's rootfs A/B: root slots `APP` and `APP_b`, switched through `nvbootctrl -t rootfs` by a RAUC `custom` backend (WP-6.3) |
 | Distribution | `ubuntu-noble` (`distros/ubuntu-noble`): ports.ubuntu.com, Docker's noble repository |
 | Kernel | `nvidia-l4t-kernel` 6.8.12 (`6.8.12-1021-tegra`) with NVIDIA's out-of-tree modules; Orin's GPU driver is `nvgpu` (`-nvgpu` packages; `-openrm` is Thor's) |
-| GPU in containers | `nvidia-container-toolkit` 1.19.1 from NVIDIA's `common` repository; Docker's `nvidia` runtime (device-init's bake adds it); `nv-load-gpu-libs` links the board's `libcuda` and writes the container CSVs on each boot |
+| GPU in containers | `nvidia-container-toolkit` 1.19.1 from NVIDIA's `common` repository; Docker's `nvidia` runtime (`ironflock bake` adds it); `nv-load-gpu-libs` links the board's `libcuda` and writes the container CSVs on each boot |
 | Consoles | `ttyTCU0`, 115200 8N1 (the debug header), and the display (`tty0`) |
 | Slot size | 8 GiB (`base`); only the base variant |
 | Disk | NVIDIA's NVMe layout for rootfs A/B, plus `data` (see below); written by NVIDIA's flash tools |
@@ -160,7 +160,7 @@ with `--no-flash`.
 checks it: the versions, the sources and pins, kernel, initrd and `nvgpu`,
 units and masks, the baked agent and the `nvidia` runtime. It also runs the
 tree's binaries in a chroot: dpkg and apt consistency, systemd, Docker,
-containerd, RAUC, `ironflock-init`, `nvidia-ctk` and `nvidia-container-cli`.
+containerd, RAUC, `ironflock`, `nvidia-ctk` and `nvidia-container-cli`.
 CI runs both on every pull request (`jetson-rootfs` in `ci.yml`), and makes
 the flash package from the image (`jetson-flash`, above).
 

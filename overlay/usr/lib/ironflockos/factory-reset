@@ -733,7 +733,8 @@ retire() {
     mv -f "$request" "$request.gave-up" 2>/dev/null || say "could not rename $request: the slot's state and the mark on /data keep it from being tried again"
   fi
   if [ "$1" = yes ]; then
-    for f in "$esp"/*.flock "$esp/proxy.conf"; do
+    # Every .flock enroll would take, whatever the case of its name.
+    for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk] "$esp/proxy.conf"; do
       if [ -e "$f" ]; then remove "$f" 2>/dev/null || left=yes; fi
     done
   fi

@@ -256,7 +256,7 @@ if [ "$BOOTLOADER" = tegra ]; then
   [ -x "$ROOT/usr/bin/nvidia-container-runtime" ] || die "nvidia-container-runtime is missing"
 fi
 
-# --- IronFlock: the agent and the host defaults, by device-init ----------
+# --- IronFlock: the agent and the host defaults, by ironflock bake -------
 # The installer writes devices; it is not one.
 if [ "$VARIANT" != installer ]; then
   bash "$here/bake.sh"

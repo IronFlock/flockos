@@ -1,7 +1,7 @@
 # Current-state audit (2026-11-04)
 
 Evidence for the [master plan](master-plan.md). Read-only review of this repository and
-of the sibling repositories `device-init`, `device-agent`, `flasher`, `workflows` and the
+of the sibling repositories `device-init` (now `ironflock-cli`), `device-agent`, `flasher`, `workflows` and the
 private `IronFlock/flockos`. Paths are relative to the repository root unless shown
 otherwise. "Likely" marks an inference that was not confirmed by running a build.
 
@@ -9,7 +9,7 @@ otherwise. "Likely" marks an inference that was not confirmed by running a build
 
 - `RecordEvolution/ReswarmOS`, public, default branch `master`, 757 commits, no GitHub
   workflows, no rulesets. `.github/` holds only `copilot-instructions.md`.
-- Last commit 82b9a03 (2026-10-17) removed `reswarmify/` (now `IronFlock/device-init`)
+- Last commit 82b9a03 (2026-10-17) removed `reswarmify/` (now `IronFlock/ironflock-cli`)
   and the `reagent`/`reswarm*` units and scripts **from `reswarmify/archive`** only. The
   same units and scripts still exist under `buildroot/rootfs/` and
   `cubic/project/rootfs-overlay/`.
@@ -164,7 +164,7 @@ Base `config` for Pi 3/4 selects firmware variants that do not match `genimage.c
   expired 2022-10-29). Treat the key as compromised; never reuse.
 - `flock.sh` echoes the device secret and WiFi password to the log.
 
-## 6. `IronFlock/device-init` (v1.4.8)
+## 6. `IronFlock/device-init` (v1.4.8; now `IronFlock/ironflock-cli`)
 
 - Entry: `curl -fsSL https://instance-registry.ironflock.com/dl/device-init/install.sh | sudo bash -s -- -c device.flock`.
   `install.sh` verifies OpenPGP signatures (bootstrap key in Cloud KMS
