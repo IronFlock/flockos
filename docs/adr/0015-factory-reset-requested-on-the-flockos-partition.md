@@ -60,8 +60,19 @@ the count lives, the time limits, and what a device does without `/data`.
   with the request it belongs to: the slot survives a read-only or missing FLOCKOS
   partition, a `/data` that cannot be mounted, and a power loss (the file is written
   under another name, synced and renamed). A request is told from another one by its
-  checksum, size and time of change. Another slot, or a slot an update has written,
-  counts anew: a request has at most three attempts per system.
+  checksum, size and time of change. Only a request written anew is a new one.
+- **A request that ended never fires again**, held by three marks, each enough alone:
+  the request is renamed to `factory-reset.conf.gave-up` when the reset gives up (a
+  completed one is removed); the outcome is marked on `/data`
+  (`flockos/factory-reset.done`, `outcome=done` or `outcome=gave-up`), which every slot
+  reads; and the state goes with each update into the new slot (`rauc-post-install`,
+  never a reason for the update to fail). A slot without the state, after a rollback or
+  an update, finds the mark on `/data`; with the request renamed nothing runs at all.
+  What remains: a request that gave up while the FLOCKOS partition was read-only and
+  `/data` could not be written either, found by a slot without the state (a rollback).
+  Such a device can count attempts again, but while its FLOCKOS partition stays
+  read-only no attempt can begin, as the kept files go there first; once it is
+  writable, the slot that gave up renames the request at its next boot.
 - **No count, no attempt.** Where the count cannot be written, there is no attempt: the
   device boots as it is, the old identity runs on, and the console and the record say
   why. A device where nothing can be written at all therefore never resets, and always
@@ -163,19 +174,25 @@ the same, and removes `factory-reset.keep`.
 
 ### 5. The `.flock` and `proxy.conf` meanwhile
 
-While a request is open, the reset writes `/run/flockos/factory-reset-hold`, which enroll
-and `flockos-proxy` read:
+The reset writes `/run/flockos/factory-reset-hold` at each boot it runs, which enroll and
+`flockos-proxy` read (and `ironflock status` may show):
 
-- `wait` while the old owner's data may still be on `/data` (no erase yet, or a reset
-  that gave up before erasing): they leave the FLOCKOS partition's `.flock` and
-  `proxy.conf` alone, and the old identity runs on, from the agent's copy. The new
-  identity never lands on the old data.
+- `wait`: a request is open and the old owner's data may still be on `/data`: they leave
+  the FLOCKOS partition's `.flock` and `proxy.conf` alone, and the old identity runs on,
+  from the agent's copy. The new identity never lands on the old data.
 - `copy` once the erase has begun: they take the `.flock` and `proxy.conf` but leave them
   on the partition, with the other `.flock` files, for the attempt still to come, which
   erases the agent's copy again. So a device whose attempt failed after the erase comes
   online as the new device. Without `/data` (`/run/flockos/data-missing`) they copy too.
-- No file: as without a reset. Once enroll has enrolled from a `.flock` on the partition,
-  it removes every other `.flock` there.
+- `gave-up`: the reset gave up with the old data and could not remove the `.flock` and
+  `proxy.conf` that came for the device after it (a read-only FLOCKOS partition): they
+  stay unused, as with `wait`, until the partition can be written and they are removed.
+- No file: no reset is open; they are taken as without a reset. Once enroll has enrolled
+  from a `.flock` on the partition, it removes every other `.flock` there.
+
+After a give-up with the old data the device is the device it was, online with its old
+identity. The `.flock` and `proxy.conf` that came with the request are removed with it; a
+`.flock` or `proxy.conf` put on the partition later is taken as on any device.
 
 ### 6. Not repart's factory reset, not deleting files: a new filesystem
 

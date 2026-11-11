@@ -239,6 +239,16 @@ refused() {
   [ ! -e "$src/office.nmconnection" ]
 }
 
+@test "a factory reset's hold gave-up: the profiles are taken as on any device" {
+  static office.nmconnection >"$src/office.nmconnection"
+  mkdir -p "$tmp/frun"
+  echo gave-up >"$tmp/frun/factory-reset-hold"
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  [ -e "$dest/office.nmconnection" ]
+  [ ! -e "$src/office.nmconnection" ]
+}
+
 @test "a factory reset's hold copy: the profiles are taken, on trial, and stay on the partition for the attempt to come" {
   trial_env
   static office.nmconnection >"$src/office.nmconnection"

@@ -30,7 +30,9 @@
 # do meanwhile, as for enroll and flockos-proxy: "wait" while the old owner's
 # data may still be on /data (the profiles are for the device after it and
 # stay on the partition), "copy" once it is being erased (they are taken and
-# left on the partition for the attempt still to come). Without /data
+# left on the partition for the attempt still to come). After a reset that
+# gave up ("gave-up", or no hold file) they are taken as on any device: the
+# device stays the one it was and the trial guards its way online. Without /data
 # (/run/flockos/data-missing) they are taken into the root slot's own
 # NetworkManager folder and left on the partition, without a trial: what the
 # device keeps now is lost with the next update.
@@ -61,7 +63,8 @@ umask 077
 esp=${FLOCKOS_ESP:-/boot/efi}
 run=${FLOCKOS_RUN:-/run/flockos}
 dest=${FLOCKOS_CONNECTIONS:-/data/network/connections}
-# What the factory reset says (wait, copy or nothing); without /data the
+# What the factory reset says (wait, copy, gave-up or nothing; gave-up is as
+# nothing here, the profiles are on trial anyway); without /data the
 # profiles go to the slot's own folder, which NetworkManager reads then.
 hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
 on_trial=yes

@@ -121,8 +121,11 @@ rc=0
 # A factory reset (ADR-0015) says in factory-reset-hold what to do with the
 # FLOCKOS partition's proxy.conf and .flock meanwhile: "wait" (they are for
 # the device after it), or "copy" (take them, and leave them there for the
-# reset still to come). Without /data (flockos-data-missing) they are copied.
+# reset still to come); "gave-up" as "wait" (a reset gave up with the old
+# data and could not remove them). Without /data (flockos-data-missing) they
+# are copied.
 reset_hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
+if [ "$reset_hold" = gave-up ]; then reset_hold="wait"; fi
 if [ "$reset_hold" != wait ] && [ -e "$run/data-missing" ]; then reset_hold=copy; fi
 if [ "${1:-}" != apply ] && [ "$reset_hold" != wait ] && [ -f "$esp/proxy.conf" ]; then
   if parse "$esp/proxy.conf"; then

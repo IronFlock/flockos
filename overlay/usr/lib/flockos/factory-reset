@@ -207,8 +207,12 @@ state_set() {
   done
 }
 
-# hold wait|copy|none: what enroll and flockos-proxy do with the FLOCKOS
-# partition's .flock and proxy.conf at this boot.
+# hold wait|copy|gave-up|none: what enroll and flockos-proxy do with the
+# FLOCKOS partition's .flock and proxy.conf at this boot. wait: a reset is
+# open and the old owner's data may be on /data, leave them; copy: a reset is
+# open and has begun to erase, take them and leave them there; gave-up: a
+# reset gave up with the old data and could not remove the files that came
+# for the device after it, leave them; none (no file): take them as usual.
 hold() {
   mkdir -p "$run" 2>/dev/null || true
   if [ "$1" = none ]; then
@@ -645,7 +649,7 @@ attempt() {
   fi
   # The mark that this request is done, with what the record says of it: for
   # either slot, a lost state, and a record lost to a power loss.
-  if ! printf '%s\n' "request=$FR_ID" "slot=$slot" "attempt=$FR_ATTEMPT" "keep-network=$keep_network" "kept=$kept" \
+  if ! printf '%s\n' "request=$FR_ID" "outcome=done" "slot=$slot" "attempt=$FR_ATTEMPT" "keep-network=$keep_network" "kept=$kept" \
     "other-slot=$other_slot" "note=$note" "failed-steps=$failed_steps" >"$new/flockos-reset.done"; then
     step_failed restore
   fi
@@ -683,6 +687,43 @@ done_on_data() {
   fi
   rmdir "$check" 2>/dev/null || true
   return "$found"
+}
+
+# mark_data TEXT: the mark of how this request ended, on the data partition,
+# for either slot and a lost state. Best effort, under its time limits.
+mark_data() {
+  local dir=$scratch/mark ok=1
+  [ -n "$data" ] && [ -e "$data" ] || return 1
+  mkdir -p "$dir"
+  if lim "$limit_mount" mount -t ext4 -o "$mount_opts" "$data" "$dir" 2>/dev/null; then
+    if mkdir -p "$dir/flockos" && printf '%s\n' "$1" >"$dir/flockos/.factory-reset.done.new" &&
+      mv -f "$dir/flockos/.factory-reset.done.new" "$dir/flockos/factory-reset.done"; then
+      ok=0
+    fi
+    lim "$limit_short" sync || true
+    lim "$limit_mount" umount "$dir" || ok=1
+  fi
+  rmdir "$dir" 2>/dev/null || true
+  return "$ok"
+}
+
+# retire OLD-DATA: a request that gave up triggers no more: renamed to
+# factory-reset.conf.gave-up. With the old owner's data still on /data the
+# .flock and proxy.conf that came for the device after the reset go too: the
+# device stays the device it was. Sets the hold: gave-up while they could not
+# be removed (a read-only FLOCKOS partition), none otherwise.
+retire() {
+  local f left=no
+  if [ -e "$request" ]; then
+    rm -rf "$request.gave-up" 2>/dev/null || true
+    mv -f "$request" "$request.gave-up" 2>/dev/null || say "could not rename $request: the slot's state and the mark on /data keep it from being tried again"
+  fi
+  if [ "$1" = yes ]; then
+    for f in "$esp"/*.flock "$esp/proxy.conf"; do
+      if [ -e "$f" ]; then remove "$f" 2>/dev/null || left=yes; fi
+    done
+  fi
+  if [ "$left" = yes ]; then hold gave-up; else hold none; fi
 }
 
 # mark_get KEY: a value of the done mark.
@@ -764,13 +805,26 @@ give_up() {
   fi
   if [ "$(state_get booted-slot)" != cleaned ]; then left+=${left:+ }booted-slot; fi
   if [ "$(state_get other-slot)" != cleaned ]; then left+=${left:+ }other-slot; fi
+  if [ "$data_left" != none ]; then
+    mark_data "$(printf '%s\n' "request=$id" "outcome=gave-up" "erase=${erase:-no}")" ||
+      say "could not leave the mark on /data that this request gave up"
+  fi
   remove_files || say "could not remove factory-reset.keep or a part file"
   say "GAVE UP after $attempts_max attempts ($reason); the device boots with /data as it is ($data_left)${left:+; left of the old owner: $left}"
   write_record gave-up "attempt=$attempt" "attempts-max=$attempts_max" "reason=$reason" "keep-network=$keep_network" \
     "data=$data_left" "left=$left" || true
-  # The old owner's data is still on /data: a new identity must not land on
-  # it, the old one runs on. Otherwise enroll takes a waiting .flock as usual.
-  if [ "$data_left" = old ]; then hold wait; else hold none; fi
+  # The old owner's data is still on /data: the device stays the device it
+  # was, and a new identity must not land on that data.
+  if [ "$data_left" = old ]; then retire yes; else retire no; fi
+  exit 0
+}
+
+# gave_up_before ERASE: this request gave up at an earlier boot, perhaps in
+# the other slot. Nothing is tried; what could not be retired then is now.
+gave_up_before() {
+  say "this request was given up before (factory-reset.log); it is not tried again"
+  state_set request="$id" outcome=gave-up erase="$1" || true
+  if [ "$1" = started ]; then retire no; else retire yes; fi
   exit 0
 }
 
@@ -869,9 +923,7 @@ if [ "$same" = yes ]; then attempt=$(state_get attempts); fi
 [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
 if [ "$same" = yes ] && [ "$(state_get outcome)" = "done" ]; then finished; fi
 if [ "$same" = yes ] && [ "$(state_get outcome)" = gave-up ]; then
-  say "this request was given up after $attempt attempts (factory-reset.log); it is not tried again"
-  if [ "$(state_get erase)" = started ]; then hold none; else hold wait; fi
-  exit 0
+  gave_up_before "$(state_get erase)"
 fi
 if [ "$begun" = no ] && in_tryboot; then
   say "this system runs on trial (tryboot): the reset waits for the next boot that is not a trial"
@@ -891,6 +943,7 @@ if wait_dev "$data_dev" "$wait_secs"; then
   fi
 fi
 if done_on_data; then
+  if [ "$(mark_get outcome)" = gave-up ]; then gave_up_before "$(mark_get erase)"; fi
   if [ "$same" = yes ] && [ "$(mark_get slot)" = "$slot" ]; then
     # This system completed the reset, and a power loss cut its end short.
     attempt=$(mark_get attempt)

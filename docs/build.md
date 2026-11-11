@@ -341,8 +341,9 @@ keyfile NetworkManager can read (a name of other characters, over 64 KiB, no
 `type=` in `[connection]`, ...) is renamed to `<name>.nmconnection.refused`, the
 reason goes to the journal and the console, and the unit fails; the others are
 taken. During a factory reset they follow `/run/flockos/factory-reset-hold` as the
-`.flock` and `proxy.conf` do, and without `/data` they go to the root slot's own
-folder (ADR-0016, section 8).
+`.flock` and `proxy.conf` do (after a reset that gave up they are taken as on
+any device), and without `/data` they go to the root slot's own folder
+(ADR-0016, section 8).
 ADR-0016 has the rules and the contract for the caller;
 `/usr/lib/flockos/network-profiles check FILE` tells whether a file would be
 taken.
@@ -395,13 +396,19 @@ left. Every step that waits on a disk has a time limit; an attempt has 25
 minutes in all. The reset restarts the device only after it has completed,
 and a completed reset is marked done in the state and on the new `/data`, so it
 is never done twice. Where the count cannot be written there is no attempt.
-While a request is open, `/run/flockos/factory-reset-hold` tells enroll and
-`flockos-proxy` to leave the FLOCKOS partition's `.flock` and `proxy.conf`
-alone (`wait`, while the old owner's data may still be on `/data`) or to take
-them and leave them there (`copy`, once the erase has begun); network profiles
-there follow it the same way ([Network profiles](#network-profiles)). A reset
-ends a trial of network profiles: with `keep-network=yes` the profiles in use
-are kept, with `keep-network=no` none of the old ones comes back. A request the
+A request that ended never fires again: a given-up request is renamed to
+`factory-reset.conf.gave-up`, its outcome is marked on `/data`, and the state
+goes with every update into the new slot. After a give-up with the old data
+the device stays the device it was; the `.flock` and `proxy.conf` that came
+with the request are removed. `/run/flockos/factory-reset-hold` tells enroll
+and `flockos-proxy` what to do with the FLOCKOS partition's `.flock` and
+`proxy.conf`: leave them (`wait`, a request is open and the old owner's data
+may be on `/data`; `gave-up`, they could not be removed after a give-up), or
+take them and leave them there (`copy`, once the erase has begun). Network
+profiles there follow `wait` and `copy` the same way, and after a give-up they
+are taken as on any device, on trial ([Network profiles](#network-profiles)).
+A reset ends a trial of network profiles: with `keep-network=yes` the profiles
+in use are kept, with `keep-network=no` none of the old ones comes back. A request the
 device does not understand is refused, not counted, and renamed to
 `factory-reset.conf.refused`. On a Raspberry Pi that runs an update on trial,
 the reset waits for the next boot that is not a trial. The steps are on the
@@ -434,9 +441,21 @@ from this section.
   device refuses any other key or value; a new key comes with a release of
   IronFlockOS, and `check` tells whether a device knows it.
 - **Which request.** The device tells a request from another one by its
-  checksum, size and time of change. Each request has three attempts; one that
-  was completed or given up is not tried again. To try again after a give-up,
-  write the request anew (it gets a new time of change).
+  checksum, size and time of change. Each request has three attempts. One that
+  was completed or given up never fires again, in any slot and after any
+  update: a completed one is removed, a given-up one is renamed to
+  `factory-reset.conf.gave-up` (on a read-only FLOCKOS partition, at the first
+  boot it can be written), and both are marked on `/data` and in the state,
+  which an update carries into the new slot. To try again, write a new
+  request.
+- **The hold.** `/run/flockos/factory-reset-hold`, written at each boot the
+  reset runs: `wait` (a request is open; the FLOCKOS partition's `.flock` and
+  `proxy.conf` stay unused while the old owner's data may be on `/data`),
+  `copy` (a request is open and has begun to erase; they are used and stay),
+  `gave-up` (the reset gave up with the old data and could not remove them;
+  they stay unused); no file: no request is open, they are used as on any
+  device. After a give-up with the old data the device is the device it was,
+  and the `.flock` and `proxy.conf` that came with the request are removed.
 - **Before writing.** The next start must run a system that has the reset: the
   running system must be the bootloader's next choice and marked good (`rauc
   status`: the booted slot is `boot_primary` and its `boot_status` is `good`),
@@ -479,6 +498,9 @@ from this section.
 - **The state.** `/var/lib/flockos/factory-reset.state` of the booted slot, for
   a status: `request=`, `attempts=` (made so far), `erase=` (`no` or `started`),
   `outcome=` (empty while open, `done` or `gave-up`), `last-failure=`. Read only.
+  An update carries it into the new slot. The data partition holds
+  `flockos/factory-reset.done` with `request=` and `outcome=` of the last
+  request that ended there.
 - **The record.** `/boot/efi/factory-reset.log`, replaced by every attempt, the
   give-up and every refusal, and the same in the booted slot as
   `/var/lib/flockos/factory-reset.log` (for when the FLOCKOS partition cannot be

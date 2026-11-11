@@ -146,8 +146,10 @@ profiles follow it as the `.flock` and `proxy.conf` do:
   device after the reset and stay on the partition.
 - **`copy`**, once the erase has begun: they are taken (on trial, against what the new
   `/data` holds) and left on the partition for the attempt still to come.
-- **No hold file**: as without a reset, also when a request that was given up or cannot
-  be removed stays on the partition for good.
+- **No hold file, or `gave-up`**: as without a reset. After a reset that gave up the
+  device stays the device it was, and the profiles are taken on trial like any others,
+  also while the request's `.flock` and `proxy.conf` could not be removed and stay unused
+  on the partition (`gave-up`).
 - **Without `/data`** (`/run/flockos/data-missing`, and no `wait`): they go into the root
   slot's own `/etc/NetworkManager/system-connections`, which NetworkManager reads then,
   without a trial, and stay on the partition: what the device keeps then is lost with the

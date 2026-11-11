@@ -12,7 +12,8 @@
 # do with the FLOCKOS partition's .flock meanwhile: "wait" while the old
 # owner's data may still be on /data (the old identity runs on), "copy" once
 # it is being erased (take it and leave it there, with the other .flock
-# files, for the reset still to come). Without /data (flockos-data-missing)
+# files, for the reset still to come), "gave-up" when a reset gave up with the
+# old data and could not remove the .flock that came for after it (leave it). Without /data (flockos-data-missing)
 # it is copied as well: what the device keeps now is lost with the next
 # update.
 # `ironflock-init enroll` needs no network: the agent comes from the image or
@@ -31,8 +32,8 @@ conf=${FLOCKOS_ENROLL_CONF:-/etc/flockos/enroll.conf}
 hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
 if [ "$hold" != wait ] && [ -e "$run/data-missing" ]; then hold=copy; fi
 flock=""
-if [ "$hold" = wait ]; then
-  echo "enroll: a factory reset waits: no .flock is taken from the FLOCKOS partition before it"
+if [ "$hold" = wait ] || [ "$hold" = gave-up ]; then
+  echo "enroll: a factory reset waits or gave up ($hold): no .flock is taken from the FLOCKOS partition"
   if [ -e "$state/enrolled" ]; then exit 0; fi
 else
   for f in "$esp"/*.flock; do
