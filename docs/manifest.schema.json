@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/IronFlock/ironflockos/blob/main/docs/manifest.schema.json",
-  "title": "IronFlockOS release manifest (dl/flockos/manifest.json payload), schema 1",
-  "description": "The document the release pipeline signs and publishes as dl/flockos/manifest.json (ADR-0009). Published inside the device-agent's envelope: {\"payload\": \"<base64 of this document>\", \"signature\": \"<base64 Ed25519 signature>\"}, at most 64 KiB, signed over the message \"flockos-manifest:v1\\nflockos/manifest.json\\n<sha256 hex of the payload>\". The device-agent reads channels, releases and images; FlockFlasher reads boards. Readers ignore fields they do not know, and skip an image whose variant, kernel or architecture they do not know (the enums below list what the pipeline publishes today; adding a value needs no reader update, and readers keep the images they know); a change that breaks a reader raises schema.",
+  "title": "IronFlockOS release manifest (dl/ironflockos/manifest.json payload), schema 1",
+  "description": "The document the release pipeline signs and publishes as dl/ironflockos/manifest.json (ADR-0009). Published inside the device-agent's envelope: {\"payload\": \"<base64 of this document>\", \"signature\": \"<base64 Ed25519 signature>\"}, at most 64 KiB, signed over the message \"ironflockos-manifest:v1\\nironflockos/manifest.json\\n<sha256 hex of the payload>\". The device-agent reads channels, releases and images; FlockFlasher reads boards. Readers ignore fields they do not know, and skip an image whose variant, kernel or architecture they do not know (the enums below list what the pipeline publishes today; adding a value needs no reader update, and readers keep the images they know); a change that breaks a reader raises schema.",
   "type": "object",
   "required": ["schema", "issued_at", "channels", "releases", "boards"],
   "additionalProperties": false,
@@ -104,7 +104,7 @@
         "images": {
           "description": "Every image of the release, by IMAGE_ID (os-release), which is also the RAUC compatible.",
           "type": "object",
-          "propertyNames": { "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" },
+          "propertyNames": { "pattern": "^ironflockos-[a-z0-9]+(-[a-z0-9]+)*$" },
           "additionalProperties": { "$ref": "#/$defs/image" }
         }
       }
@@ -123,7 +123,7 @@
           "$ref": "#/$defs/diskImage"
         },
         "bundle": {
-          "description": "The RAUC bundle, <image-id>-<version>.raucb. The device-agent downloads it from <its update base>/flockos/<version>/<the last segment of url> (an IronFlock appliance's OS mirror serves the same paths; on the cloud it is url), checks size and sha256, and hands it to RAUC, which checks the signature and compatible. The installer has none.",
+          "description": "The RAUC bundle, <image-id>-<version>.raucb. The device-agent downloads it from <its update base>/ironflockos/<version>/<the last segment of url> (an IronFlock appliance's OS mirror serves the same paths; on the cloud it is url), checks size and sha256, and hands it to RAUC, which checks the signature and compatible. The installer has none.",
           "allOf": [
             { "$ref": "#/$defs/artifact" },
             {
@@ -135,7 +135,7 @@
         },
         "payloads": { "$ref": "#/$defs/payloads" },
         "modules_alias": {
-          "description": "The image's hardware list, <image-id>-<version>.modules.alias.gz, gzip: the lines 'alias <modalias pattern> <module>' of each kernel in the image, from its modules.alias (drivers built as modules) and the alias records of its modules.builtin.modinfo (drivers built in), each kernel's after a '#' comment line. A device whose modalias matches a pattern (fnmatch, as modprobe matches them, after both have '-' turned into '_' outside [...]) has a driver in the image, built as a module or built in; whether it needs a firmware file the list does not say. ironflock os install matches the disk controller and the network card against it. Releases up to 0.14.0 have none.",
+          "description": "The image's hardware list, <image-id>-<version>.modules.alias.gz, gzip: the lines 'alias <modalias pattern> <module>' of each kernel in the image, from its modules.alias (drivers built as modules) and the alias records of its modules.builtin.modinfo (only the aliases a built-in driver declares by name, such as fs-ext4), then a line 'builtin <module>' for each driver built into the kernel (its modules.builtin; a device whose sysfs driver/module names one has a driver), each kernel's after a '#' comment line. Releases up to 0.15.0 have no builtin lines. A device whose modalias matches a pattern (fnmatch, as modprobe matches them, after both have '-' turned into '_' outside [...]) has a driver in the image, built as a module or built in; whether it needs a firmware file the list does not say. ironflock os install matches the disk controller and the network card against it. Releases up to 0.14.0 have none.",
           "$ref": "#/$defs/artifact"
         }
       },
@@ -148,7 +148,7 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" }
+      "items": { "type": "string", "pattern": "^ironflockos-[a-z0-9]+(-[a-z0-9]+)*$" }
     },
     "board": {
       "description": "FlockFlasher's SupportedBoard (src/types/index.ts).",
@@ -185,7 +185,7 @@
         },
         "osname": { "const": "IronFlockOS" },
         "osvariant": {
-          "description": "How FlockFlasher writes it: always image, a raw image with the .flock copied onto its FLOCKOS partition (ADR-0004).",
+          "description": "How FlockFlasher writes it: always image, a raw image with the .flock copied onto its IRONFLOCKOS partition (ADR-0004).",
           "const": "image"
         },
         "sha256": {
@@ -202,7 +202,7 @@
           "anyOf": [{ "$ref": "#/$defs/url" }, { "const": "" }]
         },
         "version": { "$ref": "#/$defs/version" },
-        "image_id": { "type": "string", "pattern": "^flockos-[a-z0-9]+(-[a-z0-9]+)*$" },
+        "image_id": { "type": "string", "pattern": "^ironflockos-[a-z0-9]+(-[a-z0-9]+)*$" },
         "variant": { "enum": ["base", "nvidia", "installer"] },
         "kernel": { "enum": ["std", "rt"] },
         "payloads": { "$ref": "#/$defs/payloads" }

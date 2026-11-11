@@ -1,0 +1,129 @@
+#!/bin/bash
+# Enroll this root slot for the device (master plan, section 3.4; WP-2.3,
+# WP-5.1 of the CLI's plan): `ironflock enroll` with the device's .flock.
+#
+# Runs on the first boot of every slot (a fresh flash, and after every A/B
+# update, which brings a slot without the SSH user and the agent's unit) and
+# whenever a new .flock lies on the IRONFLOCKOS partition. The .flock is the newest
+# *.flock on the IRONFLOCKOS partition (the case of the name does not count, as
+# for ironflock), else the agent's own copy on /data. With neither the device
+# stays unenrolled, reachable on the console only. Once it has enrolled from
+# the IRONFLOCKOS partition, the other .flock files there go too: each would
+# enroll the device again at the next boot.
+# A .flock that ironflock does not accept (exit code 4: not readable, not
+# JSON, no device_key or secret; nothing was changed) is renamed to
+# <name>.rejected, where it is kept but enrolls nothing, and the next one is
+# taken: the next newest, at last the agent's copy. Each is tried once per
+# boot, so the device comes online with what there is and the script never
+# loops. Any other failure ends the script with ironflock's exit code; the
+# slot stays unmarked and the next boot tries again.
+# A factory reset (ADR-0015) says in /run/ironflockos/factory-reset-hold what to
+# do with the IRONFLOCKOS partition's .flock meanwhile: "wait" while the old
+# owner's data may still be on /data (the old identity runs on), "copy" once
+# it is being erased (take it and leave it there, with the other .flock
+# files, for the reset still to come; one that is not accepted stays there
+# too), "gave-up" when a reset gave up with the old data and could not remove
+# the .flock that came for after it (leave it). Without /data
+# (ironflockos-data-missing) it is copied as well: what the device keeps now
+# is lost with the next update.
+# `ironflock enroll` needs no network: the agent comes from the image or
+# from /data.
+set -euo pipefail
+
+# IRONFLOCKOS_ESP, IRONFLOCKOS_AGENT_DIR, IRONFLOCKOS_STATE, IRONFLOCKOS_IRONFLOCK, IRONFLOCKOS_RUN: for
+# the unit tests only.
+esp=${IRONFLOCKOS_ESP:-/boot/efi}
+run=${IRONFLOCKOS_RUN:-/run/ironflockos}
+agent_dir=${IRONFLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}
+state=${IRONFLOCKOS_STATE:-/var/lib/ironflockos}
+ironflock=${IRONFLOCKOS_IRONFLOCK:-/usr/bin/ironflock}
+conf=${IRONFLOCKOS_ENROLL_CONF:-/etc/ironflockos/enroll.conf}
+agent_flock=$agent_dir/device-config.flock
+
+hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
+if [ "$hold" != wait ] && [ -e "$run/data-missing" ]; then hold=copy; fi
+# The candidates, in the order they are tried: the IRONFLOCKOS partition's
+# .flock files, newest first, then the agent's copy.
+candidates=()
+if [ "$hold" = wait ] || [ "$hold" = gave-up ]; then
+  echo "enroll: a factory reset waits or gave up ($hold): no .flock is taken from the IRONFLOCKOS partition"
+  if [ -e "$state/enrolled" ]; then exit 0; fi
+else
+  for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk]; do
+    [ -f "$f" ] || continue
+    i=${#candidates[@]}
+    while [ "$i" -gt 0 ] && [ "$f" -nt "${candidates[i - 1]}" ]; do
+      candidates[i]=${candidates[i - 1]}
+      i=$((i - 1))
+    done
+    candidates[i]=$f
+  done
+fi
+if [ -f "$agent_flock" ]; then candidates+=("$agent_flock"); fi
+if [ ${#candidates[@]} -eq 0 ]; then
+  echo "enroll: no .flock on the IRONFLOCKOS partition and none on /data: the device stays unenrolled"
+  exit 0
+fi
+
+# The hostname comes from the device name in the .flock (ADR-0009), unless
+# /etc/ironflockos/enroll.conf (on /data, so it outlives updates) says
+# hostname-from-flock=no.
+hostname_from_flock=yes
+if [ -f "$conf" ] && grep -qx 'hostname-from-flock=no' "$conf"; then hostname_from_flock=no; fi
+
+# remove_others USED: the IRONFLOCKOS partition's other .flock files go once
+# the device has enrolled from USED, one of them; each would enroll it again
+# at the next boot, with an older .flock. Not while a factory reset is still
+# to come (copy), which takes them.
+remove_others() {
+  local f
+  if [ "$1" = "$agent_flock" ] || [ "$hold" = copy ]; then return 0; fi
+  for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk]; do
+    [ -f "$f" ] && [ "$f" != "$1" ] || continue
+    shred -u "$f" 2>/dev/null || rm -f "$f"
+    echo "enroll: removed $(basename "$f") from the IRONFLOCKOS partition, which was not used"
+  done
+}
+
+rc=0
+for flock in "${candidates[@]}"; do
+  args=(enroll -c "$flock")
+  if [ "$hold" != copy ]; then args+=(--shred-source); fi
+  if [ "$hostname_from_flock" = yes ]; then args+=(--hostname-from-flock); fi
+  rc=0
+  "$ironflock" "${args[@]}" || rc=$?
+  [ "$rc" -eq 4 ] || break
+  # Not accepted, and nothing was changed: on to the next one.
+  if [ "$flock" = "$agent_flock" ]; then
+    echo "enroll: the agent's own .flock ($flock) was not accepted" >&2
+  elif [ "$hold" = copy ]; then
+    echo "enroll: $(basename "$flock") on the IRONFLOCKOS partition was not accepted; it stays there for the factory reset still to come" >&2
+  elif mv -f "$flock" "$flock.rejected"; then
+    echo "enroll: $(basename "$flock") on the IRONFLOCKOS partition was not accepted: kept as $(basename "$flock").rejected" >&2
+  else
+    echo "enroll: $(basename "$flock") on the IRONFLOCKOS partition was not accepted and could not be renamed" >&2
+  fi
+done
+
+case $rc in
+  0)
+    mkdir -p "$state"
+    date -u +%Y-%m-%dT%H:%M:%SZ >"$state/enrolled"
+    echo "enroll: this slot is enrolled from $(basename "$flock")"
+    remove_others "$flock"
+    ;;
+  1)
+    # A step failed; ironflock names it. Once the .flock has left the
+    # IRONFLOCKOS partition the agent has its copy (only a failed agent step
+    # keeps it there): the older ones go, as after an enrolment that worked.
+    if [ ! -e "$flock" ]; then remove_others "$flock"; fi
+    echo "enroll: ironflock enroll -c $flock failed: this slot is enrolled again at the next boot" >&2
+    ;;
+  4)
+    echo "enroll: no .flock was accepted: the device stays unenrolled" >&2
+    ;;
+  *)
+    echo "enroll: ironflock enroll -c $flock ended with exit code $rc: this slot is enrolled again at the next boot" >&2
+    ;;
+esac
+exit "$rc"

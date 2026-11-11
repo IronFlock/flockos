@@ -48,16 +48,16 @@ setup() {
 }
 
 @test "udev starts nvidia-persistenced when the nvidia module loads" {
-  rule=$(grep -v '^#' "$profile/overlay/usr/lib/udev/rules.d/71-flockos-nvidia.rules")
+  rule=$(grep -v '^#' "$profile/overlay/usr/lib/udev/rules.d/71-ironflockos-nvidia.rules")
   [[ "$rule" == *'SUBSYSTEM=="module", KERNEL=="nvidia"'* ]]
   [[ "$rule" == *'ENV{SYSTEMD_WANTS}+="nvidia-persistenced.service"'* ]]
 }
 
 @test "under Secure Boot, an NVIDIA GPU whose module did not load gets a console message" {
-  rule=$(grep -v '^#' "$profile/overlay/usr/lib/udev/rules.d/71-flockos-nvidia.rules" | grep flockos-nvidia-secure-boot)
+  rule=$(grep -v '^#' "$profile/overlay/usr/lib/udev/rules.d/71-ironflockos-nvidia.rules" | grep ironflockos-nvidia-secure-boot)
   [[ "$rule" == *'SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x03*"'* ]]
-  [[ "$rule" == *'ENV{SYSTEMD_WANTS}+="flockos-nvidia-secure-boot.service"'* ]]
-  unit=$profile/overlay/usr/lib/systemd/system/flockos-nvidia-secure-boot.service
+  [[ "$rule" == *'ENV{SYSTEMD_WANTS}+="ironflockos-nvidia-secure-boot.service"'* ]]
+  unit=$profile/overlay/usr/lib/systemd/system/ironflockos-nvidia-secure-boot.service
   grep -qx 'ConditionSecurity=uefi-secureboot' "$unit"
   grep -qx 'ConditionPathExists=!/sys/module/nvidia' "$unit"
   grep -qx 'StandardOutput=journal+console' "$unit"

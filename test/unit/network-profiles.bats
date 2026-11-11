@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
-# Network profiles from the FLOCKOS partition (ADR-0016, docs/build.md
+# Network profiles from the IRONFLOCKOS partition (ADR-0016, docs/build.md
 # "Network profiles"): NetworkManager keyfiles there, network/*.nmconnection,
 # become the device's profiles on /data before NetworkManager starts; refused
 # ones are renamed; a pending factory reset holds them back.
 
 repo="$BATS_TEST_DIRNAME/../.."
-script="$repo/overlay/usr/lib/flockos/network-profiles"
+script="$repo/overlay/usr/lib/ironflockos/network-profiles"
 units="$repo/overlay/usr/lib/systemd/system"
 
 setup() {
@@ -19,8 +19,8 @@ setup() {
   printf '#!/bin/sh\necho "$*" >>"%s/sync.log"\nn=$(wc -l <"%s/sync.log")\nif [ -f "%s/sync.kill" ] && [ "$n" -eq "$(cat "%s/sync.kill")" ]; then kill -9 "$PPID"; fi\nexit 0\n' \
     "$tmp" "$tmp" "$tmp" "$tmp" >"$tmp/bin/sync"
   chmod +x "$tmp/bin/shred" "$tmp/bin/sync"
-  export PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_CONNECTIONS=$tmp/data/network/connections \
-    FLOCKOS_RUN=$tmp/frun FLOCKOS_SLOT_CONNECTIONS=$tmp/slot-nm
+  export PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_CONNECTIONS=$tmp/data/network/connections \
+    IRONFLOCKOS_RUN=$tmp/frun IRONFLOCKOS_SLOT_CONNECTIONS=$tmp/slot-nm
   src=$tmp/esp/network dest=$tmp/data/network/connections
 }
 
@@ -54,11 +54,11 @@ psk=s3cret pass
 method=auto
 '
 
-@test "without a profile on the FLOCKOS partition nothing changes" {
+@test "without a profile on the IRONFLOCKOS partition nothing changes" {
   rmdir "$src"
   run bash "$script"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"no profile on the FLOCKOS partition"* ]]
+  [[ "$output" == *"no profile on the IRONFLOCKOS partition"* ]]
   [ -z "$(ls -A "$dest")" ]
 }
 
@@ -67,7 +67,7 @@ method=auto
   static office.nmconnection >"$tmp/want"
   run bash "$script"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"took office.nmconnection (ethernet) from the FLOCKOS partition"* ]]
+  [[ "$output" == *"took office.nmconnection (ethernet) from the IRONFLOCKOS partition"* ]]
   cmp "$tmp/want" "$dest/office.nmconnection"
   [ "$(mode "$dest/office.nmconnection")" = 600 ]
   [ ! -e "$src/office.nmconnection" ]
@@ -220,10 +220,10 @@ refused() {
   echo wait >"$tmp/frun/factory-reset-hold"
   run bash "$script"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"a factory reset waits: the profiles on the FLOCKOS partition wait for it"* ]]
+  [[ "$output" == *"a factory reset waits: the profiles on the IRONFLOCKOS partition wait for it"* ]]
   [ -e "$src/office.nmconnection" ]
   [ ! -e "$dest/office.nmconnection" ]
-  # wait wins over a missing /data, as for enroll and flockos-proxy.
+  # wait wins over a missing /data, as for enroll and ironflockos-proxy.
   : >"$tmp/frun/data-missing"
   run bash "$script"
   [ ! -e "$dest/office.nmconnection" ]
@@ -256,7 +256,7 @@ refused() {
   echo copy >"$tmp/frun/factory-reset-hold"
   run bash "$script"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"took office.nmconnection (ethernet) from the FLOCKOS partition and left it there"* ]]
+  [[ "$output" == *"took office.nmconnection (ethernet) from the IRONFLOCKOS partition and left it there"* ]]
   cmp "$dest/office.nmconnection" <(static office.nmconnection)
   [ -e "$src/office.nmconnection" ]
   [ ! -e "$tmp/shred.log" ]
@@ -286,7 +286,7 @@ refused() {
 
 @test "a power loss: a part file of /data is cleared, and a profile still on the partition is taken again" {
   static office.nmconnection >"$src/office.nmconnection"
-  printf 'half' >"$dest/.flockos-profile-office.nmconnection.part"
+  printf 'half' >"$dest/.ironflockos-profile-office.nmconnection.part"
   # Taken before, not yet removed from the partition.
   static office.nmconnection >"$dest/office.nmconnection"
   run bash "$script"
@@ -296,13 +296,13 @@ refused() {
   [ ! -e "$src/office.nmconnection" ]
 }
 
-@test "a profile that cannot leave the FLOCKOS partition is taken all the same, again at the next boot; the unit fails" {
+@test "a profile that cannot leave the IRONFLOCKOS partition is taken all the same, again at the next boot; the unit fails" {
   if [ "$(id -u)" = 0 ]; then skip "root ignores the folder modes this test relies on"; fi
   static office.nmconnection >"$src/office.nmconnection"
   chmod 555 "$src"
   run bash "$script"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"could not remove office.nmconnection from the FLOCKOS partition: the next boot takes it again"* ]]
+  [[ "$output" == *"could not remove office.nmconnection from the IRONFLOCKOS partition: the next boot takes it again"* ]]
   [ -e "$dest/office.nmconnection" ]
   [ -e "$src/office.nmconnection" ]
   chmod 755 "$src"
@@ -317,7 +317,7 @@ refused() {
   mkdir "$dest/office.nmconnection"
   run bash "$script"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"office.nmconnection: $dest/office.nmconnection is no profile file; office.nmconnection stays on the FLOCKOS partition"* ]]
+  [[ "$output" == *"office.nmconnection: $dest/office.nmconnection is no profile file; office.nmconnection stays on the IRONFLOCKOS partition"* ]]
   [[ "$output" != *"took office.nmconnection"* ]]
   [ -z "$(ls -A "$dest/office.nmconnection")" ]
   cmp "$src/office.nmconnection" <(static office.nmconnection)
@@ -332,7 +332,7 @@ refused() {
   [ -e "$src/office.nmconnection" ]
 }
 
-@test "a FLOCKOS partition that turned read-only: an old .refused that cannot go keeps back none of the profiles after it" {
+@test "a IRONFLOCKOS partition that turned read-only: an old .refused that cannot go keeps back none of the profiles after it" {
   if [ "$(id -u)" = 0 ]; then skip "root ignores the folder modes this test relies on"; fi
   printf '[connection]\nid=x\n' >"$src/a-bad.nmconnection"
   printf 'old refusal\n' >"$src/a-bad.nmconnection.refused"
@@ -427,11 +427,11 @@ refused() {
 }
 
 @test "the unit runs before NetworkManager, after /data and its folders, whenever a profile lies there" {
-  u=$units/flockos-network-profiles.service
-  grep -qx 'ExecStart=/usr/lib/flockos/network-profiles' "$u"
-  # Not /data: without it (flockos-data-missing) the profiles still come.
+  u=$units/ironflockos-network-profiles.service
+  grep -qx 'ExecStart=/usr/lib/ironflockos/network-profiles' "$u"
+  # Not /data: without it (ironflockos-data-missing) the profiles still come.
   grep -qx 'RequiresMountsFor=/boot/efi' "$u"
-  grep -qx 'After=local-fs.target flockos-data-layout.service flockos-data-missing.service' "$u"
+  grep -qx 'After=local-fs.target ironflockos-data-layout.service ironflockos-data-missing.service' "$u"
   grep -q '^PARTLABEL=data .*nofail,x-systemd.before=local-fs.target' "$repo/overlay/etc/fstab"
   grep -qx 'Before=NetworkManager.service' "$u"
   grep -qx 'ConditionPathExistsGlob=/boot/efi/network/\*.nmconnection' "$u"
@@ -441,32 +441,32 @@ refused() {
   grep -qx 'WantedBy=multi-user.target' "$u"
   # Where it puts them is what NetworkManager reads, readable by root only.
   grep -q '^/data/network/connections  */etc/NetworkManager/system-connections ' "$repo/overlay/etc/fstab"
-  grep -qx 'path=/etc/NetworkManager/system-connections' "$repo/overlay/etc/NetworkManager/conf.d/10-flockos.conf"
-  grep -qx 'chmod 0700 "$d/network/connections"' "$repo/overlay/usr/lib/flockos/data-layout"
+  grep -qx 'path=/etc/NetworkManager/system-connections' "$repo/overlay/etc/NetworkManager/conf.d/10-ironflockos.conf"
+  grep -qx 'chmod 0700 "$d/network/connections"' "$repo/overlay/usr/lib/ironflockos/data-layout"
   # A factory reset runs before /data is mounted, so before this unit.
-  grep -q '^Before=.*data.mount' "$units/flockos-factory-reset.service"
+  grep -q '^Before=.*data.mount' "$units/ironflockos-factory-reset.service"
   # Enroll, which writes the .flock's Wi-Fi profile, comes after NetworkManager.
-  grep -q '^After=.*NetworkManager.service' "$units/flockos-enroll.service"
+  grep -q '^After=.*NetworkManager.service' "$units/ironflockos-enroll.service"
   # Enabled on devices, with the trial's watch; the installer has no /data.
-  grep -qx '  systemctl --root="$ROOT" enable flockos-network-profiles.service flockos-network-profiles-trial.service' \
+  grep -qx '  systemctl --root="$ROOT" enable ironflockos-network-profiles.service ironflockos-network-profiles-trial.service' \
     "$repo/build/customize.sh"
-  grep -qx '  systemctl --root="$ROOT" mask flockos-network-profiles.service flockos-network-profiles-trial.service' \
+  grep -qx '  systemctl --root="$ROOT" mask ironflockos-network-profiles.service ironflockos-network-profiles-trial.service' \
     "$repo/build/customize.sh"
   for check in "$repo/test/image/rpi-check.sh" "$repo/test/image/jetson-rootfs-check.sh"; do
-    grep -q 'flockos-network-profiles.service flockos-network-profiles-trial.service; do' "$check"
+    grep -q 'ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do' "$check"
   done
 }
 
 @test "a failed, refused or killed run keeps nothing from starting: no unit needs it, it needs nothing but its mounts" {
   # Only ordering: NetworkManager, enrollment, the agent and multi-user.target
   # start after it, whatever its result.
-  for u in flockos-network-profiles.service flockos-network-profiles-trial.service; do
+  for u in ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
     ! grep -qE '^(Requires|Requisite|BindsTo|PartOf|Upholds|OnFailure|FailureAction|SuccessAction|RequiredBy|UpheldBy)=' "$units/$u"
   done
-  ! grep -rlE '^(Requires|Requisite|BindsTo|PartOf)=.*flockos-network-profiles' "$repo/overlay" "$repo/profiles"
+  ! grep -rlE '^(Requires|Requisite|BindsTo|PartOf)=.*ironflockos-network-profiles' "$repo/overlay" "$repo/profiles"
   # The watch is ordered before nothing, so nothing waits for its loop.
-  ! grep -q '^Before=' "$units/flockos-network-profiles-trial.service"
-  grep -qx 'Type=simple' "$units/flockos-network-profiles-trial.service"
+  ! grep -q '^Before=' "$units/ironflockos-network-profiles-trial.service"
+  grep -qx 'Type=simple' "$units/ironflockos-network-profiles-trial.service"
 }
 
 # trial_env: an enrolled device whose agent has not connected, at uptime 1000
@@ -478,7 +478,7 @@ trial_env() {
   echo boot-one >"$tmp/boot_id"
   printf '#!/bin/sh\necho "$*" >>"%s/systemctl.log"\n' "$tmp" >"$tmp/bin/systemctl"
   chmod +x "$tmp/bin/systemctl"
-  export FLOCKOS_AGENT_DIR=$tmp/agent FLOCKOS_AGENT_RUN=$tmp/run FLOCKOS_UPTIME=$tmp/uptime FLOCKOS_BOOT_ID=$tmp/boot_id
+  export IRONFLOCKOS_AGENT_DIR=$tmp/agent IRONFLOCKOS_AGENT_RUN=$tmp/run IRONFLOCKOS_UPTIME=$tmp/uptime IRONFLOCKOS_BOOT_ID=$tmp/boot_id
   trial=$tmp/data/network/trial
 }
 
@@ -510,7 +510,7 @@ method=auto
   : >"$tmp/run/connected"
   run bash "$script" trial
   [ "$status" -eq 0 ]
-  [[ "$output" == *"the device-agent has connected: the profiles from the FLOCKOS partition stay (office.nmconnection)"* ]]
+  [[ "$output" == *"the device-agent has connected: the profiles from the IRONFLOCKOS partition stay (office.nmconnection)"* ]]
   [ ! -e "$trial" ]
   cmp "$dest/office.nmconnection" <(static office.nmconnection)
   [ ! -e "$tmp/systemctl.log" ]
@@ -536,7 +536,7 @@ method=auto
   at 1900
   run bash "$script" trial
   [ "$status" -eq 0 ]
-  [[ "$output" == *"has not connected with the profiles from the FLOCKOS partition (lab.nmconnection office.nmconnection): back to the earlier ones (office.nmconnection old-name.nmconnection) for 30 minutes"* ]]
+  [[ "$output" == *"has not connected with the profiles from the IRONFLOCKOS partition (lab.nmconnection office.nmconnection): back to the earlier ones (office.nmconnection old-name.nmconnection) for 30 minutes"* ]]
   cmp "$dest/office.nmconnection" "$tmp/office.before"
   cmp "$dest/old-name.nmconnection" "$tmp/old-name.before"
   [ ! -e "$dest/lab.nmconnection" ]
@@ -548,7 +548,7 @@ method=auto
   [ "$(tstate elapsed)" = 0 ]
   : >"$tmp/run/connected"
   run bash "$script" trial
-  [[ "$output" == *"has connected with the earlier profiles: they stay, the ones from the FLOCKOS partition go (lab.nmconnection office.nmconnection)"* ]]
+  [[ "$output" == *"has connected with the earlier profiles: they stay, the ones from the IRONFLOCKOS partition go (lab.nmconnection office.nmconnection)"* ]]
   [ ! -e "$trial" ]
   cmp "$dest/office.nmconnection" "$tmp/office.before"
   [ ! -e "$dest/lab.nmconnection" ]
@@ -645,16 +645,16 @@ method=auto
 }
 
 @test "the trial's watch: after NetworkManager and the profiles, while a trial lasts, and it starts again when it fails" {
-  u=$units/flockos-network-profiles-trial.service
-  grep -qx 'ExecStart=/usr/lib/flockos/network-profiles trial-watch' "$u"
-  grep -qx 'After=flockos-network-profiles.service NetworkManager.service' "$u"
+  u=$units/ironflockos-network-profiles-trial.service
+  grep -qx 'ExecStart=/usr/lib/ironflockos/network-profiles trial-watch' "$u"
+  grep -qx 'After=ironflockos-network-profiles.service NetworkManager.service' "$u"
   grep -qx 'RequiresMountsFor=/data /opt/ironflock' "$u"
   grep -qx 'ConditionPathExists=/data/network/trial/state' "$u"
   grep -qx 'Restart=on-failure' "$u"
   grep -qx 'WantedBy=multi-user.target' "$u"
   # The marks it judges by: the agent's unit and its connection.
-  grep -q 'agent_run=${FLOCKOS_AGENT_RUN:-/run/ironflock-device-agent}' "$script"
-  grep -q 'agent_dir=${FLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}' "$script"
+  grep -q 'agent_run=${IRONFLOCKOS_AGENT_RUN:-/run/ironflock-device-agent}' "$script"
+  grep -q 'agent_dir=${IRONFLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}' "$script"
 }
 
 @test "a factory reset ends a trial: it keeps network/connections at most, never the trial's earlier profiles" {
@@ -662,11 +662,11 @@ method=auto
   # the earlier owner's profiles) can come back. keep-network=yes: the
   # profiles in use, the ones the request promised, are kept, and the trial
   # with its way back ends with the reset.
-  grep -qx 'keep_always="rauc"' "$repo/overlay/usr/lib/flockos/factory-reset"
-  grep -qx 'keep_network_items="network/connections flockos/proxy.conf flockos/ptp.conf"' \
-    "$repo/overlay/usr/lib/flockos/factory-reset"
+  grep -qx 'keep_always="rauc"' "$repo/overlay/usr/lib/ironflockos/factory-reset"
+  grep -qx 'keep_network_items="network/connections ironflockos/proxy.conf ironflockos/ptp.conf"' \
+    "$repo/overlay/usr/lib/ironflockos/factory-reset"
   # The trial lives beside the profiles, not in what a reset keeps.
   grep -q 'trial=$(dirname -- "$dest")/trial' "$script"
   # The watch has nothing to judge on the new /data.
-  grep -qx 'ConditionPathExists=/data/network/trial/state' "$units/flockos-network-profiles-trial.service"
+  grep -qx 'ConditionPathExists=/data/network/trial/state' "$units/ironflockos-network-profiles-trial.service"
 }

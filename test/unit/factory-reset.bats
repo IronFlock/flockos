@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Factory reset (docs/build.md, "Factory reset"; ADR-0015): requested by
-# factory-reset.conf on the FLOCKOS partition, run at boot before /data is
+# factory-reset.conf on the IRONFLOCKOS partition, run at boot before /data is
 # mounted, against a fake device: folders stand for the data partition and the
 # root slots, fakes for mount, mkfs.ext4, lsblk, blkid, findmnt, grub-editenv,
 # sync and timeout. A fake can cut the reset short at its n-th call, or at the
@@ -9,7 +9,7 @@
 # and say why.
 
 repo="$BATS_TEST_DIRNAME/../.."
-reset="$repo/overlay/usr/lib/flockos/factory-reset"
+reset="$repo/overlay/usr/lib/ironflockos/factory-reset"
 units="$repo/overlay/usr/lib/systemd/system"
 
 setup() {
@@ -18,11 +18,11 @@ setup() {
   mkdir -p "$tmp/bin"
   fakes
   device
-  export PATH="$tmp/bin:$PATH" FLOCKOS_ESP=$tmp/esp FLOCKOS_ROOT=$tmp/disk/rootfs-a \
-    FLOCKOS_SYSTEM_CONF=$tmp/system.conf FLOCKOS_PROC_CMDLINE=$tmp/cmdline FLOCKOS_DATA_DEV=$tmp/dev/data \
-    FLOCKOS_RUN=$tmp/run FLOCKOS_BOOTLOADER_DT=$tmp/dt FLOCKOS_RESET_WAIT=0
+  export PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_ROOT=$tmp/disk/rootfs-a \
+    IRONFLOCKOS_SYSTEM_CONF=$tmp/system.conf IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline IRONFLOCKOS_DATA_DEV=$tmp/dev/data \
+    IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_BOOTLOADER_DT=$tmp/dt IRONFLOCKOS_RESET_WAIT=0
   slot=$tmp/disk/rootfs-a other=$tmp/disk/rootfs-b data=$tmp/disk/vda4 esp=$tmp/esp
-  state_file=$slot/var/lib/flockos/factory-reset.state hold_file=$tmp/run/factory-reset-hold
+  state_file=$slot/var/lib/ironflockos/factory-reset.state hold_file=$tmp/run/factory-reset-hold
 }
 
 teardown() {
@@ -45,7 +45,7 @@ if [ -n "${FAKE_KILL_ON:-}" ] && [ "$FAKE_KILL_ON" = "$(basename "$0")" ] && [ !
   : >"$T/killed"
 fi
 power_loss() {
-  if [ -n "${FLOCKOS_RESET_PID:-}" ]; then kill -9 "$FLOCKOS_RESET_PID" 2>/dev/null; fi
+  if [ -n "${IRONFLOCKOS_RESET_PID:-}" ]; then kill -9 "$IRONFLOCKOS_RESET_PID" 2>/dev/null; fi
   kill -9 "$PPID"
   exit 137
 }
@@ -173,15 +173,15 @@ enrolled_slot() {
   local r=$1 f
   mkdir -p "$r/usr/lib" "$r/usr/share/base-files" "$r/etc/sudoers.d" "$r/etc/systemd/system/multi-user.target.wants" \
     "$r/etc/systemd/system/ironflock-device-agent.service.d" "$r/etc/systemd/system/NetworkManager.service.d" \
-    "$r/etc/docker" "$r/etc/flockos" "$r/var/lib/flockos" "$r/apps/prod/app1" "$r/var/lib/containerd/io.containerd.metadata.v1.bolt" \
-    "$r/var/lib/NetworkManager" "$r/var/lib/sudo/lectured" "$r/var/tmp/tmp.app" "$r/root/.ssh" "$r/var/lib/chrony" "$r/usr/lib/flockos"
-  printf 'NAME="IronFlockOS"\nID=flockos\nIMAGE_ID=flockos-amd64-efi-base\nIMAGE_VERSION=0.15.0\n' >"$r/usr/lib/os-release"
+    "$r/etc/docker" "$r/etc/ironflockos" "$r/var/lib/ironflockos" "$r/apps/prod/app1" "$r/var/lib/containerd/io.containerd.metadata.v1.bolt" \
+    "$r/var/lib/NetworkManager" "$r/var/lib/sudo/lectured" "$r/var/tmp/tmp.app" "$r/root/.ssh" "$r/var/lib/chrony" "$r/usr/lib/ironflockos"
+  printf 'NAME="IronFlockOS"\nID=ironflockos\nIMAGE_ID=ironflockos-amd64-efi-base\nIMAGE_VERSION=0.15.0\n' >"$r/usr/lib/os-release"
   cat >"$r/etc/passwd" <<'EOF'
 root:x:0:0:root:/root:/bin/bash
 daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
 systemd-network:x:998:998:systemd Network Management:/:/usr/sbin/nologin
 nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
-flockostest:x:1000:1000::/home/flockostest:/bin/bash
+ironflockostest:x:1000:1000::/home/ironflockostest:/bin/bash
 second:x:1001:1001::/home/second:/bin/bash
 EOF
   cat >"$r/etc/shadow" <<'EOF'
@@ -189,35 +189,35 @@ root:*:20000:0:99999:7:::
 daemon:*:20000:0:99999:7:::
 systemd-network:!*:20000::::::
 nobody:*:20000:0:99999:7:::
-flockostest:!:20400:0:99999:7:::
+ironflockostest:!:20400:0:99999:7:::
 second:!:20401:0:99999:7:::
 EOF
   cat >"$r/etc/group" <<'EOF'
 root:x:0:
-sudo:x:27:flockostest
+sudo:x:27:ironflockostest
 users:x:100:
-docker:x:999:flockostest,second
+docker:x:999:ironflockostest,second
 systemd-network:x:998:
 nogroup:x:65534:
-flockostest:x:1000:
+ironflockostest:x:1000:
 second:x:1001:
 EOF
   cat >"$r/etc/gshadow" <<'EOF'
 root:*::
-sudo:*::flockostest
+sudo:*::ironflockostest
 users:*::
-docker:!:second:flockostest,second
+docker:!:second:ironflockostest,second
 systemd-network:!*::
 nogroup:*::
-flockostest:!::
+ironflockostest:!::
 second:!::
 EOF
-  printf 'flockostest:100000:65536\nsecond:165536:65536\n' >"$r/etc/subuid"
+  printf 'ironflockostest:100000:65536\nsecond:165536:65536\n' >"$r/etc/subuid"
   cp "$r/etc/subuid" "$r/etc/subgid"
   chmod 0640 "$r/etc/shadow" "$r/etc/gshadow"
   # The backups shadow-utils keeps, as passwd --lock left them.
   for f in passwd shadow group gshadow subuid subgid; do cp -p "$r/etc/$f" "$r/etc/$f-"; done
-  printf 'flockostest ALL=(ALL) NOPASSWD:ALL\n' >"$r/etc/sudoers.d/ironflock-flockostest"
+  printf 'ironflockostest ALL=(ALL) NOPASSWD:ALL\n' >"$r/etc/sudoers.d/ironflock-ironflockostest"
   echo '# the package README' >"$r/etc/sudoers.d/README"
   echo '[Unit]' >"$r/etc/systemd/system/ironflock-device-agent.service"
   ln -s ../ironflock-device-agent.service "$r/etc/systemd/system/multi-user.target.wants/ironflock-device-agent.service"
@@ -228,14 +228,14 @@ EOF
   printf '127.0.0.1\tlocalhost\n127.0.1.1\t%s\n::1\tlocalhost ip6-localhost ip6-loopback\n' "$2" >"$r/etc/hosts"
   echo 0123456789abcdef0123456789abcdef >"$r/etc/machine-id"
   echo '{"data-root": "/opt/ironflock/device-agent/docker-apps"}' >"$r/etc/docker/daemon.json"
-  ln -s /data/flockos/proxy.conf "$r/etc/flockos/proxy.conf"
-  echo '#!/bin/sh' >"$r/usr/lib/flockos/enroll"
-  date -u +%Y-%m-%dT%H:%M:%SZ >"$r/var/lib/flockos/enrolled"
-  : >"$r/var/lib/flockos/slot-proven"
+  ln -s /data/ironflockos/proxy.conf "$r/etc/ironflockos/proxy.conf"
+  echo '#!/bin/sh' >"$r/usr/lib/ironflockos/enroll"
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$r/var/lib/ironflockos/enrolled"
+  : >"$r/var/lib/ironflockos/slot-proven"
   echo 'the app data of the owner' >"$r/apps/prod/app1/data.txt"
   echo bolt >"$r/var/lib/containerd/io.containerd.metadata.v1.bolt/meta.db"
   echo key >"$r/var/lib/NetworkManager/secret_key"
-  : >"$r/var/lib/sudo/lectured/flockostest"
+  : >"$r/var/lib/sudo/lectured/ironflockostest"
   echo tmp >"$r/var/tmp/tmp.app/file"
   echo 'curl -u owner:secret' >"$r/root/.bash_history"
   echo 'alias owner=1' >"$r/root/.bashrc"
@@ -246,56 +246,56 @@ EOF
 }
 
 # device: an enrolled amd64-efi device booted from slot A, slot B written by an
-# update, the data partition (vda4, which the link FLOCKOS_DATA_DEV stands for
+# update, the data partition (vda4, which the link IRONFLOCKOS_DATA_DEV stands for
 # /dev/disk/by-partlabel/data points at) in use, a new .flock and proxy.conf
-# waiting on the FLOCKOS partition.
+# waiting on the IRONFLOCKOS partition.
 device() {
   mkdir -p "$tmp/dev"
   : >"$tmp/dev/vda4"
   ln -sfn vda4 "$tmp/dev/data"
   : >"$tmp/dev/rootfs-a"
   : >"$tmp/dev/rootfs-b"
-  : >"$tmp/dev/flockos"
-  printf 'vda4 vda data\nrootfs-a vda rootfs-a\nrootfs-b vda rootfs-b\nflockos vda FLOCKOS\n' >"$tmp/blk"
-  printf '/ %s\n%s %s\n' "$tmp/dev/rootfs-a" "$tmp/esp" "$tmp/dev/flockos" >"$tmp/mounts"
+  : >"$tmp/dev/ironflockos"
+  printf 'vda4 vda data\nrootfs-a vda rootfs-a\nrootfs-b vda rootfs-b\nironflockos vda IRONFLOCKOS\n' >"$tmp/blk"
+  printf '/ %s\n%s %s\n' "$tmp/dev/rootfs-a" "$tmp/esp" "$tmp/dev/ironflockos" >"$tmp/mounts"
   enrolled_slot "$tmp/disk/rootfs-a" owner-device
   enrolled_slot "$tmp/disk/rootfs-b" owner-device-before
   local d=$tmp/disk/vda4
-  mkdir -p "$d/ironflock/device-agent/docker-apps/containers/abc" "$d/ironflock/device-init" "$d/home/flockostest/.ssh" \
-    "$d/network/connections" "$d/flockos" "$d/rauc" "$d/etc/ssh" "$d/log/journal/0123" "$d/log/ironflock" \
+  mkdir -p "$d/ironflock/device-agent/docker-apps/containers/abc" "$d/ironflock/device-init" "$d/home/ironflockostest/.ssh" \
+    "$d/network/connections" "$d/ironflockos" "$d/rauc" "$d/etc/ssh" "$d/log/journal/0123" "$d/log/ironflock" \
     "$d/cache" "$d/fwupd" "$d/pstore" "$d/lost+found"
   echo '{"name": "owner-device", "secret": "s3cret"}' >"$d/ironflock/device-agent/device-config.flock"
   echo db >"$d/ironflock/device-agent/device-agent.db"
   : >"$d/ironflock/device-agent/enrolled"
   echo '{"Name": "/owner-app"}' >"$d/ironflock/device-agent/docker-apps/containers/abc/config.v2.json"
-  echo '{"user": {"name": "flockostest"}}' >"$d/ironflock/device-init/installed.json"
-  echo 'ssh-ed25519 AAAA owner-key' >"$d/home/flockostest/.ssh/authorized_keys"
+  echo '{"user": {"name": "ironflockostest"}}' >"$d/ironflock/device-init/installed.json"
+  echo 'ssh-ed25519 AAAA owner-key' >"$d/home/ironflockostest/.ssh/authorized_keys"
   printf '[connection]\nid=OwnerWiFi\n[wifi-security]\npsk=wifi-password\n' >"$d/network/connections/ironflock-wifi.nmconnection"
   printf '[connection]\nid=site-lan\n' >"$d/network/connections/site-lan.nmconnection"
-  printf 'http_proxy=http://user:proxy-password@proxy.owner.example:3128\n' >"$d/flockos/proxy.conf"
-  printf 'interface=enp88s0\n' >"$d/flockos/ptp.conf"
-  printf 'hostname-from-flock=no\n' >"$d/flockos/enroll.conf"
-  printf 'isolate=2-3\n' >"$d/flockos/rt.conf"
+  printf 'http_proxy=http://user:proxy-password@proxy.owner.example:3128\n' >"$d/ironflockos/proxy.conf"
+  printf 'interface=enp88s0\n' >"$d/ironflockos/ptp.conf"
+  printf 'hostname-from-flock=no\n' >"$d/ironflockos/enroll.conf"
+  printf 'isolate=2-3\n' >"$d/ironflockos/rt.conf"
   chmod 0700 "$d/network/connections"
-  chmod 0600 "$d/network/connections/"* "$d/flockos/proxy.conf"
+  chmod 0600 "$d/network/connections/"* "$d/ironflockos/proxy.conf"
   printf '[slot.rootfs.1]\nbundle.version=0.15.0\n' >"$d/rauc/central.raucs"
-  echo 'A=good B=good' >"$d/rauc/flockos-rpi-tryboot.state"
+  echo 'A=good B=good' >"$d/rauc/ironflockos-rpi-tryboot.state"
   echo key >"$d/etc/ssh/ssh_host_ed25519_key"
   echo journal >"$d/log/journal/0123/system.journal"
   echo 'agent log of owner-device' >"$d/log/ironflock/device-agent.log"
-  echo bundle >"$d/cache/flockos.raucb"
+  echo bundle >"$d/cache/ironflockos.raucb"
   echo pending >"$d/fwupd/pending.db"
   echo crash >"$d/pstore/dmesg.txt"
   echo 'left by the owner' >"$d/owner-notes.txt"
   mkdir -p "$tmp/esp/EFI/BOOT" "$tmp/run"
-  printf 'ORDER=A B\nA_OK=1\nA_TRY=1\nB_OK=1\nB_TRY=0\nFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1\nFLOCKOS_RT_CMDLINE=isolcpus=2-3\n' \
+  printf 'ORDER=A B\nA_OK=1\nA_TRY=1\nB_OK=1\nB_TRY=0\nIRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1\nIRONFLOCKOS_RT_CMDLINE=isolcpus=2-3\n' \
     >"$tmp/esp/EFI/BOOT/grubenv"
   echo shim >"$tmp/esp/EFI/BOOT/BOOTX64.EFI"
   echo '{"name": "new-device", "secret": "new"}' >"$tmp/esp/new-device.flock"
   printf 'http_proxy=http://new-proxy:3128\n' >"$tmp/esp/proxy.conf"
   cat >"$tmp/system.conf" <<EOF
 [system]
-compatible=flockos-amd64-efi-base
+compatible=ironflockos-amd64-efi-base
 bootloader=grub
 grubenv=$tmp/esp/EFI/BOOT/grubenv
 data-directory=/data/rauc
@@ -313,7 +313,7 @@ EOF
   echo 'BOOT_IMAGE=/vmlinuz root=PARTUUID=x rauc.slot=A rw' >"$tmp/cmdline"
 }
 
-# request CONTENT [STAMP]: factory-reset.conf on the FLOCKOS partition, written
+# request CONTENT [STAMP]: factory-reset.conf on the IRONFLOCKOS partition, written
 # at STAMP (touch -t; the same by default, so a request is the same request
 # in every test).
 request() {
@@ -337,13 +337,13 @@ on_disk() {
 
 mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 value() { sed -n "s/^$1=//p" "$tmp/esp/factory-reset.log"; }
-copy_value() { sed -n "s/^$1=//p" "$slot/var/lib/flockos/factory-reset.log"; }
+copy_value() { sed -n "s/^$1=//p" "$slot/var/lib/ironflockos/factory-reset.log"; }
 state_value() { sed -n "s/^$1=//p" "$state_file"; }
 grubenv() { cat "$tmp/esp/EFI/BOOT/grubenv"; }
 hold_mode() { cat "$hold_file" 2>/dev/null || echo none; }
 not_root() { if [ "$(id -u)" = 0 ]; then skip "root ignores the folder modes this test relies on"; fi; }
 
-# state: every file, link and folder of the disks and the FLOCKOS partition,
+# state: every file, link and folder of the disks and the IRONFLOCKOS partition,
 # with the content of files; the records without their time, the attempt
 # counts left out (a cut-short reset takes one more attempt).
 state() {
@@ -352,7 +352,7 @@ state() {
       echo "$f -> $(readlink "$f")"
     elif [ -d "$f" ]; then
       echo "$f/"
-    elif [[ "$f" == *factory-reset.log || "$f" == *factory-reset.state || "$f" == */flockos/factory-reset.done ]]; then
+    elif [[ "$f" == *factory-reset.log || "$f" == *factory-reset.state || "$f" == */ironflockos/factory-reset.done ]]; then
       grep -vE '^(time|attempt|attempts|last-failure)=' "$f" | sed "s|^|$f: |"
     else
       echo "$f $(cksum <"$f")"
@@ -364,7 +364,7 @@ state() {
 # request and the record, grubenv, and in the root slots the paths of
 # clean_slot and the reset's own state.
 outside() {
-  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/grubenv|^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/flockos/(enrolled |factory-reset\.)'
+  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/grubenv|^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/ironflockos/(enrolled |factory-reset\.)'
 }
 
 # --- a reset that completes --------------------------------------------------
@@ -374,7 +374,7 @@ outside() {
   boot
   [ "$status" -eq 0 ]
   [[ "$output" == *"attempt 1 of 3: resetting the device (keep network: no)"* ]]
-  [ "$(cd "$data" && find . | LC_ALL=C sort | tr '\n' ' ')" = ". ./flockos ./flockos/factory-reset.done ./lost+found ./rauc ./rauc/central.raucs ./rauc/flockos-rpi-tryboot.state " ]
+  [ "$(cd "$data" && find . | LC_ALL=C sort | tr '\n' ' ')" = ". ./ironflockos ./ironflockos/factory-reset.done ./lost+found ./rauc ./rauc/central.raucs ./rauc/ironflockos-rpi-tryboot.state " ]
   grep -qx 'bundle.version=0.15.0' "$data/rauc/central.raucs"
   [ ! -e "$esp/factory-reset.conf" ] && [ ! -e "$esp/factory-reset.keep" ] && [ ! -e "$esp/.factory-reset.keep.part" ]
   [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
@@ -382,7 +382,7 @@ outside() {
   [ "$(value attempt)" = 1 ] && [ "$(value attempts-max)" = 3 ]
   [ "$(state_value outcome)" = done ] && [ "$(state_value attempts)" = 1 ]
   [ "$(value request)" = "$(state_value request)" ]
-  grep -qx "request=$(value request)" "$data/flockos/factory-reset.done"
+  grep -qx "request=$(value request)" "$data/ironflockos/factory-reset.done"
   [ "$(cat "$slot/etc/machine-id")" = uninitialized ]
   [ "$(hold_mode)" = none ]
   # The old filesystem was read only, without following links; the new one is
@@ -392,32 +392,32 @@ outside() {
   grep -qx 'mkfs.ext4 -F -q -L data -m 0 vda4' "$tmp/calls"
   grep -qx 'mount nodev,nosuid,nosymfollow vda4' "$tmp/calls"
   # The record is kept in the booted slot as well.
-  cmp -s "$esp/factory-reset.log" "$slot/var/lib/flockos/factory-reset.log"
+  cmp -s "$esp/factory-reset.log" "$slot/var/lib/ironflockos/factory-reset.log"
 }
 
 @test "keep-network=yes keeps the network profiles, proxy.conf and ptp.conf with their modes; nothing else of /data" {
   request 'keep-network=yes\n'
   boot
   [ "$status" -eq 0 ]
-  [ "$(cd "$data" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./flockos/factory-reset.done ./flockos/proxy.conf ./flockos/ptp.conf ./network/connections/ironflock-wifi.nmconnection ./network/connections/site-lan.nmconnection ./rauc/central.raucs ./rauc/flockos-rpi-tryboot.state " ]
+  [ "$(cd "$data" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./ironflockos/factory-reset.done ./ironflockos/proxy.conf ./ironflockos/ptp.conf ./network/connections/ironflock-wifi.nmconnection ./network/connections/site-lan.nmconnection ./rauc/central.raucs ./rauc/ironflockos-rpi-tryboot.state " ]
   grep -qx 'psk=wifi-password' "$data/network/connections/ironflock-wifi.nmconnection"
   [ "$(mode "$data/network/connections")" = 700 ]
   [ "$(mode "$data/network/connections/ironflock-wifi.nmconnection")" = 600 ]
-  [ "$(mode "$data/flockos/proxy.conf")" = 600 ]
-  [ "$(mode "$data/flockos")" = 755 ]
+  [ "$(mode "$data/ironflockos/proxy.conf")" = 600 ]
+  [ "$(mode "$data/ironflockos")" = 755 ]
   [ "$(value keep-network)" = yes ]
-  [ "$(value kept)" = "rauc network/connections flockos/proxy.conf flockos/ptp.conf" ]
+  [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf" ]
 }
 
 @test "a kept file that cannot be read is a note, not a reason to stop" {
   not_root
-  chmod 000 "$data/flockos/ptp.conf"
+  chmod 000 "$data/ironflockos/ptp.conf"
   request 'keep-network=yes\n'
   boot
   [ "$status" -eq 0 ]
   [ "$(value result)" = done ]
-  [ "$(value kept)" = "rauc network/connections flockos/proxy.conf" ]
-  [ "$(value note)" = "flockos/ptp.conf could not be read and was not kept" ]
+  [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf" ]
+  [ "$(value note)" = "ironflockos/ptp.conf could not be read and was not kept" ]
 }
 
 @test "the booted slot: the enrollment, the agent's unit and what apps and users left are gone; the system and slot-proven stay" {
@@ -435,21 +435,21 @@ outside() {
   done
   for f in subuid subgid subuid- subgid-; do [ ! -s "$slot/etc/$f" ]; done
   [ "$(mode "$slot/etc/shadow")" = 640 ] && [ "$(mode "$slot/etc/gshadow-")" = 640 ]
-  [ ! -e "$slot/etc/sudoers.d/ironflock-flockostest" ] && [ -e "$slot/etc/sudoers.d/README" ]
+  [ ! -e "$slot/etc/sudoers.d/ironflock-ironflockostest" ] && [ -e "$slot/etc/sudoers.d/README" ]
   [ ! -e "$slot/etc/systemd/system/ironflock-device-agent.service" ]
   [ ! -L "$slot/etc/systemd/system/multi-user.target.wants/ironflock-device-agent.service" ]
   [ ! -e "$slot/etc/systemd/system/ironflock-device-agent.service.d" ] && [ ! -e "$slot/etc/systemd/system/ironflock.slice" ]
   [ -e "$slot/etc/systemd/system/NetworkManager.service.d/ironflock-restart.conf" ]
-  [ "$(cat "$slot/etc/hostname")" = flockos ]
-  grep -qx "$(printf '127.0.1.1\tflockos')" "$slot/etc/hosts"
-  [ ! -e "$slot/var/lib/flockos/enrolled" ] && [ -e "$slot/var/lib/flockos/slot-proven" ]
+  [ "$(cat "$slot/etc/hostname")" = ironflockos ]
+  grep -qx "$(printf '127.0.1.1\tironflockos')" "$slot/etc/hosts"
+  [ ! -e "$slot/var/lib/ironflockos/enrolled" ] && [ -e "$slot/var/lib/ironflockos/slot-proven" ]
   [ ! -e "$slot/apps" ]
   for d in var/lib/containerd var/lib/NetworkManager var/lib/sudo/lectured var/tmp; do
     [ -d "$slot/$d" ] && [ -z "$(ls -A "$slot/$d")" ]
   done
   [ "$(ls -A "$slot/root" | tr '\n' ' ')" = ".bashrc .profile " ]
   [ "$(cat "$slot/root/.bashrc")" = '# ~/.bashrc of the image' ]
-  [ -e "$slot/etc/docker/daemon.json" ] && [ -L "$slot/etc/flockos/proxy.conf" ] && [ -e "$slot/var/lib/chrony/chrony.drift" ]
+  [ -e "$slot/etc/docker/daemon.json" ] && [ -L "$slot/etc/ironflockos/proxy.conf" ] && [ -e "$slot/var/lib/chrony/chrony.drift" ]
 }
 
 @test "the account clean-up under mawk, as Debian's awk" {
@@ -469,9 +469,9 @@ outside() {
   boot
   [ "$status" -eq 0 ]
   [ "$(cut -d: -f1 "$other/etc/passwd" | tr '\n' ' ')" = "root daemon systemd-network nobody " ]
-  [ "$(cat "$other/etc/hostname")" = flockos ]
+  [ "$(cat "$other/etc/hostname")" = ironflockos ]
   [ "$(cat "$other/etc/machine-id")" = uninitialized ]
-  [ ! -e "$other/var/lib/flockos/enrolled" ] && [ -e "$other/var/lib/flockos/slot-proven" ]
+  [ ! -e "$other/var/lib/ironflockos/enrolled" ] && [ -e "$other/var/lib/ironflockos/slot-proven" ]
   [ ! -e "$other/apps" ] && [ ! -e "$other/etc/systemd/system/ironflock-device-agent.service" ]
   ! grep -q 'rootfs-a' "$tmp/calls"
   [ "$(grep -n 'mount nodev,nosuid,nosymfollow rootfs-b' "$tmp/calls" | cut -d: -f1)" -lt "$(grep -n '^mkfs.ext4' "$tmp/calls" | cut -d: -f1)" ]
@@ -512,11 +512,11 @@ outside() {
   request ''
   boot
   [ "$status" -eq 0 ]
-  [ "$(grubenv | LC_ALL=C sort | tr '\n' ' ')" = "A_OK=1 A_TRY=0 B_OK=1 B_TRY=0 FLOCKOS_CMDLINE=systemd.debug_shell=ttyS1 ORDER=A B " ]
+  [ "$(grubenv | LC_ALL=C sort | tr '\n' ' ')" = "A_OK=1 A_TRY=0 B_OK=1 B_TRY=0 IRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1 ORDER=A B " ]
   # The done mark is looked for first, then the kept files are read, then the
   # flag is cleared.
   [ "$(head -n 5 "$tmp/calls" | tr '\n' '|')" = "mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|grub-editenv set A_TRY=0|" ]
-  grep -qx 'grub-editenv unset FLOCKOS_RT_CMDLINE' "$tmp/calls"
+  grep -qx 'grub-editenv unset IRONFLOCKOS_RT_CMDLINE' "$tmp/calls"
 }
 
 @test "GRUB: a booted slot that is not good, or a command line without a slot, leaves the try flags alone" {
@@ -551,7 +551,7 @@ outside() {
   request '\xef\xbb\xbf# from Windows\r\nkeep-network=yes\r\n'
   boot
   [ "$status" -eq 0 ]
-  [ -e "$data/flockos/proxy.conf" ]
+  [ -e "$data/ironflockos/proxy.conf" ]
 }
 
 @test "the same answer in every locale: a no-break space is no space" {
@@ -583,10 +583,13 @@ outside() {
     [ ! -e "$tmp/systemctl.log" ] && [ ! -e "$tmp/calls" ] && [ "$(hold_mode)" = none ]
   done
   [ "$(value reason)" = "the request holds a NUL byte" ]
+  # The refused request is identified in the record, as the state would.
+  [[ "$(value request)" =~ ^[0-9]+-4-2026111[01]T[0-9]{6}Z$ ]]
   mkdir "$esp/factory-reset.conf"
   boot
   [ "$status" -eq 0 ]
   [ "$(value reason)" = "the request is not a file" ]
+  [[ "$(value request)" =~ ^unreadable- ]]
 }
 
 @test "check: prints keep-network=yes or no, or the reason without the file's name, and changes nothing" {
@@ -618,13 +621,13 @@ outside() {
   [ "$status" -eq 0 ]
   [ "$(value result)" = done ]
   [[ "$(value time)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
-  [ "$(value image)" = flockos-amd64-efi-base ] && [ "$(value version)" = 0.15.0 ] && [ "$(value slot)" = A ]
+  [ "$(value image)" = ironflockos-amd64-efi-base ] && [ "$(value version)" = 0.15.0 ] && [ "$(value slot)" = A ]
   [[ "$(value request)" =~ ^[0-9]+-[0-9]+-2026111[01]T[0-9]{6}Z$ ]]
   [ "$(value other-slot)" = cleaned ]
-  for owner in owner-device flockostest OwnerWiFi wifi-password proxy.owner.example proxy-password s3cret owner-app; do
+  for owner in owner-device ironflockostest OwnerWiFi wifi-password proxy.owner.example proxy-password s3cret owner-app; do
     ! grep -q "$owner" "$esp/factory-reset.log" || { echo "the record names $owner"; return 1; }
   done
-  ! grep -q -e owner-device -e flockostest -e OwnerWiFi <<<"$output"
+  ! grep -q -e owner-device -e ironflockostest -e OwnerWiFi <<<"$output"
 }
 
 @test "nothing outside the data partition and the paths of the reset changes; a new .flock and proxy.conf wait for the next boot; part files go" {
@@ -693,7 +696,7 @@ outside() {
   [ "$(state_value attempts)" = 1 ]
   boot
   [ "$status" -eq 0 ]
-  [ "$(value result)" = done ] && [ "$(value attempt)" = 2 ] && [ -e "$data/flockos/proxy.conf" ]
+  [ "$(value result)" = done ] && [ "$(value attempt)" = 2 ] && [ -e "$data/ironflockos/proxy.conf" ]
 }
 
 @test "a completed reset is not done again: its request found at a later boot, in either slot, is removed and nothing else happens" {
@@ -719,10 +722,10 @@ outside() {
   [ ! -e "$tmp/systemctl.log" ] && [ ! -e "$esp/factory-reset.conf" ]
   [ "$(state_value outcome)" = done ]
   # A power loss lost the record: it is written from the mark.
-  rm "$esp/factory-reset.log" "$slot/var/lib/flockos/factory-reset.log"
+  rm "$esp/factory-reset.log" "$slot/var/lib/ironflockos/factory-reset.log"
   request 'keep-network=yes\n'
   boot
-  [ "$(value result)" = done ] && [ "$(value kept)" = "rauc network/connections flockos/proxy.conf flockos/ptp.conf" ]
+  [ "$(value result)" = done ] && [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf" ]
 }
 
 @test "a slot cleared halfway is finished the same at the next attempt" {
@@ -733,9 +736,9 @@ outside() {
   mkdir -p "$slot/apps/prod/app1"
   echo 'the app data of the owner' >"$slot/apps/prod/app1/data.txt"
   echo owner-device >"$slot/etc/hostname"
-  echo 'flockostest:x:1000:1000::/home/flockostest:/bin/bash' >>"$slot/etc/passwd"
-  : >"$slot/etc/passwd.flockos-new"
-  rm "$state_file" "$data/flockos/factory-reset.done"
+  echo 'ironflockostest:x:1000:1000::/home/ironflockostest:/bin/bash' >>"$slot/etc/passwd"
+  : >"$slot/etc/passwd.ironflockos-new"
+  rm "$state_file" "$data/ironflockos/factory-reset.done"
   echo 0123456789abcdef0123456789abcdef >"$slot/etc/machine-id"
   request 'keep-network=yes\n'
   boot
@@ -753,7 +756,7 @@ outside() {
   boot
   [ "$status" -eq 0 ]
   [[ "$output" == *"attempt 2 of 3, going on with the reset begun before (keep network: yes)"* ]]
-  [ -e "$data/flockos/proxy.conf" ] && [ ! -e "$esp/factory-reset.keep" ]
+  [ -e "$data/ironflockos/proxy.conf" ] && [ ! -e "$esp/factory-reset.keep" ]
   [ "$(value result)" = done ] && [ "$(value keep-network)" = yes ]
 }
 
@@ -786,7 +789,7 @@ outside() {
   # proxy.conf that came for after the reset are gone, nothing is held.
   [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
   [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
-  grep -qx 'outcome=gave-up' "$data/flockos/factory-reset.done"
+  grep -qx 'outcome=gave-up' "$data/ironflockos/factory-reset.done"
   [ "$(cd "$data" && find . | LC_ALL=C sort | grep -v factory-reset.done)" = "$data_before" ]
   # It is not tried again.
   on_disk vda4 vda
@@ -798,7 +801,7 @@ outside() {
   [ "$(value result)" = done ] && [ "$(value attempt)" = 1 ]
 }
 
-@test "the other failures before the reset begins: no data partition, the wrong one, FLOCKOS on another disk, no room, an unreadable grubenv" {
+@test "the other failures before the reset begins: no data partition, the wrong one, IRONFLOCKOS on another disk, no room, an unreadable grubenv" {
   data_before=$(cd "$data" && find . | LC_ALL=C sort)
   check_failed() {
     boot
@@ -812,17 +815,17 @@ outside() {
   request '' 202611110801
   check_failed "the data partition is not the partition named data on the disk of the root slot"
   on_disk vda4 vda data
-  on_disk flockos sdb
+  on_disk ironflockos sdb
   request '' 202611110802
-  check_failed "the FLOCKOS partition at * is not on the disk of the root slot"
-  on_disk flockos vda
+  check_failed "the IRONFLOCKOS partition at * is not on the disk of the root slot"
+  on_disk ironflockos vda
   rm "$tmp/dev/vda4"
   request '' 202611110803
   check_failed "the data partition (*) is missing"
   : >"$tmp/dev/vda4"
   mkdir "$esp/.factory-reset.keep.part"
   request '' 202611110804
-  check_failed "cannot write factory-reset.keep to the FLOCKOS partition"
+  check_failed "cannot write factory-reset.keep to the IRONFLOCKOS partition"
   ! grep -q grub-editenv "$tmp/calls"
   rmdir "$esp/.factory-reset.keep.part"
   touch "$tmp/broken-grubenv"
@@ -914,14 +917,14 @@ outside() {
   [ "$status" -eq 0 ]
   [ "$(value result)" = incomplete ] && [ "$(value failed-steps)" = booted-slot ]
   [ ! -e "$esp/factory-reset.conf" ] && [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
-  [ ! -e "$slot/apps" ] && [ ! -e "$slot/var/lib/flockos/enrolled" ]
+  [ ! -e "$slot/apps" ] && [ ! -e "$slot/var/lib/ironflockos/enrolled" ]
   [ "$(cat "$slot/etc/machine-id")" = uninitialized ]
 }
 
 @test "an attempt that cannot be counted is not made: the boot goes on as it is" {
   not_root
-  mkdir -p "$slot/var/lib/flockos"
-  chmod 555 "$slot/var/lib/flockos"
+  mkdir -p "$slot/var/lib/ironflockos"
+  chmod 555 "$slot/var/lib/ironflockos"
   request 'keep-network=yes\n'
   data_before=$(state | grep '^disk/vda4')
   for k in 1 2 3 4; do
@@ -929,16 +932,17 @@ outside() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"without a count there is no attempt at this boot"* ]]
     [ "$(value result)" = failed ] && [[ "$(value reason)" == "cannot count the attempt in "* ]]
+    [ "$(value attempt)" = 1 ] && [ "$(value data)" = old ] && [ "$(value begun)" = no ]
     [ "$(state | grep '^disk/vda4')" = "$data_before" ] && [ "$(hold_mode)" = wait ]
   done
-  # Nothing can be written at all, the FLOCKOS partition neither: the same.
+  # Nothing can be written at all, the IRONFLOCKOS partition neither: the same.
   chmod 555 "$esp"
   before=$(state)
   boot
   [ "$status" -eq 0 ] && [ "$(state)" = "$before" ] && [ "$(hold_mode)" = wait ]
 }
 
-@test "a read-only FLOCKOS partition: each attempt fails before it begins, the boot goes on, the record is kept in the slot" {
+@test "a read-only IRONFLOCKOS partition: each attempt fails before it begins, the boot goes on, the record is kept in the slot" {
   not_root
   request 'keep-network=yes\n'
   chmod 555 "$esp"
@@ -947,18 +951,18 @@ outside() {
     [ "$status" -eq 0 ]
   done
   [ "$(copy_value result)" = gave-up ] && [ "$(copy_value data)" = old ]
-  [ "$(copy_value reason)" = "cannot write factory-reset.keep to the FLOCKOS partition" ]
+  [ "$(copy_value reason)" = "cannot write factory-reset.keep to the IRONFLOCKOS partition" ]
   [ "$(hold_mode)" = gave-up ] && [ -e "$data/owner-notes.txt" ]
 }
 
-@test "a request that gave up never fires again: in a fresh slot (an update), after a rollback, with FLOCKOS read-only" {
+@test "a request that gave up never fires again: in a fresh slot (an update), after a rollback, with IRONFLOCKOS read-only" {
   not_root
   request 'keep-network=yes\n'
   chmod 555 "$esp"
   for k in 1 2 3; do boot; done
   [ "$(copy_value result)" = gave-up ] && [ "$(hold_mode)" = gave-up ]
   [ -e "$esp/factory-reset.conf" ] && [ -e "$esp/new-device.flock" ]
-  grep -qx 'outcome=gave-up' "$data/flockos/factory-reset.done"
+  grep -qx 'outcome=gave-up' "$data/ironflockos/factory-reset.done"
   data_before=$(state | grep '^disk/vda4')
   # A slot without this state (a rollback, or an update without its carry):
   # the mark on /data says gave-up. Nothing is tried, nothing is counted.
@@ -970,27 +974,29 @@ outside() {
     [ "$(hold_mode)" = gave-up ] && [ "$(state | grep '^disk/vda4')" = "$data_before" ]
   done
   # The state alone, without the mark on /data, does the same.
-  rm "$data/flockos/factory-reset.done"
+  rm "$data/ironflockos/factory-reset.done"
   boot
   [ "$status" -eq 0 ] && [[ "$output" == *"given up before"* ]] && ! grep -q mkfs "$tmp/calls"
-  # FLOCKOS writable again: the request is retired and the files go.
+  # IRONFLOCKOS writable again: the request is retired and the files go,
+  # every .flock enroll would take (the case of its name does not count).
   chmod 755 "$esp"
+  echo '{}' >"$esp/Other.FLOCK"
   boot
   [ "$status" -eq 0 ]
   [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
-  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
+  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/Other.FLOCK" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
   # An update carries the state into the new slot.
-  grep -q 'reset_state=${FLOCKOS_RESET_STATE:-/var/lib/flockos/factory-reset.state}' "$repo/overlay/usr/lib/flockos/rauc-post-install"
-  grep -q 'cp -p "$reset_state" "$mnt$reset_state"' "$repo/overlay/usr/lib/flockos/rauc-post-install"
+  grep -q 'reset_state=${IRONFLOCKOS_RESET_STATE:-/var/lib/ironflockos/factory-reset.state}' "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
+  grep -q 'cp -p "$reset_state" "$mnt$reset_state"' "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
 }
 
-@test "after a give-up with the old data, a .flock put on FLOCKOS later enrolls as on any device; while held, it waits" {
-  lib=$repo/overlay/usr/lib/flockos
+@test "after a give-up with the old data, a .flock put on IRONFLOCKOS later enrolls as on any device; while held, it waits" {
+  lib=$repo/overlay/usr/lib/ironflockos
   mkdir -p "$tmp/agent" "$tmp/state" "$tmp/run"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
-  enroll_env=(FLOCKOS_AGENT_DIR="$tmp/agent" FLOCKOS_STATE="$tmp/state" FLOCKOS_INIT="$tmp/ironflock-init"
-    FLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock"
+  chmod +x "$tmp/ironflock"
+  enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_IRONFLOCK="$tmp/ironflock"
+    IRONFLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
   echo gave-up >"$hold_file"
   : >"$tmp/state/enrolled"
   run env "${enroll_env[@]}" bash "$lib/enroll"
@@ -1010,26 +1016,26 @@ outside() {
   [ "$(state)" = "$before" ] && [ ! -e "$state_file" ] && [ ! -e "$esp/factory-reset.log" ]
 }
 
-# --- enroll and flockos-proxy, the units ----------------------------------------
+# --- enroll and ironflockos-proxy, the units ----------------------------------------
 
-@test "enroll and flockos-proxy: wait leaves the FLOCKOS partition's .flock and proxy.conf, copy takes them and leaves them there" {
-  lib=$repo/overlay/usr/lib/flockos
+@test "enroll and ironflockos-proxy: wait leaves the IRONFLOCKOS partition's .flock and proxy.conf, copy takes them and leaves them there" {
+  lib=$repo/overlay/usr/lib/ironflockos
   mkdir -p "$tmp/agent" "$tmp/state" "$tmp/pdata" "$tmp/run"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock"
+  chmod +x "$tmp/ironflock"
   echo '{"appliance_domain": "old.example"}' >"$tmp/agent/device-config.flock"
   printf 'http_proxy=http://old:3128\n' >"$tmp/pdata/proxy.conf"
   echo '{"appliance_domain": "new.example"}' >"$esp/new-device.flock"
   echo '{"appliance_domain": "other.example"}' >"$esp/other.flock"
   touch -t 202001010000 "$esp/other.flock"
-  enroll_env=(FLOCKOS_AGENT_DIR="$tmp/agent" FLOCKOS_STATE="$tmp/state" FLOCKOS_INIT="$tmp/ironflock-init"
-    FLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
-  proxy_env=(FLOCKOS_PROXY_CONF="$tmp/pdata/proxy.conf" FLOCKOS_AGENT_FLOCK="$tmp/agent/device-config.flock")
+  enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_IRONFLOCK="$tmp/ironflock"
+    IRONFLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
+  proxy_env=(IRONFLOCKOS_PROXY_CONF="$tmp/pdata/proxy.conf" IRONFLOCKOS_AGENT_FLOCK="$tmp/agent/device-config.flock")
 
   echo wait >"$hold_file"
   : >"$tmp/state/enrolled"
   run env "${enroll_env[@]}" bash "$lib/enroll"
-  [ "$status" -eq 0 ] && [[ "$output" == *"no .flock is taken from the FLOCKOS partition"* ]] && [ ! -e "$tmp/init-calls" ]
+  [ "$status" -eq 0 ] && [[ "$output" == *"no .flock is taken from the IRONFLOCKOS partition"* ]] && [ ! -e "$tmp/init-calls" ]
   rm "$tmp/state/enrolled"
   run env "${enroll_env[@]}" bash "$lib/enroll"
   [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/agent/device-config.flock --shred-source --hostname-from-flock" ]
@@ -1052,7 +1058,7 @@ outside() {
   grep -qx 'http_proxy=http://new-proxy:3128' "$tmp/pdata/proxy.conf" && [ -e "$esp/proxy.conf" ]
   grep -qx 'NO_PROXY=localhost,127.0.0.1,::1,new.example,.new.example' "$tmp/run/proxy.env"
 
-  # Without /data (flockos-data-missing) both copy as well.
+  # Without /data (ironflockos-data-missing) both copy as well.
   rm "$hold_file"
   : >"$tmp/run/data-missing"
   run env "${enroll_env[@]}" bash "$lib/enroll"
@@ -1068,40 +1074,40 @@ outside() {
   [ ! -e "$esp/proxy.conf" ]
 }
 
-@test "the units: the reset and the note of a missing /data are wanted by /data's mount; nothing of /data or FLOCKOS can stop the boot" {
-  u=$units/flockos-factory-reset.service
+@test "the units: the reset and the note of a missing /data are wanted by /data's mount; nothing of /data or IRONFLOCKOS can stop the boot" {
+  u=$units/ironflockos-factory-reset.service
   grep -qx 'DefaultDependencies=no' "$u"
   grep -qx 'ConditionPathExists=|/boot/efi/factory-reset.conf' "$u"
   grep -qx 'ConditionPathExists=|/boot/efi/factory-reset.keep' "$u"
   grep -qx 'ConditionPathIsMountPoint=!/data' "$u"
-  grep -qx 'ExecStart=/usr/lib/flockos/factory-reset' "$u"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/factory-reset' "$u"
   grep -qx 'Before=systemd-fsck@dev-disk-by\\x2dpartlabel-data.service data.mount local-fs.target' "$u"
-  grep -qx 'Before=flockos-data-layout.service flockos-proxy.service flockos-ptp.service' "$u"
+  grep -qx 'Before=ironflockos-data-layout.service ironflockos-proxy.service ironflockos-ptp.service' "$u"
   grep -qE '^TimeoutStartSec=[0-9]+min$' "$u"
   ! grep -q '^\[Install\]' "$u"
-  [ "$(readlink "$units/data.mount.wants/flockos-factory-reset.service")" = ../flockos-factory-reset.service ]
-  [ "$(readlink "$units/data.mount.wants/flockos-data-missing.service")" = ../flockos-data-missing.service ]
-  m=$units/flockos-data-missing.service
+  [ "$(readlink "$units/data.mount.wants/ironflockos-factory-reset.service")" = ../ironflockos-factory-reset.service ]
+  [ "$(readlink "$units/data.mount.wants/ironflockos-data-missing.service")" = ../ironflockos-data-missing.service ]
+  m=$units/ironflockos-data-missing.service
   grep -qx 'After=data.mount' "$m" && grep -qx 'ConditionPathIsMountPoint=!/data' "$m"
-  grep -qx 'ExecStart=/usr/lib/flockos/data-missing' "$m"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/data-missing' "$m"
   # /etc/fstab: no mount there can stop the boot; each stays before
   # local-fs.target. The reset is no requirement of /data's mount.
   fstab=$repo/overlay/etc/fstab
-  ! grep -q 'x-systemd.requires=flockos-factory-reset' "$fstab"
+  ! grep -q 'x-systemd.requires=ironflockos-factory-reset' "$fstab"
   grep -v '^#' "$fstab" | grep -v '^$' | while read -r what where type opts rest; do
     [[ ",$opts," == *,nofail,* && ",$opts," == *,x-systemd.before=local-fs.target,* ]] || { echo "$where: $opts"; exit 1; }
   done
-  grep -qE '^RequiresMountsFor=/opt/ironflock$' "$units/flockos-proxy.service"
+  grep -qE '^RequiresMountsFor=/opt/ironflock$' "$units/ironflockos-proxy.service"
   ! grep -q '^\[Install\]' "$m"
   ! grep -q '/data' "$repo/profiles/installer/overlay/etc/fstab"
-  grep -q 'mask flockos-factory-reset.service flockos-data-missing.service$' "$repo/build/customize.sh"
-  ! grep -q 'factory-reset' "$repo/profiles/installer/overlay/usr/lib/flockos/installer"
-  [ "$(cat "$repo/overlay/etc/hostname")" = flockos ]
-  grep -qx 'image_hostname=flockos' "$reset"
+  grep -q 'mask ironflockos-factory-reset.service ironflockos-data-missing.service$' "$repo/build/customize.sh"
+  ! grep -q 'factory-reset' "$repo/profiles/installer/overlay/usr/lib/ironflockos/installer"
+  [ "$(cat "$repo/overlay/etc/hostname")" = ironflockos ]
+  grep -qx 'image_hostname=ironflockos' "$reset"
 }
 
-@test "data-missing says that /data is missing, on the console and in /run for enroll and flockos-proxy" {
-  run env FLOCKOS_RUN="$tmp/run" sh "$repo/overlay/usr/lib/flockos/data-missing"
+@test "data-missing says that /data is missing, on the console and in /run for enroll and ironflockos-proxy" {
+  run env IRONFLOCKOS_RUN="$tmp/run" sh "$repo/overlay/usr/lib/ironflockos/data-missing"
   [ "$status" -eq 0 ]
   [[ "$output" == *"THE DATA PARTITION COULD NOT BE MOUNTED"* ]]
   grep -q 'root slot' "$tmp/run/data-missing"

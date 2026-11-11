@@ -1,0 +1,10 @@
+# Applies a new ptp.conf as soon as it is written.
+[Unit]
+Description=IronFlockOS: watch /data/ironflockos/ptp.conf
+
+[Path]
+PathChanged=/data/ironflockos/ptp.conf
+Unit=ironflockos-ptp-reload.service
+
+[Install]
+WantedBy=multi-user.target

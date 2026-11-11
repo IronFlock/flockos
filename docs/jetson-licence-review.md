@@ -31,7 +31,7 @@ texts were read from the files NVIDIA ships, not from summaries.
 
 | Artefact | NVIDIA content | Channel | State |
 |----------|----------------|---------|-------|
-| Slot image `<image-id>-<version>.rootfs.ext4.zst` and bundle `.raucb` | The `nvidia-l4t-*` packages the target lists and their dependencies, and the container toolkit, installed by dpkg from NVIDIA's repositories | Download server `flockos/<version>/`, appliance OS mirror, FlockFlasher, the device-agent | Built in CI (WP-6.2) |
+| Slot image `<image-id>-<version>.rootfs.ext4.zst` and bundle `.raucb` | The `nvidia-l4t-*` packages the target lists and their dependencies, and the container toolkit, installed by dpkg from NVIDIA's repositories | Download server `ironflockos/<version>/`, appliance OS mirror, FlockFlasher, the device-agent | Built in CI (WP-6.2) |
 | Flash package | Bootloader binaries, BCTs and partition images that NVIDIA's tools make from the BSP; NVIDIA's host flash tools; two NVIDIA scripts with IronFlockOS's `-r` fix; the layout `build/tegra-layout.py` makes from NVIDIA's XML | Planned for the release matrix (WP-6.4) | Built in CI, not published |
 | Orin Nano SD image | The same for an SD card: kernel, DTB, ESP with L4TLauncher, recovery | FlockFlasher (WP-6.4) | Planned |
 | QSPI capsule `TEGRA_BL.Cap` | The bootloader binaries (MB1, MB2, BPMP, SPE, RCE, UEFI, OP-TEE, TF-A) in one capsule | Inside the bundle (WP-6.5) | Planned |
@@ -100,12 +100,12 @@ uses Canonical's binaries from `ports.ubuntu.com`.
    A check in `test/image/jetson-rootfs-check.sh` makes this a rule: every installed
    `nvidia-l4t-*` package has its `copyright` file (WP-6.8).
 2. **The Agreement goes with every Jetson file.** NVIDIA's text, byte for byte the BSP's,
-   is published as `NVIDIA-LICENSE.txt` next to the Jetson files in `flockos/<version>/`.
+   is published as `NVIDIA-LICENSE.txt` next to the Jetson files in `ironflockos/<version>/`.
    The release notes link it. FlockFlasher shows it before it writes a Jetson image.
    Devices that update over the air get it inside the bundle (WP-6.8).
 3. **IronFlockOS mirrors NVIDIA's sources.** Each Jetson release puts NVIDIA's
    `public_sources.tbz2` of its L4T version, and the `libnvidia-container` source of its
-   tag, on the download server (`flockos/sources/l4t-<version>/`). This is IronFlock's
+   tag, on the download server (`ironflockos/sources/l4t-<version>/`). This is IronFlock's
    own source offer. Passing on NVIDIA's offer (GPLv2 section 3(c)) is allowed only for
    noncommercial distribution. The same mirror holds FreeRTOS for the capsule's offer
    (WP-6.8).

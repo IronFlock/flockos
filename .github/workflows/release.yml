@@ -1,15 +1,33 @@
 # Release of IronFlockOS: the merge of a release pull request (`just
-# release-patch`: version bump, title `release flockos v<version>`) builds
+# release-patch`: version bump, title `release ironflockos v<version>`) builds
 # every image, signs the RAUC bundles in Cloud KMS, publishes images, bundles
 # and the signed catalog, makes the Compute Engine images of the virtual
 # devices, and sets the tag last (a tag means "devices can get it"). Nothing
 # is built, signed or published from a laptop.
 #
+# `source` decides where the images come from (ADR-0018): a release takes
+# the images its pull request's dry run built, when build/reuse.sh proves
+# that run built the release commit's tree, and `build` builds them only
+# when it cannot; the job summary says which and why. A dry run builds, has
+# the harness attest the manifest of its build (`attest-build`) and checks
+# its own images as a release would take them (`would-reuse`).
+#
 # `build` builds every image as a release build (build.yml), `sign` gives
-# the bundles their release signature (WP-1.6). The stage, e2e and promote
-# jobs (WP-2.6) slot in after `sign`, each `needs` the one before, and
-# `sources` (the release's source code) between stage and promote; vm-images
-# (ADR-0010) follows promote, and `tag` needs both.
+# the bundles their release signature (WP-1.6), one job per image, each
+# uploading its image's files as the artifact signed-<mode>-<image>. The
+# stage, e2e and promote jobs (WP-2.6) slot in after `sign`, each `needs` the
+# one before, and `sources` (the release's source code) between stage and
+# promote; vm-images (ADR-0010) follows promote, and `tag` needs both. Each
+# job downloads only what it needs: attest and e2e one image each, stage
+# every image once, promote only the list of hashes and sizes stage made.
+#
+# Every test runs before the merge (ADR-0019): a release that reuses its pull
+# request's images only releases them, and skips e2e; that pull request's dry
+# run booted its image of amd64-efi base. A release that builds its images,
+# because it cannot reuse them, runs e2e on its image of amd64-efi base
+# before it publishes, as nobody has booted that build. The other release
+# images are published without a test of their own bytes either way; their
+# development builds are tested in the pull request.
 #
 # A no-release merge starts nothing: `paths` holds only VERSION, and when a
 # no-release pull request touches it anyway the jobs are skipped by its merge
@@ -55,6 +73,10 @@ jobs:
       # left to do); dry-run: build, publish nothing.
       mode: ${{ steps.mode.outputs.mode }}
       tag: ${{ steps.mode.outputs.tag }}
+      # The release's images (RELEASE_IMAGES in build/release.conf), for the
+      # matrices of sign and attest.
+      images: ${{ steps.images.outputs.images }}
+      attest: ${{ steps.images.outputs.attest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,13 +105,141 @@ jobs:
         run: |
           mv .harness "$RUNNER_TEMP/harness"
           "$RUNNER_TEMP/harness/scripts/release.sh" mode
+      - name: the release's images
+        id: images
+        run: |
+          . build/lib.sh
+          load_conf build/release.conf
+          # shellcheck disable=SC2086 # a space-separated list of image names
+          images=$(printf '%s\n' $RELEASE_IMAGES)
+          echo "images=$(jq -Rnc '[inputs]' <<<"$images")" >> "$GITHUB_OUTPUT"
+          # The installer has no bundle.
+          echo "attest=$(jq -Rnc '{include: [inputs | {image: ., subjects: (if endswith("-installer") then "*.img.gz" else "*.img.gz\n*.raucb" end)}]}' <<<"$images")" >> "$GITHUB_OUTPUT"
+
+  # Where the images come from (ADR-0018, docs/release.md "Reused images").
+  # A release looks for the dry run of its pull request (build/reuse.sh
+  # find): the pull request merged as this commit, its newest successful ci
+  # run, that run's manifest of its build with the harness's attestation of
+  # it, made in that run for that pull request at a merge commit whose tree
+  # is this commit's, and every image's artifact, which it downloads and
+  # checks file by file against the manifest. Anything it cannot prove, or
+  # any error, and the release builds as before. A dry run always builds.
+  # The lookup runs only while the repository variable IRONFLOCKOS_REUSE is
+  # true; anything else is a build. Each step of the lookup has a timeout and
+  # may fail, the job's timeout is above their sum, and when the job fails
+  # all the same, build runs and sign takes the built images.
+  source:
+    needs: [verify]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.decide.outputs.reuse }}
+      run-id: ${{ steps.decide.outputs.run-id }}
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the pull request's dry run (release only, while IRONFLOCKOS_REUSE is true)
+        id: lookup
+        if: env.MODE == 'release' && vars.IRONFLOCKOS_REUSE == 'true'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: build/reuse.sh find "$COMMIT" "$RUNNER_TEMP/reuse"
+      - name: its images
+        id: download
+        if: steps.lookup.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 20
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-image-*
+          path: dl
+          run-id: ${{ steps.lookup.outputs.run-id }}
+          github-token: ${{ github.token }}
+      - name: every file as the manifest lists it
+        id: files
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          mkdir images
+          for d in dl/release-image-*; do mv "$d" "images/ironflockos-${d#dl/release-image-}"; done
+          build/reuse.sh files "$RUNNER_TEMP/reuse/build.tsv" images
+          cp "$RUNNER_TEMP/reuse/build.tsv" build.tsv
+      # The verified manifest goes to the sign jobs under a name of its own,
+      # so that it never meets the manifest of a build.
+      - name: the verified manifest, for the sign jobs
+        id: keep
+        if: steps.files.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-reused-manifest
+          path: build.tsv
+          if-no-files-found: error
+          retention-days: 7
+      - name: reuse or build
+        id: decide
+        if: always()
+        env:
+          SWITCH: ${{ vars.IRONFLOCKOS_REUSE }}
+          LOOKUP: ${{ steps.lookup.outcome }}
+          DOWNLOAD: ${{ steps.download.outcome }}
+          FILES: ${{ steps.files.outcome }}
+          KEEP: ${{ steps.keep.outcome }}
+          WHY: ${{ steps.lookup.outputs.why }}
+          RUN: ${{ steps.lookup.outputs.run-id }}
+          PR: ${{ steps.lookup.outputs.pr }}
+          BUILT: ${{ steps.lookup.outputs.commit }}
+          THIS_RUN: ${{ github.run_id }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$MODE" != release ]; then
+            why="a dry run builds its images"
+          elif [ "$SWITCH" != true ]; then
+            why="reuse is switched off (the repository variable IRONFLOCKOS_REUSE is not true)"
+          elif [ "$LOOKUP" != success ]; then
+            why=${WHY:-the lookup failed (see its log)}
+          elif [ "$DOWNLOAD" != success ]; then
+            why="the images of run $RUN did not download"
+          elif [ "$FILES" != success ]; then
+            why="the images of run $RUN are not the files its manifest lists"
+          elif [ "$KEEP" != success ]; then
+            why="the verified manifest did not upload"
+          else
+            why=""
+          fi
+          if [ -z "$why" ]; then
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "run-id=$RUN" >> "$GITHUB_OUTPUT"
+            echo "**Images: reused** from [run $RUN]($SERVER/$REPO/actions/runs/$RUN) of pull request #$PR, which built $BUILT, the tree of this commit (ADR-0018)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "reuse=false" >> "$GITHUB_OUTPUT"
+            echo "run-id=$THIS_RUN" >> "$GITHUB_OUTPUT"
+            echo "**Images: built** in this run: $why." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # Every image as a release build (build.yml): the images trust the IronFlockOS
   # root CA, and each bundle is sealed with a throwaway key of its build. No
-  # job of the build holds the release identity.
+  # job of the build holds the release identity. Skipped when the release
+  # reuses its pull request's images; it runs when source failed.
   build:
-    needs: [verify]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    needs: [verify, source]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
@@ -97,48 +247,182 @@ jobs:
       signing: release
       prefix: release-image
 
-  # The release signature (docs/signing.md). Only a release run gets the
-  # workload identity flockos-release: the pool grants it to a push of
-  # release.yml on main (a release merge) and to runs on v* tags. This job
-  # re-signs every bundle with the bundle signer in Cloud KMS through PKCS#11
-  # and checks it against the IronFlockOS root CA (build/sign-bundles.sh). A dry
-  # run does the same with a throwaway stand-in for the signer.
-  sign:
-    needs: [verify, build]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+  # The manifest of the build (build/reuse.sh manifest): every file of every
+  # image as built, by sha256 and size, from the build's lists.
+  manifest:
+    needs: [verify, source, build]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write
-    env:
-      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: files-release-image-*
+          path: lists
+          merge-multiple: true
+      - name: the manifest
+        run: |
+          build/reuse.sh manifest lists > build.tsv
+          wc -l build.tsv
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-build-manifest
+          path: build.tsv
+          if-no-files-found: error
+          retention-days: 3
+
+  # Release pull requests only: the harness attests the manifest, in this
+  # run, for this pull request, at its merge commit. That attestation is what
+  # the release run checks before it reuses these images.
+  attest-build:
+    needs: [verify, manifest]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.manifest.result == 'success' && needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request' }}
+    uses: IronFlock/workflows/.github/workflows/attest-provenance.yml@v1
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      artifact: release-build-manifest
+      subject-path: build.tsv
+      dry-run: false
+
+  # Release pull requests only: the check the release run makes, on this run
+  # (build/reuse.sh check, then every file against the manifest). It fails
+  # the dry run when this run's images would not verify.
+  would-reuse:
+    needs: [verify, attest-build]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.attest-build.result == 'success' && needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: this run, as the release run checks the run it reuses
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+          PR: ${{ github.event.pull_request.number }}
+          COMMIT: ${{ github.sha }}
+        run: build/reuse.sh check "$RUN" "$PR" "$COMMIT" "$RUNNER_TEMP/reuse"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
           pattern: release-image-*
           path: dl
-      - name: one directory per image, as the build left it
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+      - name: every file as the manifest lists it
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMIT: ${{ github.sha }}
         run: |
-          mkdir out
-          for d in dl/release-image-*; do mv "$d" "out/flockos-${d#dl/release-image-}"; done
-          ls -l out/*/
+          mkdir images
+          for d in dl/release-image-*; do mv "$d" "images/ironflockos-${d#dl/release-image-}"; done
+          build/reuse.sh files "$RUNNER_TEMP/reuse/build.tsv" images
+          # The release commit will have the head's tree when the pull
+          # request is up to date with main, as the ruleset requires.
+          if [ "$(git -C . cat-file -t "$HEAD_SHA" 2>/dev/null)" = commit ] || git fetch -q --depth=1 origin "$HEAD_SHA"; then
+            if [ "$(git rev-parse "$HEAD_SHA^{tree}")" = "$(git rev-parse "$COMMIT^{tree}")" ]; then
+              echo "**Images: a release of this pull request would reuse them.**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "**Images: a release would build them anew**: the pull request is not up to date with main." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+  # The release signature (docs/signing.md). Only a release run gets the
+  # workload identity ironflockos-release: the pool grants it to a push of
+  # release.yml on main (a release merge) and to runs on v* tags. One job per
+  # image: it re-signs the image's bundle with the bundle signer in Cloud KMS
+  # through PKCS#11 and checks it against the IronFlockOS root CA
+  # (build/sign-bundles.sh), then against the keyring the image itself
+  # carries (build/verify-bundles.sh, ADR-0019), and uploads the image's
+  # files as signed-<mode>-<image>, which every later job takes. The
+  # installer has no bundle and passes through as it is. A dry run does the
+  # same with a throwaway stand-in for the signer, whose bundles the image's
+  # keyring must refuse.
+  sign:
+    name: sign (${{ matrix.image }})
+    needs: [verify, source, manifest]
+    # After the manifest of this run's build, or without it when the
+    # release reuses its pull request's images (no build, no manifest job).
+    # Once source has decided to reuse, a sign job cannot fall back to a
+    # build: a download that fails here fails the release.
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.manifest.result == 'success' || ((needs.source.result == 'success' && needs.source.outputs.reuse == 'true') && needs.manifest.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.verify.outputs.images) }}
+    env:
+      MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      IMAGE: ${{ matrix.image }}
+      BUNDLE: ${{ !endsWith(matrix.image, '-installer') }}
+      # This run reuses the images source verified (the build was skipped).
+      REUSED: ${{ needs.source.result == 'success' && needs.source.outputs.reuse == 'true' && needs.manifest.result == 'skipped' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The manifest (this run's build's, or the reused one source
+      # verified), and the image as built: by this run, or by the pull
+      # request's run that source verified.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
+        with:
+          name: ${{ env.REUSED == 'true' && 'release-reused-manifest' || 'release-build-manifest' }}
+          path: manifest
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 20
+        with:
+          name: release-image-${{ matrix.image }}
+          path: out/ironflockos-${{ matrix.image }}
+          run-id: ${{ env.REUSED == 'true' && needs.source.outputs.run-id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: every file as the manifest lists it
+        run: build/reuse.sh files manifest/build.tsv out "$IMAGE"
       - name: authenticate the bundle signer (release only)
-        if: env.MODE == 'release'
+        if: env.MODE == 'release' && env.BUNDLE == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-release@record-1283.iam.gserviceaccount.com
-      - name: sign the bundles (${{ env.MODE }})
-        run: build/sign-in-builder.sh "$MODE" out
-      - name: upload the signed images and bundles
+          service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
+      # Then the bundle as signed against the keyring its image carries
+      # (build/verify-bundles.sh), which unpacks the image on the runner's
+      # second disk.
+      - name: sign the bundle (${{ env.MODE }})
+        if: env.BUNDLE == 'true'
+        env:
+          IRONFLOCKOS_WORK: /mnt/ironflockos-sign
+        run: |
+          sudo mkdir -p "$IRONFLOCKOS_WORK"
+          sudo chown "$(id -u):$(id -g)" "$IRONFLOCKOS_WORK"
+          build/sign-in-builder.sh "$MODE" out
+      - name: the installer has no bundle
+        if: env.BUNDLE != 'true'
+        run: |
+          if compgen -G "out/ironflockos-$IMAGE/*.raucb" >/dev/null; then echo "::error::$IMAGE has a bundle"; exit 1; fi
+          ls -l "out/ironflockos-$IMAGE"
+      - name: upload the image's files as signed
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out/
+          name: signed-${{ env.MODE }}-${{ matrix.image }}
+          path: out/ironflockos-${{ matrix.image }}/
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -149,18 +433,23 @@ jobs:
   # never hold the identity a verifier pins (docs/signing.md). Before stage,
   # so nothing is published without it. A dry run only checks the files.
   attest:
+    name: attest (${{ matrix.image }})
     needs: [verify, sign]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
+    # One call per image, each downloading only that image's files
+    # (signed-<mode>-<image>, 1 to 2.5 GB), in parallel. The harness takes the
+    # files themselves; with digests it would need none of them.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.attest) }}
     uses: IronFlock/workflows/.github/workflows/attest-provenance.yml@v1
     permissions:
       contents: read
       id-token: write
       attestations: write
     with:
-      artifact: release-${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
-      subject-path: |
-        */*.img.gz
-        */*.raucb
+      artifact: signed-${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}-${{ matrix.image }}
+      subject-path: ${{ matrix.subjects }}
       dry-run: ${{ needs.verify.outputs.mode != 'release' }}
 
   # The release images as published, in QEMU (test/qemu/run.py, amd64-efi
@@ -170,9 +459,12 @@ jobs:
   # signature the image's keyring (the IronFlockOS root CA) must accept, and
   # falls back. A dry run's bundles carry the stand-in's signature, which no
   # release image accepts: it boots and reboots only.
+  # Only for images this run built (ADR-0019): a run that reuses its pull
+  # request's images skips it, as that pull request's dry run booted the same
+  # bytes; a run that built them, because it could not reuse, boots them here.
   e2e:
-    needs: [verify, sign]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    needs: [verify, source, sign]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -186,12 +478,10 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out
+          name: signed-${{ env.MODE }}-amd64-efi-base
+          path: out/ironflockos-amd64-efi-base
       - name: install QEMU, OVMF and mtools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 qemu-utils ovmf mtools
+        run: build/ci-apt.sh qemu-system-x86 qemu-utils ovmf mtools
       - name: give the runner KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules >/dev/null
@@ -204,28 +494,28 @@ jobs:
           docker save -o "$RUNNER_TEMP/hello-world.tar" hello-world:latest
       - name: QEMU test of the release image (${{ env.MODE }})
         run: |
-          sudo mkdir -p /mnt/flockos-qemu
-          sudo chown "$(id -u):$(id -g)" /mnt/flockos-qemu
+          sudo mkdir -p /mnt/ironflockos-qemu
+          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-qemu
           only=()
           [ "$MODE" = release ] || only=(--only boot)
           python3 -I test/qemu/run.py --target amd64-efi --variant base "${only[@]}" --secure-boot \
-            --work /mnt/flockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
+            --work /mnt/ironflockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar"
       - name: console and shell logs
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-logs-${{ env.MODE }}
           path: |
-            /mnt/flockos-qemu/console.log
-            /mnt/flockos-qemu/shell.log
+            /mnt/ironflockos-qemu/console.log
+            /mnt/ironflockos-qemu/shell.log
           if-no-files-found: ignore
           retention-days: 7
 
   # The signed release to the staging tree, as the publisher identity
-  # (flockos-publisher: the IronFlockOS trees of the download bucket only).
+  # (ironflockos-publisher: the IronFlockOS trees of the download bucket only).
   stage:
     needs: [verify, sign, attest]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && needs.attest.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -238,16 +528,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Every image's files as signed, one artifact each, side by side.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out
+          pattern: signed-${{ env.MODE }}-*
+          path: dl
+      - name: one directory per image
+        run: |
+          mkdir out
+          for d in dl/signed-"$MODE"-*; do mv "$d" "out/ironflockos-${d#dl/signed-"$MODE"-}"; done
+          ls -l out/*/
       - name: authenticate the publisher (release only)
         if: env.MODE == 'release'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: stage (${{ env.MODE }})
@@ -255,14 +551,13 @@ jobs:
       # What the GitHub Release carries besides the catalog, kept apart from
       # the images: the assets job then downloads a few hundred kilobytes,
       # not every image and bundle (v0.10.0's assets job timed out on that).
-      # Also the source packages of every image, for the sources job.
-      - name: the release's checksums, SBOMs and source packages
+      # Also the source packages of every image, for the sources job, and
+      # what the catalog reads, for the promote job: each file's sha256 and
+      # size (files.tsv) and each image's small files (catalog/).
+      - name: the release's checksums, SBOMs, source packages and catalog input
         run: |
-          mkdir meta
-          build/publish.sh sums out > meta/SHA256SUMS
-          cp out/*/*.cdx.json meta/
-          cat out/*/*.sources.tsv | LC_ALL=C sort -u > meta/sources.tsv
-          ls -l meta
+          build/publish.sh meta out meta
+          ls -lR meta
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-meta-${{ env.MODE }}
@@ -273,14 +568,14 @@ jobs:
   # The release's source code (docs/release.md, "Source code"): apt in the
   # build container finds every file of every source package of the images
   # (build/sources.sh plan; release/sources names those outside the
-  # archives). The files the pool flockos/sources/ lacks go there, and the
+  # archives). The files the pool ironflockos/sources/ lacks go there, and the
   # index SOURCES goes to the staging tree, which promote publishes with the
   # images (build/publish.sh sources). As the publisher. A dry run looks up
   # every source package the same way, so one without source fails it, and
   # uploads nothing.
   sources:
     needs: [verify, stage]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.stage.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -307,23 +602,26 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: publish the sources (${{ env.MODE }})
         run: build/publish.sh sources sources.plan "$(tr -d '[:space:]' < VERSION)"
 
-  # The live release: the staged files to flockos/<version>/, the release
-  # notes (release-notes/*.md) to flockos/release-notes.json, then the
+  # The live release: the staged files to ironflockos/<version>/, the release
+  # notes (release-notes/*.md) to ironflockos/release-notes.json, then the
   # catalog (tools/catalog), built on the published one with this release on
   # the test channel (the first release is production too), signed with the
-  # catalog key in Cloud KMS as flockos-release, and published last. Then
+  # catalog key in Cloud KMS as ironflockos-release, and published last. Then
   # every file and the catalog must answer through the download proxy, or
   # there is no tag. A dry run signs with a throwaway key and publishes
   # nothing.
+  # After e2e: a run that built its images needs it to have succeeded, a run
+  # that reused them needs it skipped (ADR-0019). Anything else stops the
+  # release before it publishes.
   promote:
-    needs: [verify, stage, e2e, sources]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    needs: [verify, source, stage, e2e, sources]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.stage.result == 'success' && needs.sources.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && ((needs.source.result == 'success' && needs.source.outputs.reuse == 'true' && needs.e2e.result == 'skipped') || ((needs.source.result != 'success' || needs.source.outputs.reuse != 'true') && needs.e2e.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -336,10 +634,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The catalog reads the hashes and sizes stage made, not the files.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out
+          name: release-meta-${{ env.MODE }}
+          path: meta
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tools/catalog/go.mod
@@ -348,7 +647,7 @@ jobs:
         run: |
           # The bucket's public face, not the proxy: a 404 here means there is no catalog yet.
           code=$(curl -sS -o previous.json -w '%{http_code}' --retry 5 \
-            https://storage.googleapis.com/ironflock-downloads/flockos/manifest.json)
+            https://storage.googleapis.com/ironflock-downloads/ironflockos/manifest.json)
           case "$code" in
             200) echo "PREVIOUS=previous.json" >> "$GITHUB_ENV" ;;
             404) rm -f previous.json; echo "no published catalog: this is the first release" ;;
@@ -359,15 +658,15 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
       - name: build and sign the catalog (${{ env.MODE }})
         run: |
           . build/lib.sh
           load_conf build/release.conf
           version=$(tr -d '[:space:]' < VERSION)
           if [ "$MODE" = release ]; then
-            [ -f pki/flockos-catalog.pub ] || { echo "::error::pki/flockos-catalog.pub is missing: tools/release-setup.sh"; exit 1; }
-            pub=$PWD/pki/flockos-catalog.pub
+            [ -f pki/ironflockos-catalog.pub ] || { echo "::error::pki/ironflockos-catalog.pub is missing: tools/release-setup.sh"; exit 1; }
+            pub=$PWD/pki/ironflockos-catalog.pub
             signer=(-kms-key "$CATALOG_KMS_KEY")
           else
             openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/catalog-key.pem"
@@ -376,12 +675,12 @@ jobs:
             signer=(-key-file "$RUNNER_TEMP/catalog-key.pem")
           fi
           previous=()
-          if [ -n "${PREVIOUS:-}" ] && [ -f pki/flockos-catalog.pub ]; then
-            previous=(-previous "$PWD/$PREVIOUS" -pubkey "$PWD/pki/flockos-catalog.pub")
+          if [ -n "${PREVIOUS:-}" ] && [ -f pki/ironflockos-catalog.pub ]; then
+            previous=(-previous "$PWD/$PREVIOUS" -pubkey "$PWD/pki/ironflockos-catalog.pub")
           fi
           cd tools/catalog
-          go run . build -dir ../../out -repo ../.. -version "$version" -channel test \
-            -url "$DL_BASE/flockos/$version" -min-agent "$CATALOG_MIN_AGENT" \
+          go run . build -dir ../../meta/catalog -files ../../meta/files.tsv -repo ../.. -version "$version" -channel test \
+            -url "$DL_BASE/ironflockos/$version" -min-agent "$CATALOG_MIN_AGENT" \
             -boards ../../release/boards.json "${previous[@]}" -o ../../payload.json
           go run . sign -payload ../../payload.json "${signer[@]}" -pubkey "$pub" -o ../../manifest.json
           go run . verify -pubkey "$pub" ../../manifest.json >/dev/null
@@ -401,7 +700,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: promote, publish the catalog, check (${{ env.MODE }})
@@ -418,16 +717,16 @@ jobs:
   # the virtual-device-manager's IronFlockOS VMs, amd64-efi base and nvidia and
   # arm64-efi base (GCE_IMAGES in build/release.conf; no real-time kernel for
   # VMs). Each is made from the published image, which it must match by
-  # SHA256SUMS, into its image family flockos-<target>-<variant>, from which
+  # SHA256SUMS, into its image family ironflockos-<target>-<variant>, from which
   # the manager creates new VMs (build/gce-image.sh). After the promotion, so
   # a family never offers an unpublished release; the tag waits for them. As
-  # the publisher, which may make flockos-* images in record-1283 and nothing
+  # the publisher, which may make ironflockos-* images in record-1283 and nothing
   # else of Compute Engine (tools/release-setup.sh). A dry run makes the
   # tarballs and prints the cloud calls.
   vm-images:
     name: vm image (${{ matrix.image }})
     needs: [verify, promote]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.promote.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -445,12 +744,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The image as the build left it (signing re-signs only the bundles),
-      # and the release's SHA256SUMS, which it must match.
+      # The image as the release publishes it, and the release's SHA256SUMS,
+      # which it must match.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-image-${{ matrix.image }}
-          path: out/flockos-${{ matrix.image }}
+          name: signed-${{ env.MODE }}-${{ matrix.image }}
+          path: out/ironflockos-${{ matrix.image }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-meta-${{ env.MODE }}
@@ -460,26 +759,26 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         if: env.MODE == 'release'
       - name: the Compute Engine image of ${{ env.IMAGE }} (${{ env.MODE }})
         env:
-          FLOCKOS_WORK: /mnt/flockos-gce
+          IRONFLOCKOS_WORK: /mnt/ironflockos-gce
         run: |
-          sudo mkdir -p "$FLOCKOS_WORK"
-          sudo chown "$(id -u):$(id -g)" "$FLOCKOS_WORK"
-          build/gce-image.sh "out/flockos-$IMAGE" "$(tr -d '[:space:]' < VERSION)" meta/SHA256SUMS
+          sudo mkdir -p "$IRONFLOCKOS_WORK"
+          sudo chown "$(id -u):$(id -g)" "$IRONFLOCKOS_WORK"
+          build/gce-image.sh "out/ironflockos-$IMAGE" "$(tr -d '[:space:]' < VERSION)" meta/SHA256SUMS
 
   # Production promotion (docs/release.md): run by hand on a release's tag
   # (gh workflow run release.yml --ref v<version> -f promote-production=true).
   # The release's files are published already; the catalog's production
-  # channel moves to it, signed with the catalog key as flockos-release and
-  # published as flockos-publisher, then checked through the download proxy.
+  # channel moves to it, signed with the catalog key as ironflockos-release and
+  # published as ironflockos-publisher, then checked through the download proxy.
   # The workload identity pool gives both identities to runs on v* tags.
   production:
     needs: [verify]
-    if: needs.verify.outputs.mode == 'tag' && inputs.promote-production
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.verify.outputs.mode == 'tag' && inputs.promote-production }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -495,18 +794,18 @@ jobs:
           cache: false
       - name: the published catalog
         run: |
-          curl -fsS --retry 5 -o previous.json https://storage.googleapis.com/ironflock-downloads/flockos/manifest.json
+          curl -fsS --retry 5 -o previous.json https://storage.googleapis.com/ironflock-downloads/ironflockos/manifest.json
       - name: authenticate the catalog signer
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-release@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
       - name: move production to this release, sign
         run: |
           . build/lib.sh
           load_conf build/release.conf
           version=$(tr -d '[:space:]' < VERSION)
-          pub=$PWD/pki/flockos-catalog.pub
+          pub=$PWD/pki/ironflockos-catalog.pub
           cd tools/catalog
           go run . build -version "$version" -channel production -boards ../../release/boards.json \
             -previous ../../previous.json -pubkey "$pub" -o ../../payload.json
@@ -518,7 +817,7 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: flockos-publisher@record-1283.iam.gserviceaccount.com
+          service_account: ironflockos-publisher@record-1283.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
       - name: publish the catalog, check
         run: |
@@ -528,7 +827,7 @@ jobs:
 
   tag:
     needs: [verify, promote, vm-images]
-    if: needs.verify.outputs.mode == 'release'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.promote.result == 'success' && needs.vm-images.result == 'success' && needs.verify.outputs.mode == 'release' }}
     uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
     permissions:
       contents: read
@@ -541,11 +840,11 @@ jobs:
 
   # The GitHub Release the tag job made gets the release's checksums, SBOMs
   # and catalog (the images and bundles are on the download server; links in
-  # SHA256SUMS' names below DL_BASE/flockos/<version>/). As the release App,
+  # SHA256SUMS' names below DL_BASE/ironflockos/<version>/). As the release App,
   # like the tag: this workflow's token stays read-only.
   assets:
     needs: [verify, tag]
-    if: needs.verify.outputs.mode == 'release'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.tag.result == 'success' && needs.verify.outputs.mode == 'release' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
@@ -578,3 +877,25 @@ jobs:
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           gh release upload "v$version" --repo "$REPO" --clobber meta/SHA256SUMS catalog/manifest.json meta/*.cdx.json
+
+  # The last word on the run: every job this run's mode needs succeeded and
+  # every other was skipped (build/release-check.sh, its table). A job
+  # skipped by mistake fails the run, and so the dry run of a release pull
+  # request (ci.yml's release-build).
+  release-ok:
+    if: always()
+    needs: [verify, source, build, manifest, attest-build, would-reuse, sign, attest, e2e, stage, sources, promote, vm-images, production, tag, assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: every job ran or was skipped as this run's mode needs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          PROMOTE: ${{ inputs.promote-production }}
+        run: build/release-check.sh

@@ -9,7 +9,7 @@
 | [signing.md](signing.md) | The RAUC PKI in Cloud KMS: creating it, how releases sign, renewal |
 | [jetson-licence-review.md](jetson-licence-review.md) | What the Jetson images redistribute from NVIDIA, under which terms, what IronFlockOS does to meet them, and the questions for IronFlock's legal check |
 | [release.md](release.md) | How a release runs: build, sign, test, stage, promote, the signed catalog, the tag; the one-time setup |
-| [manifest.schema.json](manifest.schema.json) | The release catalog `dl/flockos/manifest.json` the device-agent and FlockFlasher read (ADR-0009), with an [example](manifest.example.json) |
+| [manifest.schema.json](manifest.schema.json) | The release catalog `dl/ironflockos/manifest.json` the device-agent and FlockFlasher read (ADR-0009), with an [example](manifest.example.json) |
 | [targets/amd64-efi.md](targets/amd64-efi.md), [arm64-efi.md](targets/arm64-efi.md), [rpi-arm64.md](targets/rpi-arm64.md), [jetson-orin.md](targets/jetson-orin.md) | Target notes and tested hardware |
 | [current-state-audit.md](current-state-audit.md) | Evidence: what the `buildroot/` and `cubic/` trees, the published catalog, and the sibling repos do today |
 | [adr/](adr/) | Architecture decision records |
@@ -19,7 +19,7 @@
 | ADR | Decision | Status |
 |-----|----------|--------|
 | [0001](adr/0001-debian-based-image-for-all-targets.md) | One Debian-based image pipeline for all targets; Buildroot and Cubic retired | accepted |
-| [0002](adr/0002-repo-home-ironflock-flockos.md) | Repo moves to `IronFlock/flockos`, stays public | accepted |
+| [0002](adr/0002-repo-home-ironflock-flockos.md) | Repo moves to `IronFlock/ironflockos`, stays public | accepted |
 | [0003](adr/0003-first-target-amd64-efi.md) | amd64 UEFI PCs first | accepted |
 | [0004](adr/0004-raw-image-plus-installer-usb.md) | Raw disk images everywhere, IronFlockOS installer USB for PCs | accepted |
 | [0005](adr/0005-builder-mmdebstrap-genimage.md) | mmdebstrap + genimage behind a just/shell framework | proposed |
@@ -27,12 +27,15 @@
 | [0007](adr/0007-update-mechanism-rauc-and-firmware-lanes.md) | RAUC stays the OS updater; firmware in three lanes (bundle, RAUC hooks, fwupd); alternatives compared | accepted |
 | [0008](adr/0008-jetson-orin-bsp-jetpack-7.md) | Jetson Orin on Jetson Linux r39.2.1 (JetPack 7.2.1), Ubuntu 24.04; rootfs from NVIDIA's apt repositories, BSP tarball for flashing and capsules | accepted (licence review done 2026-11-07; legal sign-off before the first Jetson release) |
 | [0009](adr/0009-phase-2-decisions-hostname-channels-firmware.md) | Phase 2: hostname from the `.flock`, release channels production and test, boot firmware with OS releases and fwupd read-only first, the catalog schema | accepted |
-| [0010](adr/0010-flockos-images-for-virtual-devices.md) | Compute Engine images of every release for the virtual-device-manager; the `.flock` of a VM through its instance metadata | accepted |
+| [0010](adr/0010-ironflockos-images-for-virtual-devices.md) | Compute Engine images of every release for the virtual-device-manager; the `.flock` of a VM through its instance metadata | accepted |
 | [0011](adr/0011-secure-boot-with-debians-signed-boot-chain.md) | The EFI targets boot Debian's signed chain (Microsoft-signed shim, Debian's GRUB and kernel), so PCs boot IronFlockOS with Secure Boot on; convenience, not tamper resistance | accepted |
-| [0012](adr/0012-the-os-is-named-ironflockos.md) | The OS is named IronFlockOS; identifiers that software matches or that are in the field keep `flockos` | accepted |
+| [0012](adr/0012-the-os-is-named-ironflockos.md) | The OS is named IronFlockOS; identifiers that software matches or that are in the field keep `flockos` (renamed by 0017) | accepted |
 | [0013](adr/0013-chrony-keeps-the-time-ptp-per-device.md) | chrony replaces systemd-timesyncd; PTP through linuxptp per device, as chrony's source (client) or served from the system clock (server) | accepted |
-| [0014](adr/0014-proxy-per-device-from-the-flockos-partition.md) | The proxy is a device setting on `/data`, taken from the FLOCKOS partition, for the agent, Docker and containerd; `ntp` for networks that block NTP | accepted |
-| [0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md) | A factory reset is requested by `factory-reset.conf` on the FLOCKOS partition and runs at the next boot: a new filesystem on `/data`, RAUC's state and on request the network settings kept, both root slots cleared of the old owner; unknown requests are refused; no failure keeps a device offline (three attempts, then it gives up; no mount stops the boot) | accepted |
-| [0016](adr/0016-network-profiles-from-the-flockos-partition.md) | NetworkManager profiles on the FLOCKOS partition (`network/<name>.nmconnection`) become the device's profiles on `/data` before NetworkManager starts, for `ironflock os install`; files NetworkManager could not read are renamed, not taken | accepted |
+| [0014](adr/0014-proxy-per-device-from-the-ironflockos-partition.md) | The proxy is a device setting on `/data`, taken from the IRONFLOCKOS partition, for the agent, Docker and containerd; `ntp` for networks that block NTP | accepted |
+| [0015](adr/0015-factory-reset-requested-on-the-ironflockos-partition.md) | A factory reset is requested by `factory-reset.conf` on the IRONFLOCKOS partition and runs at the next boot: a new filesystem on `/data`, RAUC's state and on request the network settings kept, both root slots cleared of the old owner; unknown requests are refused; no failure keeps a device offline (three attempts, then it gives up; no mount stops the boot) | accepted |
+| [0016](adr/0016-network-profiles-from-the-ironflockos-partition.md) | NetworkManager profiles on the IRONFLOCKOS partition (`network/<name>.nmconnection`) become the device's profiles on `/data` before NetworkManager starts, for `ironflock os install`; files NetworkManager could not read are renamed, not taken | accepted |
+| [0017](adr/0017-every-name-is-ironflockos.md) | Every name of the OS is ironflockos: ids, `compatible`, `os-release`, partition, downloads, device paths and units, VM images, keys and accounts (new ones in Cloud KMS and IAM); FlockFlasher and FlockAgent keep their names | accepted |
+| [0018](adr/0018-the-release-reuses-the-dry-runs-images.md) | The release reuses the images of its pull request's dry run when the harness's attestation of the build's manifest and the trees prove they are the release commit's build; otherwise it builds | accepted |
+| [0019](adr/0019-every-test-runs-before-the-merge.md) | Every test runs before the merge: a release that reuses its pull request's images skips `e2e`, and `sign` checks each bundle against the keyring in its own image; a release that builds its images tests them before it publishes; the update of a release image with a release bundle stays untested before the merge | accepted |
 
 Planned: `migration.md`, how devices of the previous OS move to IronFlockOS (a reflash).

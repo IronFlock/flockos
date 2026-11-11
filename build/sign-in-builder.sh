@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-# Run build/sign-bundles.sh in the build container (build/builder.conf).
+# Run build/sign-bundles.sh in the build container (build/builder.conf), then
+# build/verify-bundles.sh in another: every bundle as signed against the
+# keyring its image carries.
 #   sign-in-builder.sh release|dry-run [DIR]
 #
 # DIR (default out) holds the images of a release build, one directory each.
 # For release, GOOGLE_APPLICATION_CREDENTIALS names the credentials file of
 # the workload identity (google-github-actions/auth in release.yml); it is
-# mounted read-only. Always linux/amd64: Google's PKCS#11 library exists for
-# amd64 only.
+# mounted read-only into the container that signs, and only there. The check
+# reads the images' file systems, which a pull request's run may have built:
+# it gets DIR read-only and, of the repository, only the files it reads
+# (build/verify-bundles.sh, build/lib.sh, pki/). Not the whole working tree,
+# where google-github-actions/auth leaves its credentials file
+# (gha-creds-*.json, a token for the release identity). IRONFLOCKOS_WORK,
+# when set, is the scratch space of the check, which unpacks each image
+# there. Always linux/amd64: Google's PKCS#11 library exists for amd64 only.
+# A dry run hands the stand-in's CA from the first container to the check's
+# positive control through a directory of its own outside DIR, removed when
+# this script ends: nothing of the stand-in reaches DIR, and so no artifact.
+# Each container installs its packages from deb.debian.org, each apt-get call
+# with its retries limited to 5 minutes: a stalled mirror fails the job
+# instead of using up its time.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -27,8 +41,21 @@ load_conf "$here/builder.conf"
 creds=()
 if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
   [ -f "$GOOGLE_APPLICATION_CREDENTIALS" ] || die "GOOGLE_APPLICATION_CREDENTIALS names no file"
-  creds=(-v "$GOOGLE_APPLICATION_CREDENTIALS:/run/flockos/gcp-credentials.json:ro"
-    -e GOOGLE_APPLICATION_CREDENTIALS=/run/flockos/gcp-credentials.json)
+  creds=(-v "$GOOGLE_APPLICATION_CREDENTIALS:/run/ironflockos/gcp-credentials.json:ro"
+    -e GOOGLE_APPLICATION_CREDENTIALS=/run/ironflockos/gcp-credentials.json)
+fi
+scratch=()
+if [ -n "${IRONFLOCKOS_WORK:-}" ]; then
+  [ -d "$IRONFLOCKOS_WORK" ] || die "IRONFLOCKOS_WORK names no directory"
+  scratch=(-v "$(cd "$IRONFLOCKOS_WORK" && pwd):/work" -e IRONFLOCKOS_WORK=/work)
+fi
+handover_rw=() handover_ro=()
+if [ "$mode" = dry-run ]; then
+  handover=$(mktemp -d "${TMPDIR:-/tmp}/ironflockos-standin.XXXXXX")
+  trap 'rm -rf "$handover"' EXIT
+  case "$handover/" in "$out"/*) die "the stand-in's directory $handover lies in $out" ;; esac
+  handover_rw=(-v "$handover:/handover" -e IRONFLOCKOS_STANDIN_KEYRING=/handover/standin-ca.pem)
+  handover_ro=(-v "$handover:/handover:ro" -e IRONFLOCKOS_STANDIN_KEYRING=/handover/standin-ca.pem)
 fi
 
 log "signing the bundles in $out ($mode) in $BUILDER_IMAGE"
@@ -38,12 +65,31 @@ docker run --rm \
   -v "$repo:/src:ro" \
   -v "$out:/out" \
   ${creds[@]+"${creds[@]}"} \
-  -e FLOCKOS_HOST_UID="$(id -u)" \
-  -e FLOCKOS_HOST_GID="$(id -g)" \
+  ${handover_rw[@]+"${handover_rw[@]}"} \
+  -e IRONFLOCKOS_HOST_UID="$(id -u)" \
+  -e IRONFLOCKOS_HOST_GID="$(id -g)" \
   -e DEBIAN_FRONTEND=noninteractive \
   "$BUILDER_IMAGE" \
   bash -c 'set -e
-    apt-get -qq -o Acquire::Retries=5 update
-    apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
+    timeout -k 30s 5m apt-get -qq -o Acquire::Retries=5 update
+    timeout -k 30s 5m apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
       rauc openssl libengine-pkcs11-openssl curl ca-certificates >/dev/null
     exec bash /src/build/sign-bundles.sh "$1" /out' sign "$mode"
+
+log "checking the signed bundles in $out against their images' keyrings ($mode)"
+# shellcheck disable=SC2016 # expanded by the container's shell
+docker run --rm \
+  --platform linux/amd64 \
+  -v "$repo/build/verify-bundles.sh:/src/build/verify-bundles.sh:ro" \
+  -v "$repo/build/lib.sh:/src/build/lib.sh:ro" \
+  -v "$repo/pki:/src/pki:ro" \
+  -v "$out:/out:ro" \
+  ${scratch[@]+"${scratch[@]}"} \
+  ${handover_ro[@]+"${handover_ro[@]}"} \
+  -e DEBIAN_FRONTEND=noninteractive \
+  "$BUILDER_IMAGE" \
+  bash -c 'set -e
+    timeout -k 30s 5m apt-get -qq -o Acquire::Retries=5 update
+    timeout -k 30s 5m apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
+      rauc openssl e2fsprogs fdisk jq >/dev/null
+    exec bash /src/build/verify-bundles.sh "$1" /out' verify "$mode"

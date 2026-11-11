@@ -17,7 +17,7 @@ off for now to save CI time, until the Jetson work continues. Still to come:
 | A/B | NVIDIA's rootfs A/B: root slots `APP` and `APP_b`, switched through `nvbootctrl -t rootfs` by a RAUC `custom` backend (WP-6.3) |
 | Distribution | `ubuntu-noble` (`distros/ubuntu-noble`): ports.ubuntu.com, Docker's noble repository |
 | Kernel | `nvidia-l4t-kernel` 6.8.12 (`6.8.12-1021-tegra`) with NVIDIA's out-of-tree modules; Orin's GPU driver is `nvgpu` (`-nvgpu` packages; `-openrm` is Thor's) |
-| GPU in containers | `nvidia-container-toolkit` 1.19.1 from NVIDIA's `common` repository; Docker's `nvidia` runtime (device-init's bake adds it); `nv-load-gpu-libs` links the board's `libcuda` and writes the container CSVs on each boot |
+| GPU in containers | `nvidia-container-toolkit` 1.19.1 from NVIDIA's `common` repository; Docker's `nvidia` runtime (`ironflock bake` adds it); `nv-load-gpu-libs` links the board's `libcuda` and writes the container CSVs on each boot |
 | Consoles | `ttyTCU0`, 115200 8N1 (the debug header), and the display (`tty0`) |
 | Slot size | 8 GiB (`base`); only the base variant |
 | Disk | NVIDIA's NVMe layout for rootfs A/B, plus `data` (see below); written by NVIDIA's flash tools |
@@ -28,7 +28,7 @@ off for now to save CI time, until the Jetson work continues. Still to come:
 NVIDIA's repositories `https://repo.download.nvidia.com/jetson/{common,som}`,
 suite `r39.2`, go into the image's sources (`nvidia-l4t.sources`) below Ubuntu:
 for a package both have, Ubuntu's version wins. The repositories carry several
-L4T releases, so `flockos-l4t.pref` holds every `nvidia-l4t-*` binary at
+L4T releases, so `ironflockos-l4t.pref` holds every `nvidia-l4t-*` binary at
 `L4T_PACKAGE_VERSION`, the kernel's binaries at `L4T_KERNEL_VERSION` and the
 container toolkit at `L4T_CONTAINER_TOOLKIT_VERSION` (all in `target.conf`). The
 build also pins the packages `targets/jetson-orin/packages` lists on mmdebstrap's
@@ -77,7 +77,7 @@ IronFlockOS does the same:
   image id (`uuid_for rootfs-a`, which the flash package gives `APP`), and
   `rauc.slot=A`.
 - RAUC writes one image into either slot, so `rauc-post-install` runs
-  `/usr/lib/flockos/tegra-extlinux` on the slot it has just written. That
+  `/usr/lib/ironflockos/tegra-extlinux` on the slot it has just written. That
   points the slot's `APPEND` line at its own PARTUUID and bootname, as
   `rpi-cmdline` does for the Pi's `cmdline.txt`.
 
@@ -106,7 +106,7 @@ something unexpected. The partitions:
 | `data` | `/data`, to the end of the disk; GPT entry 17 (explicit: counted on from `APP_b`'s 2, it would take `A_kernel`'s 3) |
 
 The ESP keeps NVIDIA's name `esp`, because `flash.sh` makes its image only
-under that name. On the other targets that role belongs to `FLOCKOS`, so the
+under that name. On the other targets that role belongs to `IRONFLOCKOS`, so the
 build points `/boot/efi` in this target's `/etc/fstab` at `PARTLABEL=esp`.
 
 The build's image is slot A's filesystem, `<image-id>-<version>.rootfs.ext4.zst`
@@ -155,12 +155,12 @@ with `--no-flash`.
 ## Tests
 
 `just build jetson-orin base` builds the image and leaves the tree in
-`<work>/flockos-jetson-orin-base/rootfs`. On an arm64 host,
-`sudo test/image/jetson-rootfs-check.sh <work>/flockos-jetson-orin-base/rootfs`
+`<work>/ironflockos-jetson-orin-base/rootfs`. On an arm64 host,
+`sudo test/image/jetson-rootfs-check.sh <work>/ironflockos-jetson-orin-base/rootfs`
 checks it: the versions, the sources and pins, kernel, initrd and `nvgpu`,
 units and masks, the baked agent and the `nvidia` runtime. It also runs the
 tree's binaries in a chroot: dpkg and apt consistency, systemd, Docker,
-containerd, RAUC, `ironflock-init`, `nvidia-ctk` and `nvidia-container-cli`.
+containerd, RAUC, `ironflock`, `nvidia-ctk` and `nvidia-container-cli`.
 CI runs both on every pull request (`jetson-rootfs` in `ci.yml`), and makes
 the flash package from the image (`jetson-flash`, above).
 

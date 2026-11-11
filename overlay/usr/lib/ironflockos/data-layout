@@ -1,0 +1,35 @@
+#!/bin/sh
+# Create the directories of /data that IronFlockOS bind-mounts or uses
+# (master plan, section 3.2). Idempotent; runs on every boot before the bind
+# mounts of /etc/fstab.
+set -eu
+# IRONFLOCKOS_DATA, IRONFLOCKOS_VAR_LOG: for the unit tests only.
+d=${IRONFLOCKOS_DATA:-/data}
+var_log=${IRONFLOCKOS_VAR_LOG:-/var/log}
+mkdir -p "$d/ironflock" "$d/home" "$d/cache" "$d/fwupd" "$d/pstore" "$d/ironflockos" "$d/rauc" "$d/etc/ssh"
+# The apps' data, which the agent keeps under its -appsDir /apps (bound from
+# here): it outlives updates.
+mkdir -p "$d/apps"
+mkdir -p "$d/network/connections"
+chmod 0700 "$d/network/connections"
+# journald writes here once the journal is flushed; same ownership and mode
+# as a fresh /var/log/journal.
+if [ ! -d "$d/log/journal" ]; then
+  mkdir -p "$d/log/journal"
+  chgrp systemd-journal "$d/log/journal" 2>/dev/null || true
+  chmod 2755 "$d/log/journal"
+fi
+# All of /var/log lives on /data (bind mount in /etc/fstab), so logs never
+# fill the root slot, whose size is fixed. This runs before that mount, while
+# /var/log is still the slot's own: its directory skeleton, with the owners
+# and modes the packages gave it, is mirrored into /data/log. A directory a
+# newer image adds appears on its first boot; what is there is kept.
+mkdir -p "$d/log"
+if [ -d "$var_log" ] && ! mountpoint -q "$var_log" 2>/dev/null; then
+  (cd "$var_log" && find . -mindepth 1 -type d) | while IFS= read -r sub; do
+    [ -d "$d/log/$sub" ] && continue
+    mkdir -p "$d/log/$sub"
+    chown --reference="$var_log/$sub" "$d/log/$sub" 2>/dev/null || true
+    chmod --reference="$var_log/$sub" "$d/log/$sub" 2>/dev/null || true
+  done
+fi

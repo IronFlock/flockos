@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage 3: the disk image (master plan, sections 3.2 and 3.3): the FLOCKOS
+# Stage 3: the disk image (master plan, sections 3.2 and 3.3): the IRONFLOCKOS
 # partition (ESP with the boot chain and GRUB's A/B script) and slot A (ext4
 # from $ROOT), assembled by genimage, compressed for FlockFlasher.
 set -euo pipefail
@@ -50,12 +50,12 @@ source ($root)/EFI/BOOT/grub.cfg
 CFG
 render "$target_dir/grub/grub.cfg" >"$esp_dir/EFI/BOOT/grub.cfg"
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" create
-grub-editenv "$esp_dir/EFI/BOOT/grubenv" set "ORDER=A B" A_OK=1 A_TRY=0 B_OK=0 B_TRY=0 FLOCKOS_CMDLINE=
+grub-editenv "$esp_dir/EFI/BOOT/grubenv" set "ORDER=A B" A_OK=1 A_TRY=0 B_OK=0 B_TRY=0 IRONFLOCKOS_CMDLINE=
 cat >"$esp_dir/README.txt" <<'TXT'
 IronFlockOS
 ===========
 
-This is the FLOCKOS partition of an IronFlockOS disk. FlockFlasher puts the
+This is the IRONFLOCKOS partition of an IronFlockOS disk. FlockFlasher puts the
 device's .flock file here; on its first boot the device enrolls with it and
 removes it from this partition.
 
@@ -66,7 +66,7 @@ find "$esp_dir" -exec touch --date="@$SOURCE_DATE_EPOCH" {} +
 esp=$img/input/esp.vfat
 esp_kib=$(($(size_bytes "$ESP_SIZE") / 1024))
 volid=$(printf '%08x' $((SOURCE_DATE_EPOCH & 0xffffffff)))
-mkfs.vfat -F 32 -n FLOCKOS -i "$volid" --invariant -C "$esp" "$esp_kib" >/dev/null
+mkfs.vfat -F 32 -n IRONFLOCKOS -i "$volid" --invariant -C "$esp" "$esp_kib" >/dev/null
 export MTOOLS_SKIP_CHECK=1
 mmd -i "$esp" ::/EFI ::/EFI/BOOT ::/EFI/debian
 mcopy -i "$esp" -m "$esp_dir/README.txt" ::/README.txt
@@ -79,7 +79,7 @@ mcopy -i "$esp" -m "$esp_dir/EFI/debian/grub.cfg" ::/EFI/debian/
 # filesystem.
 rootfs=$img/input/rootfs.ext4
 fs_uuid=$(uuid_for rootfs-fs)
-E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH mke2fs -q -t ext4 -L flockos-root -U "$fs_uuid" \
+E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH mke2fs -q -t ext4 -L ironflockos-root -U "$fs_uuid" \
   -O ^metadata_csum_seed,^orphan_file -m 1 \
   -E "root_owner=0:0,hash_seed=$fs_uuid,lazy_itable_init=0,lazy_journal_init=0" \
   -d "$ROOT" "$rootfs" "$SLOT_SIZE"

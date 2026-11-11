@@ -32,9 +32,9 @@ slot() {
 
 @test "a slot below the limits passes quietly" {
   slot 64 16
-  run check_slot_fill "$dir/slot.ext4" flockos-test
+  run check_slot_fill "$dir/slot.ext4" ironflockos-test
   [ "$status" -eq 0 ]
-  [[ "$output" == *"flockos-test: the root slot is "*"% full"* ]]
+  [[ "$output" == *"ironflockos-test: the root slot is "*"% full"* ]]
   [[ "$output" != *"::warning"* ]] && [[ "$output" != *"::error"* ]]
 }
 
@@ -44,23 +44,23 @@ slot() {
 @test "a slot past the warning limit warns and annotates the CI run" {
   slot 64 16
   read -r pct _ _ <<<"$(slot_fill "$dir/slot.ext4")"
-  FLOCKOS_SLOT_FILL_WARN=$((pct - 1)) FLOCKOS_SLOT_FILL_MAX=$((pct + 10)) run check_slot_fill "$dir/slot.ext4" flockos-test
+  IRONFLOCKOS_SLOT_FILL_WARN=$((pct - 1)) IRONFLOCKOS_SLOT_FILL_MAX=$((pct + 10)) run check_slot_fill "$dir/slot.ext4" ironflockos-test
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::warning title=root slot filling up::flockos-test: the root slot is ${pct}% full"* ]]
+  [[ "$output" == *"::warning title=root slot filling up::ironflockos-test: the root slot is ${pct}% full"* ]]
   [[ "$output" == *"the build fails from $((pct + 10))%"* ]]
 }
 
 @test "a slot at the hard limit fails the build" {
   slot 64 16
   read -r pct _ _ <<<"$(slot_fill "$dir/slot.ext4")"
-  FLOCKOS_SLOT_FILL_WARN=$((pct - 5)) FLOCKOS_SLOT_FILL_MAX=$pct run check_slot_fill "$dir/slot.ext4" flockos-test
+  IRONFLOCKOS_SLOT_FILL_WARN=$((pct - 5)) IRONFLOCKOS_SLOT_FILL_MAX=$pct run check_slot_fill "$dir/slot.ext4" ironflockos-test
   [ "$status" -ne 0 ]
-  [[ "$output" == *"::error title=root slot nearly full::flockos-test: the root slot is ${pct}% full"* ]]
+  [[ "$output" == *"::error title=root slot nearly full::ironflockos-test: the root slot is ${pct}% full"* ]]
   [[ "$output" == *"the limit is ${pct}%"* ]]
 }
 
 @test "the defaults warn from 75% and fail from 90%" {
-  grep -qF 'warn_at=${FLOCKOS_SLOT_FILL_WARN:-75} max=${FLOCKOS_SLOT_FILL_MAX:-90}' "$repo/build/lib.sh"
+  grep -qF 'warn_at=${IRONFLOCKOS_SLOT_FILL_WARN:-75} max=${IRONFLOCKOS_SLOT_FILL_MAX:-90}' "$repo/build/lib.sh"
 }
 
 @test "every image script checks its slot after making it" {

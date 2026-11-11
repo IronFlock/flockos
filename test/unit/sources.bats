@@ -18,7 +18,7 @@ linux-signed-amd64	6.12.115+2	linux (= 6.12.115-2)
 linux-signed-amd64	6.12.115+2	linux (= 6.12.115-2)
 grub-efi-amd64-signed	1+2.12+9+deb13u2	grub2 (= 2.12-9+deb13u2)
 bash	5.2.37-2
-flockos-nvidia-modules	620.70.06-1
+ironflockos-nvidia-modules	620.70.06-1
 gcc-14	14.2.0-19	gcc-14 (= 14.2.0-19), binutils (= 2.44-3),
  glibc (= 2.41-12)
 EOF
@@ -26,11 +26,11 @@ EOF
   [ "$output" = "$(printf '%s\n' \
     'bash	5.2.37-2' \
     'binutils	2.44-3' \
-    'flockos-nvidia-modules	620.70.06-1' \
     'gcc-14	14.2.0-19' \
     'glibc	2.41-12' \
     'grub-efi-amd64-signed	1+2.12+9+deb13u2' \
     'grub2	2.12-9+deb13u2' \
+    'ironflockos-nvidia-modules	620.70.06-1' \
     'linux	6.12.115-2' \
     'linux-signed-amd64	6.12.115+2')" ]
 }
@@ -44,12 +44,12 @@ EOF
 
 @test "plan: release/sources decides for the packages outside the archives, without apt" {
   printf '%s\t%s\n' docker-ce '5:29.9.3-1~debian.13~trixie' nvidia-modprobe 620.70.06-1 \
-    flockos-nvidia-modules 620.70.06-1 >"$tmp/list"
+    ironflockos-nvidia-modules 620.70.06-1 >"$tmp/list"
   run bash "$sources" plan "$tmp/list"
   [ "$status" -eq 0 ]
   [[ "$output" == *"docker-ce	5:29.9.3-1~debian.13~trixie	-	-	-	Apache-2.0"* ]]
   [[ "$output" == *"nvidia-modprobe	620.70.06-1	upstream/nvidia-modprobe/nvidia-modprobe_620.70.06.tar.gz	https://github.com/NVIDIA/nvidia-modprobe/archive/refs/tags/620.70.06.tar.gz	-	-"* ]]
-  [[ "$output" == *"flockos-nvidia-modules	620.70.06-1	upstream/flockos-nvidia-modules/flockos-nvidia-modules_620.70.06.tar.gz	https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/620.70.06.tar.gz"* ]]
+  [[ "$output" == *"ironflockos-nvidia-modules	620.70.06-1	upstream/ironflockos-nvidia-modules/ironflockos-nvidia-modules_620.70.06.tar.gz	https://github.com/NVIDIA/open-gpu-kernel-modules/archive/refs/tags/620.70.06.tar.gz"* ]]
 }
 
 @test "plan: refuses an empty list and a line that is no source package" {
@@ -78,14 +78,14 @@ plan() {
     docker-ce 5:29.9.3-1~debian.13~trixie - - - 'Apache-2.0 (https://github.com/docker/docker-ce-packaging)'
 }
 
-@test "index: the release's SOURCES, every file under DL_BASE/flockos/sources/ and a reason for the rest" {
+@test "index: the release's SOURCES, every file under DL_BASE/ironflockos/sources/ and a reason for the rest" {
   plan >"$tmp/plan"
   run bash "$sources" index "$tmp/plan" 1.2.3
   [ "$status" -eq 0 ]
   [[ "$output" == "# IronFlockOS 1.2.3: the source code"* ]]
   [[ "$output" == *"https://github.com/IronFlock/ironflockos at the tag"*"v1.2.3"* ]]
-  [[ "$output" == *$'\nacl\t2.3.2-2\thttps://instance-registry.ironflock.com/dl/flockos/sources/debian/acl/acl_2.3.2-2.dsc\n'* ]]
-  [[ "$output" == *$'linux\t1:6.18.60-1+rpt1\thttps://instance-registry.ironflock.com/dl/flockos/sources/raspberrypi/linux/linux_6.18.60-1+rpt1.dsc'* ]]
+  [[ "$output" == *$'\nacl\t2.3.2-2\thttps://instance-registry.ironflock.com/dl/ironflockos/sources/debian/acl/acl_2.3.2-2.dsc\n'* ]]
+  [[ "$output" == *$'linux\t1:6.18.60-1+rpt1\thttps://instance-registry.ironflock.com/dl/ironflockos/sources/raspberrypi/linux/linux_6.18.60-1+rpt1.dsc'* ]]
   [[ "$output" == *$'docker-ce\t5:29.9.3-1~debian.13~trixie\t-\tApache-2.0'* ]]
   [ "$(grep -vc '^#' <<<"$output")" = 5 ]
 }
@@ -94,8 +94,8 @@ plan() {
   plan >"$tmp/plan"
   DRY_RUN=1 run bash "$publish" sources "$tmp/plan" 1.2.3
   [ "$status" -eq 0 ]
-  [[ "$output" == *"+ gcloud storage cp --recursive --no-clobber"*" gs://ironflock-downloads/flockos/sources/"* ]]
-  [[ "$output" == *"+ gcloud storage cp --quiet --cache-control=public, max-age=0 "*" gs://ironflock-downloads/staging/flockos/1.2.3/SOURCES"* ]]
+  [[ "$output" == *"+ gcloud storage cp --recursive --no-clobber"*" gs://ironflock-downloads/ironflockos/sources/"* ]]
+  [[ "$output" == *"+ gcloud storage cp --quiet --cache-control=public, max-age=0 "*" gs://ironflock-downloads/staging/ironflockos/1.2.3/SOURCES"* ]]
   [[ "$output" == *"would have uploaded 4 of the release's 4 source files"* ]]
 }
 
@@ -122,7 +122,7 @@ stand_ins() {
   cat >"$tmp/bin/gcloud" <<EOF
 #!/bin/bash
 echo "gcloud \$*" >>"$tmp/log"
-if [ "\$1 \$2" = "storage ls" ] && [ -n "$1" ]; then echo "gs://ironflock-downloads/flockos/sources/$1"; fi
+if [ "\$1 \$2" = "storage ls" ] && [ -n "$1" ]; then echo "gs://ironflock-downloads/ironflockos/sources/$1"; fi
 exit 0
 EOF
   cat >"$tmp/bin/curl" <<'EOF'
@@ -149,7 +149,7 @@ fileplan() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"uploaded 1 of the release's 2 source files"* ]]
   [ "$(grep -c 'storage cp --recursive --no-clobber' "$tmp/log")" = 1 ]
-  grep -q 'staging/flockos/1.2.3/SOURCES' "$tmp/log"
+  grep -q 'staging/ironflockos/1.2.3/SOURCES' "$tmp/log"
 }
 
 @test "publish.sh sources: an empty pool gets every file" {
@@ -179,8 +179,8 @@ fileplan() {
   # shellcheck source=build/lib.sh
   . "$repo/build/lib.sh"
   load_conf "$repo/build/release.conf"
-  f="$repo/overlay/usr/share/doc/flockos/copyright"
+  f="$repo/overlay/usr/share/doc/ironflockos/copyright"
   grep -q '^Copyright 2026 IronFlock GmbH$' "$f"
   grep -q '/usr/share/common-licenses/Apache-2.0' "$f"
-  grep -qF "$DL_BASE/flockos/<VERSION_ID>/SOURCES" "$f"
+  grep -qF "$DL_BASE/ironflockos/<VERSION_ID>/SOURCES" "$f"
 }

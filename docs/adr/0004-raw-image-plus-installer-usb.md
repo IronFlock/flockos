@@ -22,7 +22,7 @@ Alternatives considered:
 ## Decision
 
 Every artefact is a raw disk image. For PCs there is an `installer` variant: an IronFlockOS
-image whose boot runs `flockos-installer` instead of the agent. It carries the target
+image whose boot runs `ironflockos-installer` instead of the agent. It carries the target
 image as a payload, picks the internal disk by rule or on the console, writes the
 payload, transfers the `.flock` file and `installer.conf`, registers the EFI boot entry
 and powers off. FlockFlasher treats the installer like any other image. The ISO repack

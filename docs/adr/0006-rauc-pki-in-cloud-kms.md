@@ -14,22 +14,22 @@ repos already sign releases with Cloud KMS through Workload Identity Federation.
 ## Decision
 
 - An IronFlockOS **root CA** (RSA 4096 or EC P-384, 20-year validity) is created once; its
-  key lives in Cloud KMS (`ironflock-release/flockos-rauc-ca`) and is used only to
+  key lives in Cloud KMS (`ironflock-release/ironflockos-rauc-ca`) and is used only to
   issue signer certificates.
 - A **bundle signer** certificate (3-year validity, rotated before expiry) is issued
-  from the CA; its key is `ironflock-release/flockos-rauc-signer` in Cloud KMS and
+  from the CA; its key is `ironflock-release/ironflockos-rauc-signer` in Cloud KMS and
   never leaves it.
 - The device keyring `/etc/rauc/keyring.pem` contains the CA certificate, so signer
   rotation requires no device update. `system.conf` sets
   `use-bundle-signing-time=true` and `bundle-formats=verity`.
 - CI signs with `rauc bundle --cert signer.pem --key 'pkcs11:…'` through Google's
   PKCS#11 library (`RAUC_PKCS11_MODULE`, `KMS_PKCS11_CONFIG`), authenticated by WIF as
-  `flockos-release@record-1283` with `roles/cloudkms.signer`. Pull-request dry runs use
+  `ironflockos-release@record-1283` with `roles/cloudkms.signer`. Pull-request dry runs use
   an ephemeral key and embed its certificate, so PR images and release bundles are
   mutually incompatible.
 - The 2021 and 2025 certificates and keys are retired; `gs://reswarmos-certs` is
-  emptied; the key in the old flockos repo is documented as compromised.
-- The signed release catalog (`dl/flockos/manifest.json`) reuses the agent's existing
+  emptied; the key in the old ironflockos repo is documented as compromised.
+- The signed release catalog (`dl/ironflockos/manifest.json`) reuses the agent's existing
   detached-signature scheme and key infrastructure.
 
 ## Consequences
@@ -42,8 +42,8 @@ repos already sign releases with Cloud KMS through Workload Identity Federation.
 
 ## Implementation note (2026-11-04, WP-0.5)
 
-The keys live in two dedicated key rings, `flockos-rauc-ca/root` and
-`flockos-rauc/bundle-signer`, instead of `ironflock-release`: Google's PKCS#11
+The keys live in two dedicated key rings, `ironflockos-rauc-ca/root` and
+`ironflockos-rauc/bundle-signer`, instead of `ironflock-release`: Google's PKCS#11
 library needs list rights on the whole ring it signs from, and the release
 identity must not see other products' release keys or the CA. Both keys are
 HSM-protected RSA 4096 with PKCS#1 SHA-256 (RAUC signs SHA-256 digests; an

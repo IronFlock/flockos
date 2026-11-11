@@ -104,7 +104,7 @@ if [ "$BOOTLOADER" = rpi ]; then
   } >"$sources/raspberrypi.sources"
   rpi_host=${RPI_MIRROR#*://}
   rpi_host=${rpi_host%%/*}
-  pref=$WORK/flockos-raspberrypi.pref
+  pref=$WORK/ironflockos-raspberrypi.pref
   printf 'Package: *\nPin: origin %s\nPin-Priority: 100\n\nPackage: raspi-firmware firmware-brcm80211\nPin: origin %s\nPin-Priority: 990\n' \
     "$rpi_host" "$rpi_host" >"$pref"
   # shellcheck disable=SC2016 # "$1" is mmdebstrap's, the tree's path
@@ -137,7 +137,7 @@ if [ "$BOOTLOADER" = tegra ]; then
   l4t_host=${l4t_host%%/*}
   l4t_kernel_pkgs="nvidia-l4t-kernel nvidia-l4t-kernel-* nvidia-l4t-display-kernel"
   toolkit_pkgs="nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1"
-  pref=$WORK/flockos-l4t.pref
+  pref=$WORK/ironflockos-l4t.pref
   {
     printf 'Package: %s\nPin: version %s\nPin-Priority: 1001\n\n' "$l4t_kernel_pkgs" "$L4T_KERNEL_VERSION"
     printf 'Package: nvidia-l4t-*\nPin: version %s\nPin-Priority: 1001\n\n' "$L4T_PACKAGE_VERSION"
@@ -182,7 +182,7 @@ if [ "$VARIANT" = nvidia ]; then
   # newest version of every other binary of the driver (exact-version
   # dependencies, no backtracking). These pins hold every binary of NVIDIA's
   # source packages at the profile's version, in the build and on the device.
-  pref=$WORK/flockos-nvidia.pref
+  pref=$WORK/ironflockos-nvidia.pref
   {
     for p in nvidia-graphics-drivers nvidia-kmod-open nvidia-modprobe nvidia-persistenced; do
       printf 'Package: src:%s\nPin: version %s\nPin-Priority: 1001\n\n' "$p" "$NVIDIA_DRIVER_VERSION"
@@ -195,9 +195,9 @@ if [ "$VARIANT" = nvidia ]; then
   hooks+=(
     --setup-hook='mkdir -p "$1/etc/apt/preferences.d"'
     --setup-hook="copy-in $pref /etc/apt/preferences.d"
-    --customize-hook="upload $here/nvidia-modules.sh /tmp/flockos-nvidia-modules.sh"
-    --chrooted-customize-hook="bash /tmp/flockos-nvidia-modules.sh $NVIDIA_DRIVER_VERSION"
-    --customize-hook='rm -f "$1/tmp/flockos-nvidia-modules.sh"'
+    --customize-hook="upload $here/nvidia-modules.sh /tmp/ironflockos-nvidia-modules.sh"
+    --chrooted-customize-hook="bash /tmp/ironflockos-nvidia-modules.sh $NVIDIA_DRIVER_VERSION"
+    --customize-hook='rm -f "$1/tmp/ironflockos-nvidia-modules.sh"'
   )
 fi
 

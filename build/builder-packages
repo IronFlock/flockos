@@ -12,7 +12,7 @@ dosfstools
 mtools
 grub-common
 openssl
-# OpenPGP signature check of ironflock-init (build/bake.sh)
+# OpenPGP signature check of ironflock (build/bake.sh)
 sqv
 curl
 jq

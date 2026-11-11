@@ -25,7 +25,7 @@ need `SYS_TIME`, host networking and `/dev/ptp*` only to keep the OS's clock rig
 - chrony replaces systemd-timesyncd in every image. It keeps the distribution's NTP pools,
   uses the NTP servers DHCP hands out, and starts with `-s`, which restores the time of its
   last run on boards without a real-time clock, as timesyncd's clock file did.
-- `linuxptp` is in every image, off until the device's `/etc/flockos/ptp.conf`
+- `linuxptp` is in every image, off until the device's `/etc/ironflockos/ptp.conf`
   (on `/data`) names an interface. The file also sets the role, client by default.
 - **client:** `ptp4l` keeps the interface's hardware clock on the master's time and never
   becomes a master. `phc2sys` hands that time to chrony through a socket, as linuxptp's

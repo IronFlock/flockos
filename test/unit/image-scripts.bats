@@ -1,16 +1,16 @@
 #!/usr/bin/env bats
-# The image's own scripts in overlay/usr/lib/flockos, run against a temporary
+# The image's own scripts in overlay/usr/lib/ironflockos, run against a temporary
 # directory instead of a device.
 
-lib="$BATS_TEST_DIRNAME/../../overlay/usr/lib/flockos"
+lib="$BATS_TEST_DIRNAME/../../overlay/usr/lib/ironflockos"
 
 setup() { tmp=$(mktemp -d); }
 teardown() { rm -rf "$tmp"; }
 
 @test "data-layout creates the /data tree with private network profiles" {
-  FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
-  for d in ironflock home cache fwupd pstore flockos rauc etc/ssh apps network/connections log/journal; do
+  for d in ironflock home cache fwupd pstore ironflockos rauc etc/ssh apps network/connections log/journal; do
     [ -d "$tmp/$d" ]
   done
   [ "$(stat -c %a "$tmp/network/connections")" = 700 ]
@@ -20,7 +20,7 @@ teardown() { rm -rf "$tmp"; }
   mkdir -p "$tmp/varlog/journal" "$tmp/varlog/private" "$tmp/varlog/apt"
   chmod 0700 "$tmp/varlog/private"
   echo old-image-log >"$tmp/varlog/apt/history.log"
-  FLOCKOS_DATA=$tmp/data FLOCKOS_VAR_LOG=$tmp/varlog run sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp/data IRONFLOCKOS_VAR_LOG=$tmp/varlog run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
   for d in log/journal log/private log/apt; do
     [ -d "$tmp/data/$d" ]
@@ -31,24 +31,24 @@ teardown() { rm -rf "$tmp"; }
   # a later run keeps what /data/log holds and adds what a newer image brings
   echo kept >"$tmp/data/log/apt/term.log"
   mkdir -p "$tmp/varlog/newpkg"
-  FLOCKOS_DATA=$tmp/data FLOCKOS_VAR_LOG=$tmp/varlog run sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp/data IRONFLOCKOS_VAR_LOG=$tmp/varlog run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
   [ "$(cat "$tmp/data/log/apt/term.log")" = kept ]
   [ -d "$tmp/data/log/newpkg" ]
 }
 
 @test "fstab puts all of /var/log on /data" {
-  grep -qE '^/data/log +/var/log +none +bind,x-systemd.requires=flockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+  grep -qE '^/data/log +/var/log +none +bind,x-systemd.requires=ironflockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
   ! grep -q '/var/log/journal' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
 }
 
 @test "data-layout makes /data/apps, the apps' data, kept as it is" {
-  FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
   [ -d "$tmp/apps" ]
   mkdir -p "$tmp/apps/prod/my-app"
   echo kept >"$tmp/apps/prod/my-app/state"
-  FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
   [ "$(cat "$tmp/apps/prod/my-app/state")" = kept ]
 }
@@ -60,10 +60,10 @@ teardown() { rm -rf "$tmp"; }
   # A mount that fails does not stop the boot (the lifeline: the agent starts).
   [[ ",$opts," == *",nofail,"* ]]
   [[ ",$opts," == *",bind,"* ]]
-  [[ ",$opts," == *",x-systemd.requires=flockos-data-layout.service,"* ]]
+  [[ ",$opts," == *",x-systemd.requires=ironflockos-data-layout.service,"* ]]
   # nofail drops the order before local-fs.target: whoever writes under /apps
   # is ordered after the mount itself.
-  for unit in docker.service ironflock-device-agent.service flockos-enroll.service; do
+  for unit in docker.service ironflock-device-agent.service ironflockos-enroll.service; do
     [[ ",$opts," == *",x-systemd.before=$unit,"* ]]
   done
   # Never required: a failed mount keeps nothing from starting.
@@ -75,7 +75,7 @@ teardown() { rm -rf "$tmp"; }
 
 # apps_check: apps-check against $tmp/data and $tmp/apps.
 apps_check() {
-  FLOCKOS_APPS=$tmp/apps FLOCKOS_DATA=$tmp/data FLOCKOS_RUN=$tmp/run run sh "$lib/apps-check"
+  IRONFLOCKOS_APPS=$tmp/apps IRONFLOCKOS_DATA=$tmp/data IRONFLOCKOS_RUN=$tmp/run run sh "$lib/apps-check"
 }
 
 @test "apps-check: /apps bound from /data/apps passes quietly and clears an old mark" {
@@ -89,7 +89,7 @@ apps_check() {
   [ ! -e "$tmp/run/apps-not-persistent" ]
 }
 
-@test "apps-check: without /data (flockos-data-missing) it points to that note and does not fail a second time" {
+@test "apps-check: without /data (ironflockos-data-missing) it points to that note and does not fail a second time" {
   mkdir -p "$tmp/apps" "$tmp/run"
   echo "THE DATA PARTITION COULD NOT BE MOUNTED" >"$tmp/run/data-missing"
   apps_check
@@ -114,15 +114,15 @@ apps_check() {
 }
 
 @test "apps-check's unit: after the mount, before Docker and the agent, which need nothing of it" {
-  u=$BATS_TEST_DIRNAME/../../overlay/usr/lib/systemd/system/flockos-apps-check.service
+  u=$BATS_TEST_DIRNAME/../../overlay/usr/lib/systemd/system/ironflockos-apps-check.service
   grep -qx 'After=apps.mount' "$u"
   grep -qx 'Before=docker.service ironflock-device-agent.service' "$u"
-  grep -qx 'ExecStart=/usr/lib/flockos/apps-check' "$u"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/apps-check' "$u"
   grep -qx 'StandardError=journal+console' "$u"
   ! grep -qE '^(Requires|BindsTo|Requisite|RequiredBy|OnFailure|FailureAction)=' "$u"
   # Enabled on devices, masked on the installer, whose fstab has no /apps.
-  grep -qx '  systemctl --root="$ROOT" enable flockos-apps-check.service' "$BATS_TEST_DIRNAME/../../build/customize.sh"
-  grep -qx '  systemctl --root="$ROOT" mask flockos-apps-check.service' "$BATS_TEST_DIRNAME/../../build/customize.sh"
+  grep -qx '  systemctl --root="$ROOT" enable ironflockos-apps-check.service' "$BATS_TEST_DIRNAME/../../build/customize.sh"
+  grep -qx '  systemctl --root="$ROOT" mask ironflockos-apps-check.service' "$BATS_TEST_DIRNAME/../../build/customize.sh"
   ! grep -q '/apps' "$BATS_TEST_DIRNAME/../../profiles/installer/overlay/etc/fstab"
 }
 
@@ -132,44 +132,44 @@ slot_proven() {
   printf '#!/bin/sh\nprintf "%%s\\n" %s\n' "$(printf "'%s' " "${@:2}")" >"$tmp/bin/grub-editenv"
   chmod +x "$tmp/bin/grub-editenv"
   printf 'root=PARTUUID=x rauc.slot=%s rw\n' "$1" >"$tmp/cmdline"
-  PATH="$tmp/bin:$PATH" FLOCKOS_GRUBENV=$tmp/grubenv FLOCKOS_PROC_CMDLINE=$tmp/cmdline \
-    FLOCKOS_SLOT_PROVEN=$tmp/flockos/slot-proven run sh "$lib/slot-proven"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_GRUBENV=$tmp/grubenv IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline \
+    IRONFLOCKOS_SLOT_PROVEN=$tmp/ironflockos/slot-proven run sh "$lib/slot-proven"
 }
 
 @test "slot-proven: a booted slot marked good has proven itself" {
   slot_proven B A_OK=1 A_TRY=1 B_OK=1 B_TRY=0
   [ "$status" -eq 0 ]
-  [ -e "$tmp/flockos/slot-proven" ]
+  [ -e "$tmp/ironflockos/slot-proven" ]
 }
 
 @test "slot-proven: a slot on trial has not, whatever the other slot's state" {
   slot_proven B A_OK=1 A_TRY=0 B_OK=1 B_TRY=1
   [ "$status" -eq 0 ]
-  [ ! -e "$tmp/flockos/slot-proven" ]
+  [ ! -e "$tmp/ironflockos/slot-proven" ]
 }
 
 @test "slot-proven: a slot that is not good has not" {
   slot_proven A A_OK=0 A_TRY=0 B_OK=1 B_TRY=0
   [ "$status" -eq 0 ]
-  [ ! -e "$tmp/flockos/slot-proven" ]
+  [ ! -e "$tmp/ironflockos/slot-proven" ]
 }
 
 @test "slot-proven: nothing without a booted slot on the command line" {
   mkdir -p "$tmp/bin"
   printf 'root=PARTUUID=x rw\n' >"$tmp/cmdline"
-  FLOCKOS_GRUBENV=$tmp/grubenv FLOCKOS_PROC_CMDLINE=$tmp/cmdline \
-    FLOCKOS_SLOT_PROVEN=$tmp/flockos/slot-proven run sh "$lib/slot-proven"
+  IRONFLOCKOS_GRUBENV=$tmp/grubenv IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline \
+    IRONFLOCKOS_SLOT_PROVEN=$tmp/ironflockos/slot-proven run sh "$lib/slot-proven"
   [ "$status" -eq 0 ]
-  [ ! -e "$tmp/flockos/slot-proven" ]
+  [ ! -e "$tmp/ironflockos/slot-proven" ]
 }
 
 @test "fstab keeps kernel crash records on /data, so an update does not lose them" {
-  grep -qE '^/data/pstore +/var/lib/systemd/pstore +none +bind,x-systemd.requires=flockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
+  grep -qE '^/data/pstore +/var/lib/systemd/pstore +none +bind,x-systemd.requires=ironflockos-data-layout.service' "$BATS_TEST_DIRNAME/../../overlay/etc/fstab"
 }
 
 @test "a failed kernel restarts by itself: an oops and a lockup count, on every target" {
   repo="$BATS_TEST_DIRNAME/../.."
-  conf="$repo/overlay/etc/sysctl.d/60-flockos-crash-recovery.conf"
+  conf="$repo/overlay/etc/sysctl.d/60-ironflockos-crash-recovery.conf"
   for key in kernel.panic_on_oops kernel.softlockup_panic kernel.hardlockup_panic; do
     grep -qx "$key = 1" "$conf"
   done
@@ -179,21 +179,41 @@ slot_proven() {
 }
 
 @test "data-layout is idempotent and keeps what is there" {
-  FLOCKOS_DATA=$tmp sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp sh "$lib/data-layout"
   echo keep >"$tmp/home/file"
-  FLOCKOS_DATA=$tmp run sh "$lib/data-layout"
+  IRONFLOCKOS_DATA=$tmp run sh "$lib/data-layout"
   [ "$status" -eq 0 ]
   [ "$(cat "$tmp/home/file")" = keep ]
 }
 
-# enroll runs a fake ironflock-init that records its arguments.
+# enroll runs a fake ironflock that records its arguments (enroll -c FILE
+# [--shred-source] [--hostname-from-flock]) and ends as the .flock says, as
+# `ironflock enroll` does: "bad" is not accepted (exit code 4, nothing
+# changed); "agent-fails" fails the agent's step (exit code 1, the .flock
+# stays); "host-step-fails" fails a step after the agent's (exit code 1, the
+# .flock shredded with --shred-source); anything else enrolls (exit code 0;
+# the fake leaves the shredding out).
 enroll_env() {
-  mkdir -p "$tmp/esp" "$tmp/agent" "$tmp/state"
-  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
-  chmod +x "$tmp/ironflock-init"
-  export FLOCKOS_ESP=$tmp/esp FLOCKOS_AGENT_DIR=$tmp/agent FLOCKOS_STATE=$tmp/state \
-    FLOCKOS_INIT=$tmp/ironflock-init FLOCKOS_ENROLL_CONF=$tmp/enroll.conf
+  mkdir -p "$tmp/esp" "$tmp/agent" "$tmp/state" "$tmp/run"
+  cat >"$tmp/ironflock" <<'EOF'
+#!/bin/bash
+echo "$*" >>"$(dirname "$0")/init-calls"
+case "$(cat "$3" 2>/dev/null)" in
+  bad) exit 4 ;;
+  agent-fails) exit 1 ;;
+  host-step-fails)
+    case " $* " in *" --shred-source "*) rm -f "$3" ;; esac
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$tmp/ironflock"
+  export IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_AGENT_DIR=$tmp/agent IRONFLOCKOS_STATE=$tmp/state \
+    IRONFLOCKOS_IRONFLOCK=$tmp/ironflock IRONFLOCKOS_ENROLL_CONF=$tmp/enroll.conf IRONFLOCKOS_RUN=$tmp/run
 }
+
+# calls: the files the fake was called with, one per line.
+calls() { sed 's/^enroll -c \([^ ]*\).*/\1/' "$tmp/init-calls"; }
 
 @test "enroll without any .flock leaves the device unenrolled" {
   enroll_env
@@ -204,10 +224,10 @@ enroll_env() {
   [ ! -e "$tmp/state/enrolled" ]
 }
 
-@test "enroll uses the newest .flock on the FLOCKOS partition and shreds it" {
+@test "enroll uses the newest .flock on the IRONFLOCKOS partition and shreds it" {
   enroll_env
   echo old >"$tmp/esp/old.flock"
-  touch -d '2020-01-01' "$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
   echo new >"$tmp/esp/new.flock"
   echo agent >"$tmp/agent/device-config.flock"
   run bash "$lib/enroll"
@@ -216,7 +236,7 @@ enroll_env() {
   [ -s "$tmp/state/enrolled" ]
 }
 
-@test "enroll removes the other .flock files of the FLOCKOS partition once it has enrolled from one" {
+@test "enroll removes the other .flock files of the IRONFLOCKOS partition once it has enrolled from one" {
   enroll_env
   echo old >"$tmp/esp/old.flock"
   touch -t 202001010000 "$tmp/esp/old.flock"
@@ -224,7 +244,7 @@ enroll_env() {
   run bash "$lib/enroll"
   [ "$status" -eq 0 ]
   [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --shred-source --hostname-from-flock" ]
-  # The one it used is ironflock-init's to shred; the other would enroll the
+  # The one it used is ironflock's to shred; the other would enroll the
   # device again at the next boot.
   [ ! -e "$tmp/esp/old.flock" ] && [ -e "$tmp/esp/new.flock" ]
   [[ "$output" == *"removed old.flock"* ]]
@@ -251,19 +271,174 @@ enroll_env() {
   [[ "$(cat "$tmp/init-calls")" == *"--hostname-from-flock"* ]]
 }
 
-@test "enroll fails when ironflock-init fails, and does not mark the slot" {
+@test "enroll fails when ironflock fails, and does not mark the slot" {
   enroll_env
   echo x >"$tmp/esp/a.flock"
-  printf '#!/bin/bash\nexit 3\n' >"$tmp/ironflock-init"
+  printf '#!/bin/bash\nexit 3\n' >"$tmp/ironflock"
   run bash "$lib/enroll"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 3 ]
   [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: exit codes 2 and 3 end the script with them; nothing else is tried or removed" {
+  enroll_env
+  echo x >"$tmp/esp/new.flock"
+  echo y >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  for code in 2 3; do
+    printf '#!/bin/bash\necho "$*" >>%s/init-calls\nexit %s\n' "$tmp" "$code" >"$tmp/ironflock"
+    rm -f "$tmp/init-calls"
+    run bash "$lib/enroll"
+    [ "$status" -eq "$code" ]
+    [ "$(calls)" = "$tmp/esp/new.flock" ]
+    [ -e "$tmp/esp/new.flock" ] && [ -e "$tmp/esp/old.flock" ] && [ ! -e "$tmp/state/enrolled" ]
+    [[ "$output" == *"ended with exit code $code"* ]]
+  done
+}
+
+@test "enroll without ironflock in the image fails and leaves everything as it is" {
+  enroll_env
+  echo x >"$tmp/esp/a.flock"
+  rm "$tmp/ironflock"
+  # (bats takes a run that ends with 127 for a typo in the test)
+  run bash -c 'bash "$1" || echo "exit code $?"' _ "$lib/enroll"
+  [[ "$output" == *"exit code 127" ]]
+  [ -e "$tmp/esp/a.flock" ] && [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: a newest .flock that is not accepted is kept as .rejected, and the next newest enrolls" {
+  enroll_env
+  echo bad >"$tmp/esp/newest.flock"
+  echo good >"$tmp/esp/middle.flock"
+  touch -t 202101010000 "$tmp/esp/middle.flock"
+  echo old >"$tmp/esp/oldest.flock"
+  touch -t 202001010000 "$tmp/esp/oldest.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" = "$tmp/esp/newest.flock
+$tmp/esp/middle.flock" ]
+  # The bad one is kept under a name nothing takes; the one used is
+  # ironflock's to shred; the older one goes.
+  [ "$(cat "$tmp/esp/newest.flock.rejected")" = bad ] && [ ! -e "$tmp/esp/newest.flock" ]
+  [ -e "$tmp/esp/middle.flock" ] && [ ! -e "$tmp/esp/oldest.flock" ]
+  [[ "$output" == *"newest.flock on the IRONFLOCKOS partition was not accepted: kept as newest.flock.rejected"* ]]
+  [[ "$output" == *"enrolled from middle.flock"* ]]
+  [ -s "$tmp/state/enrolled" ]
+  # The next boot does not take it again.
+  rm "$tmp/init-calls" "$tmp/state/enrolled" "$tmp/esp/middle.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" = "$tmp/agent/device-config.flock" ]
+}
+
+@test "enroll: the only .flock not accepted, the agent's copy enrolls the slot" {
+  enroll_env
+  echo bad >"$tmp/esp/device.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/device.flock --shred-source --hostname-from-flock
+enroll -c $tmp/agent/device-config.flock --shred-source --hostname-from-flock" ]
+  [ -e "$tmp/esp/device.flock.rejected" ] && [ ! -e "$tmp/esp/device.flock" ]
+  [ "$(cat "$tmp/agent/device-config.flock")" = agent ]
+  [[ "$output" == *"enrolled from device-config.flock"* ]]
+  [ -s "$tmp/state/enrolled" ]
+}
+
+@test "enroll: the only .flock not accepted and no agent's copy: unenrolled, the unit fails once" {
+  enroll_env
+  echo bad >"$tmp/esp/device.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"no .flock was accepted: the device stays unenrolled"* ]]
+  [ -e "$tmp/esp/device.flock.rejected" ] && [ ! -e "$tmp/esp/device.flock" ]
+  [ ! -e "$tmp/state/enrolled" ]
+  # The next boot finds nothing to take.
+  rm "$tmp/init-calls"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stays unenrolled"* ]]
+  [ ! -e "$tmp/init-calls" ]
+}
+
+@test "enroll: the agent's own copy not accepted is left as it is" {
+  enroll_env
+  echo bad >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 4 ]
+  [ "$(cat "$tmp/agent/device-config.flock")" = bad ] && [ ! -e "$tmp/agent/device-config.flock.rejected" ]
+  [[ "$output" == *"the agent's own .flock"*"was not accepted"* ]]
+  [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: a step after the agent's fails with the newest .flock gone: the older ones go too" {
+  enroll_env
+  echo host-step-fails >"$tmp/esp/new.flock"
+  echo old >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 1 ]
+  # The agent took the newest; the next boot repeats the enrolment from its
+  # copy, not from an older .flock.
+  [ "$(calls)" = "$tmp/esp/new.flock" ]
+  [ ! -e "$tmp/esp/new.flock" ] && [ ! -e "$tmp/esp/old.flock" ]
+  [[ "$output" == *"removed old.flock"* ]]
+  [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll: the agent's step fails: the .flock files stay for the next boot, nothing else is tried" {
+  enroll_env
+  echo agent-fails >"$tmp/esp/new.flock"
+  echo old >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  echo agent >"$tmp/agent/device-config.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 1 ]
+  [ "$(calls)" = "$tmp/esp/new.flock" ]
+  [ -e "$tmp/esp/new.flock" ] && [ -e "$tmp/esp/old.flock" ]
+  [ ! -e "$tmp/state/enrolled" ]
+}
+
+@test "enroll matches .flock without regard to case, as ironflock does; dot files, folders and .rejected are not taken" {
+  enroll_env
+  echo up >"$tmp/esp/Device.FLOCK"
+  echo mixed >"$tmp/esp/other.Flock"
+  touch -t 202001010000 "$tmp/esp/other.Flock"
+  echo hidden >"$tmp/esp/.part.flock"
+  mkdir "$tmp/esp/folder.flock"
+  echo kept >"$tmp/esp/x.flock.rejected"
+  touch -t 203001010000 "$tmp/esp/.part.flock" "$tmp/esp/x.flock.rejected"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(calls)" = "$tmp/esp/Device.FLOCK" ]
+  [ ! -e "$tmp/esp/other.Flock" ] && [ -e "$tmp/esp/.part.flock" ] && [ -d "$tmp/esp/folder.flock" ]
+  [ -e "$tmp/esp/x.flock.rejected" ]
+  # The unit runs for such a file too.
+  grep -qx 'ConditionPathExistsGlob=|/boot/efi/\*.\[Ff\]\[Ll\]\[Oo\]\[Cc\]\[Kk\]' \
+    "$BATS_TEST_DIRNAME/../../overlay/usr/lib/systemd/system/ironflockos-enroll.service"
+}
+
+@test "enroll while a factory reset is to come (copy): a .flock not accepted stays, the next one enrolls, nothing is removed" {
+  enroll_env
+  echo copy >"$tmp/run/factory-reset-hold"
+  echo bad >"$tmp/esp/new.flock"
+  echo good >"$tmp/esp/old.flock"
+  touch -t 202001010000 "$tmp/esp/old.flock"
+  run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $tmp/esp/new.flock --hostname-from-flock
+enroll -c $tmp/esp/old.flock --hostname-from-flock" ]
+  [ "$(cat "$tmp/esp/new.flock")" = bad ] && [ ! -e "$tmp/esp/new.flock.rejected" ] && [ -e "$tmp/esp/old.flock" ]
+  [[ "$output" == *"stays there for the factory reset still to come"* ]]
 }
 
 @test "fwupd-shim puts the booted shim where fwupd looks for it" {
   mkdir -p "$tmp/EFI/BOOT" "$tmp/EFI/debian"
   echo shim >"$tmp/EFI/BOOT/BOOTX64.EFI"
-  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  IRONFLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
   [ "$status" -eq 0 ]
   cmp "$tmp/EFI/BOOT/BOOTX64.EFI" "$tmp/EFI/debian/shimx64.efi"
   [ ! -e "$tmp/EFI/debian/shimaa64.efi" ]
@@ -273,7 +448,7 @@ enroll_env() {
 @test "fwupd-shim covers arm64" {
   mkdir -p "$tmp/EFI/BOOT" "$tmp/EFI/debian"
   echo shim >"$tmp/EFI/BOOT/BOOTAA64.EFI"
-  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  IRONFLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
   [ "$status" -eq 0 ]
   cmp "$tmp/EFI/BOOT/BOOTAA64.EFI" "$tmp/EFI/debian/shimaa64.efi"
 }
@@ -282,11 +457,11 @@ enroll_env() {
   mkdir -p "$tmp/EFI/BOOT" "$tmp/EFI/debian"
   echo new >"$tmp/EFI/BOOT/BOOTX64.EFI"
   echo old >"$tmp/EFI/debian/shimx64.efi"
-  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  IRONFLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
   [ "$status" -eq 0 ]
   cmp "$tmp/EFI/BOOT/BOOTX64.EFI" "$tmp/EFI/debian/shimx64.efi"
   touch -d @1000 "$tmp/EFI/debian/shimx64.efi"
-  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  IRONFLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
   [ "$status" -eq 0 ]
   [ "$(stat -c %Y "$tmp/EFI/debian/shimx64.efi")" = 1000 ]
 }
@@ -294,7 +469,7 @@ enroll_env() {
 @test "fwupd-shim does nothing on a partition without the OS's folder" {
   mkdir -p "$tmp/EFI/BOOT"
   echo nvidia >"$tmp/EFI/BOOT/BOOTAA64.EFI"
-  FLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
+  IRONFLOCKOS_ESP=$tmp run sh "$lib/fwupd-shim"
   [ "$status" -eq 0 ]
   [ ! -e "$tmp/EFI/debian" ]
 }

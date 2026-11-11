@@ -1,0 +1,10 @@
+# Applies a new rt.conf from the platform as soon as it is written.
+[Unit]
+Description=IronFlockOS: watch /data/ironflockos/rt.conf
+
+[Path]
+PathChanged=/data/ironflockos/rt.conf
+Unit=ironflockos-rt-tuning-reload.service
+
+[Install]
+WantedBy=multi-user.target

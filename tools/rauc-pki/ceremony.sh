@@ -7,11 +7,11 @@
 #   tools/rauc-pki/ceremony.sh --yes      do it
 #
 # Creates (idempotent: what exists is kept):
-#   key ring flockos-rauc-ca, key root           HSM, RSA_SIGN_PKCS1_4096_SHA256
-#   key ring flockos-rauc,    key bundle-signer  HSM, RSA_SIGN_PKCS1_4096_SHA256
-#   service account flockos-release, allowed to sign with bundle-signer only,
+#   key ring ironflockos-rauc-ca, key root           HSM, RSA_SIGN_PKCS1_4096_SHA256
+#   key ring ironflockos-rauc,    key bundle-signer  HSM, RSA_SIGN_PKCS1_4096_SHA256
+#   service account ironflockos-release, allowed to sign with bundle-signer only,
 #     usable only by IronFlock/ironflockos release runs (workload identity
-#     attribute release=<repo id>:release, as device-init's signer)
+#     attribute release=<repo id>:release, as the CLI's signer)
 # then issues the root CA certificate (20 years) and the signer certificate
 # (3 years) with rauc-pki, and disables the CA key version: it is enabled
 # again only to issue the next signer certificate.
@@ -22,17 +22,17 @@ set -euo pipefail
 
 PROJECT=${PROJECT:-record-1283}
 LOCATION=${LOCATION:-europe-west1}
-CA_RING=flockos-rauc-ca
+CA_RING=ironflockos-rauc-ca
 CA_KEY=root
-SIGNER_RING=flockos-rauc
+SIGNER_RING=ironflockos-rauc
 SIGNER_KEY=bundle-signer
-SA=flockos-release
+SA=ironflockos-release
 REPO=IronFlock/ironflockos
 POOL_PROVIDER_PROJECT_NUMBER=${POOL_PROVIDER_PROJECT_NUMBER:-615643915869}
 POOL=github-pool
 YEAR=$(date -u +%Y)
-CA_PEM=pki/flockos-root-ca.pem
-SIGNER_PEM=pki/flockos-bundle-signer-$YEAR.pem
+CA_PEM=pki/ironflockos-root-ca.pem
+SIGNER_PEM=pki/ironflockos-bundle-signer-$YEAR.pem
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -75,11 +75,11 @@ done
 exists kms keys describe "$CA_KEY" --keyring "$CA_RING" "${kms[@]}" ||
   do_ "$gcloud" kms keys create "$CA_KEY" --keyring "$CA_RING" "${kms[@]}" \
     --purpose asymmetric-signing --default-algorithm rsa-sign-pkcs1-4096-sha256 --protection-level hsm \
-    --labels product=flockos,use=rauc-root-ca
+    --labels product=ironflockos,use=rauc-root-ca
 exists kms keys describe "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" ||
   do_ "$gcloud" kms keys create "$SIGNER_KEY" --keyring "$SIGNER_RING" "${kms[@]}" \
     --purpose asymmetric-signing --default-algorithm rsa-sign-pkcs1-4096-sha256 --protection-level hsm \
-    --labels product=flockos,use=rauc-bundle-signing
+    --labels product=ironflockos,use=rauc-bundle-signing
 
 echo "== the release identity"
 exists iam service-accounts describe "$sa_email" --project "$PROJECT" ||
@@ -103,11 +103,11 @@ if [ "$yes" = 1 ]; then
   fi
 fi
 if [ ! -f "$CA_PEM" ]; then
-  do_ go -C tools/rauc-pki run . ca -ca-key "$ca_version" -cn "FlockOS root CA" -years 20 -out "$repo/$CA_PEM"
+  do_ go -C tools/rauc-pki run . ca -ca-key "$ca_version" -cn "IronFlockOS root CA" -years 20 -out "$repo/$CA_PEM"
 fi
 if [ ! -f "$SIGNER_PEM" ]; then
   do_ go -C tools/rauc-pki run . issue -ca-key "$ca_version" -ca-cert "$repo/$CA_PEM" \
-    -key "$signer_version" -cn "FlockOS bundle signer $YEAR" -years 3 -out "$repo/$SIGNER_PEM"
+    -key "$signer_version" -cn "IronFlockOS bundle signer $YEAR" -years 3 -out "$repo/$SIGNER_PEM"
 fi
 do_ "$gcloud" kms keys versions disable 1 --key "$CA_KEY" --keyring "$CA_RING" "${kms[@]}"
 

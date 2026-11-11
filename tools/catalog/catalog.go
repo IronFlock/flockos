@@ -1,6 +1,6 @@
 package main
 
-// The payload of dl/flockos/manifest.json, schema 1 (docs/manifest.schema.json,
+// The payload of dl/ironflockos/manifest.json, schema 1 (docs/manifest.schema.json,
 // ADR-0009), built from a release's artifacts and the previous catalog.
 
 import (
@@ -54,7 +54,8 @@ type Image struct {
 	Payloads []string `json:"payloads,omitempty"`
 	// ModulesAlias is the image's hardware list,
 	// <image-id>-<version>.modules.alias.gz: the driver aliases of its
-	// kernels, from modules.alias and modules.builtin.modinfo (build/lib.sh
+	// kernels, from modules.alias and modules.builtin.modinfo, and their
+	// built-in drivers, from modules.builtin (build/lib.sh
 	// hardware_list), which `ironflock os install` matches a machine's disk
 	// controller and network card against. Releases up to 0.14.0 have none.
 	ModulesAlias *Artifact `json:"modules_alias,omitempty"`
@@ -122,7 +123,7 @@ type BoardDef struct {
 var (
 	versionRe = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$`)
 	buildIDRe = regexp.MustCompile(`^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-g[0-9a-f]{7,40}$`)
-	imageIDRe = regexp.MustCompile(`^flockos-([a-z0-9]+(?:-[a-z0-9]+)*)-(base|nvidia|installer)(-rt)?$`)
+	imageIDRe = regexp.MustCompile(`^ironflockos-([a-z0-9]+(?:-[a-z0-9]+)*)-(base|nvidia|installer)(-rt)?$`)
 	sha256Re  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
@@ -167,6 +168,53 @@ func artifact(path, url string) (Artifact, error) {
 	return Artifact{URL: url, SHA256: hex.EncodeToString(h.Sum(nil)), Size: n}, nil
 }
 
+// FileList is the sha256 and size of each file of a release by name, as
+// build/publish.sh files lists them (<sha256> TAB <size> TAB <name>): the
+// stage job hashes the files it uploads, so the promote job needs only this
+// list, not the images and bundles themselves.
+type FileList map[string]Artifact
+
+// readFileList reads such a list; every name once, every line complete.
+func readFileList(path string) (FileList, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	files := FileList{}
+	for i, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 3 || !sha256Re.MatchString(f[0]) || f[2] == "" || strings.Contains(f[2], "/") {
+			return nil, fmt.Errorf("%s:%d: not <sha256> <size> <name>", filepath.Base(path), i+1)
+		}
+		n, err := strconv.ParseInt(f[1], 10, 64)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("%s:%d: %q is not a size in bytes", filepath.Base(path), i+1, f[1])
+		}
+		if _, ok := files[f[2]]; ok {
+			return nil, fmt.Errorf("%s:%d: %s twice", filepath.Base(path), i+1, f[2])
+		}
+		files[f[2]] = Artifact{SHA256: f[0], Size: n}
+	}
+	return files, nil
+}
+
+// artifactOf is a release file as the catalog names it: hashed from dir
+// when files is nil, else taken from files. ok is false when the file does
+// not exist (an installer's bundle).
+func artifactOf(files FileList, dir, name, url string) (a Artifact, ok bool, err error) {
+	if files == nil {
+		path := filepath.Join(dir, name)
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			return Artifact{}, false, nil
+		}
+		a, err = artifact(path, url)
+		return a, err == nil, err
+	}
+	a, ok = files[name]
+	a.URL = url
+	return a, ok, nil
+}
+
 // targetArch reads ARCH from targets/<target>/target.conf.
 func targetArch(repo, target string) (string, error) {
 	fields, err := osRelease(filepath.Join(repo, "targets", target, "target.conf"))
@@ -180,13 +228,15 @@ func targetArch(repo, target string) (string, error) {
 }
 
 // buildRelease reads one release from dir: one directory per image as the
-// release pipeline leaves them (flockos-<id>/ with <id>-<version>.img.gz, its
+// release pipeline leaves them (<id>/ with <id>-<version>.img.gz, its
 // raw size and minimum disk size in <id>-<version>.sizes, its hardware list
 // <id>-<version>.modules.alias.gz, the .raucb but for the installer,
 // <id>-<version>.os-release, and for the installer <id>-<version>.payloads,
 // the image ids it carries one per line).
-// Files are published below baseURL.
-func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error) {
+// Files are published below baseURL. The images, bundles and hardware
+// lists are hashed from dir, or taken from files when it is not nil (the
+// files may then be missing from dir).
+func buildRelease(dir, repo, version, baseURL, minAgent string, files FileList) (Release, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return Release{}, err
@@ -194,12 +244,12 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 	rel := Release{MinAgent: minAgent, Images: map[string]Image{}}
 	for _, e := range entries {
 		id := e.Name()
-		if !e.IsDir() || !strings.HasPrefix(id, "flockos-") {
+		if !e.IsDir() || !strings.HasPrefix(id, "ironflockos-") {
 			continue
 		}
 		m := imageIDRe.FindStringSubmatch(id)
 		if m == nil {
-			return Release{}, fmt.Errorf("%s is not an image directory (flockos-<target>-<variant>[-rt])", id)
+			return Release{}, fmt.Errorf("%s is not an image directory (ironflockos-<target>-<variant>[-rt])", id)
 		}
 		target, variant, kernel := m[1], m[2], "std"
 		if m[3] != "" {
@@ -228,31 +278,36 @@ func buildRelease(dir, repo, version, baseURL, minAgent string) (Release, error)
 			return Release{}, err
 		}
 		img := Image{Target: target, Variant: variant, Kernel: kernel, Architecture: arch}
-		img.Image.Artifact, err = artifact(filepath.Join(dir, id, name+".img.gz"), baseURL+"/"+name+".img.gz")
+		a, ok, err := artifactOf(files, filepath.Join(dir, id), name+".img.gz", baseURL+"/"+name+".img.gz")
 		if err != nil {
 			return Release{}, err
 		}
+		if !ok {
+			return Release{}, fmt.Errorf("%s has no image (%s.img.gz)", id, name)
+		}
+		img.Image.Artifact = a
 		img.Image.RawSize, img.Image.MinDiskSize, err = diskSizes(filepath.Join(dir, id, name+".sizes"))
 		if err != nil {
 			return Release{}, fmt.Errorf("%s: %w", id, err)
 		}
-		aliases, err := artifact(filepath.Join(dir, id, name+".modules.alias.gz"), baseURL+"/"+name+".modules.alias.gz")
+		aliases, ok, err := artifactOf(files, filepath.Join(dir, id), name+".modules.alias.gz", baseURL+"/"+name+".modules.alias.gz")
+		if err == nil && !ok {
+			err = fmt.Errorf("%s.modules.alias.gz is missing", name)
+		}
 		if err != nil {
 			return Release{}, fmt.Errorf("%s: its hardware list: %w", id, err)
 		}
 		img.ModulesAlias = &aliases
-		bundlePath := filepath.Join(dir, id, name+".raucb")
-		switch _, err := os.Stat(bundlePath); {
-		case err == nil && variant == "installer":
+		bundle, ok, err := artifactOf(files, filepath.Join(dir, id), name+".raucb", baseURL+"/"+name+".raucb")
+		switch {
+		case err != nil:
+			return Release{}, err
+		case ok && variant == "installer":
 			return Release{}, fmt.Errorf("%s has a bundle; the installer has none", id)
-		case err == nil:
-			a, err := artifact(bundlePath, baseURL+"/"+name+".raucb")
-			if err != nil {
-				return Release{}, err
-			}
-			img.Bundle = &Bundle{Artifact: a, Compatible: id}
+		case ok:
+			img.Bundle = &Bundle{Artifact: bundle, Compatible: id}
 		case variant != "installer":
-			return Release{}, fmt.Errorf("%s has no bundle (%s)", id, filepath.Base(bundlePath))
+			return Release{}, fmt.Errorf("%s has no bundle (%s.raucb)", id, name)
 		}
 		if variant == "installer" {
 			img.Payloads, err = payloads(filepath.Join(dir, id, name+".payloads"))

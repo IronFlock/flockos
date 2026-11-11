@@ -6,13 +6,13 @@ Raspberry Pi 4, 400, 5, Compute Module 4 and 5, 64-bit (master plan, sections
 
 | | |
 |---|---|
-| Boot | Pi firmware (EEPROM bootloader on Pi 4 and 5), `autoboot.txt` on FLOCKOS selects the boot partition |
-| A/B | the firmware's tryboot behind a RAUC `custom` backend (`/usr/lib/flockos/rpi-tryboot`); boot partition and root slot are one slot group, updated together (see below) |
+| Boot | Pi firmware (EEPROM bootloader on Pi 4 and 5), `autoboot.txt` on IRONFLOCKOS selects the boot partition |
+| A/B | the firmware's tryboot behind a RAUC `custom` backend (`/usr/lib/ironflockos/rpi-tryboot`); boot partition and root slot are one slot group, updated together (see below) |
 | Kernel | Raspberry Pi archive: `linux-image-rpi-v8` (`kernel8.img`, Pi 4, 400, CM4) and `linux-image-rpi-2712` (`kernel_2712.img`, Pi 5, CM5); the firmware loads the one of its model and its initramfs |
 | Firmware blobs | `raspi-firmware` (`start4.elf` and friends) and the archive's `firmware-brcm80211` (WiFi with the boards' NVRAM files) |
 | Consoles | HDMI (`tty1`) and `serial0`, 115200 8N1 (GPIO 14/15 on Pi 4, the debug connector on Pi 5) |
 | Slot size | 4 GiB (`base`) |
-| Disk | GPT: `FLOCKOS` (64 MiB, `autoboot.txt`), `boot-a`, `boot-b` (256 MiB FAT each), `rootfs-a`; `rootfs-b` and `data` made on the first boot |
+| Disk | GPT: `IRONFLOCKOS` (64 MiB, `autoboot.txt`), `boot-a`, `boot-b` (256 MiB FAT each), `rootfs-a`; `rootfs-b` and `data` made on the first boot |
 | Update bundle | `rootfs.ext4` and `boot.vfat` (the boot partition) |
 | EEPROM | `rpi-eeprom` in the image; the update lane is WP-5.3 |
 
@@ -34,7 +34,7 @@ packages win, except `raspi-firmware` and `firmware-brcm80211`.
 
 ## A/B with tryboot
 
-`autoboot.txt` on FLOCKOS (mounted at `/boot/efi`) names the boot partition
+`autoboot.txt` on IRONFLOCKOS (mounted at `/boot/efi`) names the boot partition
 the firmware starts, and the one it starts once after a tryboot reboot:
 
 ```
@@ -51,10 +51,10 @@ with rootfs-b. An update goes like this:
 1. `rauc install` writes `boot.vfat` to the other boot partition and
    `rootfs.ext4` to the other root slot. The post-install handler gives the new
    boot partition's `cmdline.txt` its own root slot: the bundle's names slot A
-   (`/usr/lib/flockos/rpi-cmdline`).
+   (`/usr/lib/ironflockos/rpi-cmdline`).
 2. RAUC makes the new slot primary: the backend arms the firmware's one-shot
    tryboot flag with `vcmailbox` and records the slot as being tried
-   (`/data/rauc/flockos-rpi-tryboot.state`).
+   (`/data/rauc/ironflockos-rpi-tryboot.state`).
 3. The next reboot starts the new slot from the `[tryboot]` section. Once it is
    marked good (by the device-agent, once it reaches the platform), the backend swaps
    the two `boot_partition` values: the new slot is the primary.

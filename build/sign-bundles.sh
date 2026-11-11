@@ -17,7 +17,10 @@
 # dry-run  a throwaway stand-in for the bundle signer: the same steps without
 #          the release identity, for dry runs of release.yml and local checks.
 #          The bundles verify against the stand-in only, never against the
-#          IronFlockOS root CA.
+#          IronFlockOS root CA. With IRONFLOCKOS_STANDIN_KEYRING set, the
+#          stand-in's CA is copied there once every bundle is signed, for the
+#          positive control of build/verify-bundles.sh. That file must lie
+#          outside DIR: nothing of the stand-in may reach an artifact.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
@@ -31,9 +34,18 @@ case "$mode" in
   *) die "usage: sign-bundles.sh release|dry-run DIR" ;;
 esac
 [ -d "$dir" ] || die "usage: sign-bundles.sh release|dry-run DIR ($dir is no directory)"
+standin_out=""
+if [ "$mode" = dry-run ] && [ -n "${IRONFLOCKOS_STANDIN_KEYRING:-}" ]; then
+  standin_out=$(cd "$(dirname "$IRONFLOCKOS_STANDIN_KEYRING")" && pwd) ||
+    die "IRONFLOCKOS_STANDIN_KEYRING names no file in an existing directory"
+  standin_out=$standin_out/$(basename "$IRONFLOCKOS_STANDIN_KEYRING")
+  case "$standin_out" in
+    "$(cd "$dir" && pwd)"/*) die "IRONFLOCKOS_STANDIN_KEYRING must lie outside $dir: nothing of the stand-in may reach an artifact" ;;
+  esac
+fi
 require rauc openssl sha256sum
 load_conf "$here/release.conf"
-root_ca=$src/pki/flockos-root-ca.pem
+root_ca=$src/pki/ironflockos-root-ca.pem
 [ -f "$root_ca" ] || die "$root_ca is missing (WP-0.5: docs/signing.md)"
 
 work=$(mktemp -d)
@@ -58,7 +70,7 @@ case "$mode" in
     export KMS_PKCS11_CONFIG=$work/kmsp11.yaml RAUC_PKCS11_MODULE=$lib
     key="pkcs11:token=$KMS_TOKEN;object=$KMS_KEY"
     # The newest bundle signer certificate (pki/README.md).
-    cert=$(printf '%s\n' "$src"/pki/flockos-bundle-signer-*.pem | sort -V | tail -n 1)
+    cert=$(printf '%s\n' "$src"/pki/ironflockos-bundle-signer-*.pem | sort -V | tail -n 1)
     [ -f "$cert" ] || die "no bundle signer certificate in pki/"
     openssl x509 -in "$cert" -noout -checkend $((30 * 86400)) >/dev/null ||
       die "$(basename "$cert") expires within 30 days: issue the next one (docs/signing.md)"
@@ -124,5 +136,9 @@ for bundle in "$dir"/*/*.raucb; do
   log "$name.raucb: signed by $signer ($mode)"
 done
 [ "$n" -gt 0 ] || die "no bundles in $dir/*/"
-chown -R "${FLOCKOS_HOST_UID:-0}:${FLOCKOS_HOST_GID:-0}" "$dir"
+chown -R "${IRONFLOCKOS_HOST_UID:-0}:${IRONFLOCKOS_HOST_GID:-0}" "$dir"
+if [ -n "$standin_out" ]; then
+  cp "$keyring" "$standin_out"
+  log "the stand-in's CA for the check's positive control: $standin_out"
+fi
 log "$n bundles signed; they verify against $(openssl x509 -in "$keyring" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')"

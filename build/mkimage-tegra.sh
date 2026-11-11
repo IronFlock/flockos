@@ -23,7 +23,7 @@ grep -q "root=PARTUUID=$(uuid_for rootfs-a) " "$ROOT/boot/extlinux/extlinux.conf
 # for the firmware's ext4 reader (L4TLauncher).
 rootfs=$img/input/rootfs.ext4
 fs_uuid=$(uuid_for rootfs-fs)
-E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH mke2fs -q -t ext4 -L flockos-root -U "$fs_uuid" \
+E2FSPROGS_FAKE_TIME=$SOURCE_DATE_EPOCH mke2fs -q -t ext4 -L ironflockos-root -U "$fs_uuid" \
   -O ^metadata_csum_seed,^orphan_file -m 1 \
   -E "root_owner=0:0,hash_seed=$fs_uuid,lazy_itable_init=0,lazy_journal_init=0" \
   -d "$ROOT" "$rootfs" "$SLOT_SIZE"

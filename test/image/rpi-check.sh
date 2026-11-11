@@ -22,7 +22,7 @@ image=$1
 work=$(mktemp -d)
 dev=""
 cleanup() {
-  for m in "$work/root/proc" "$work/root" "$work/boot" "$work/flockos"; do
+  for m in "$work/root/proc" "$work/root" "$work/boot" "$work/ironflockos"; do
     mountpoint -q "$m" && umount "$m"
   done
   [ -z "$dev" ] || losetup -d "$dev"
@@ -48,22 +48,22 @@ dev=$(losetup --find --show --partscan --read-only "$work/disk.img")
 # --- layout (low-level probes: no udev needed) ------------------------------
 probe() { blkid -p -o value -s "$2" "${dev}p$1" 2>/dev/null || true; }
 layout=$(for n in 1 2 3 4; do echo "$n $(probe "$n" PART_ENTRY_NAME) $(probe "$n" TYPE)"; done)
-want=$'1 FLOCKOS vfat\n2 boot-a vfat\n3 boot-b \n4 rootfs-a ext4'
+want=$'1 IRONFLOCKOS vfat\n2 boot-a vfat\n3 boot-b \n4 rootfs-a ext4'
 if [ "$layout" = "$want" ] && [ ! -e "${dev}p5" ]; then
-  ok "GPT layout: FLOCKOS, boot-a, boot-b (empty), rootfs-a"
+  ok "GPT layout: IRONFLOCKOS, boot-a, boot-b (empty), rootfs-a"
 else
   bad "GPT layout:"$'\n'"$layout"
 fi
 root_partuuid=$(probe 4 PART_ENTRY_UUID)
 
-mkdir -p "$work/flockos" "$work/boot" "$work/root"
-mount -o ro "${dev}p1" "$work/flockos"
+mkdir -p "$work/ironflockos" "$work/boot" "$work/root"
+mount -o ro "${dev}p1" "$work/ironflockos"
 mount -o ro "${dev}p2" "$work/boot"
 mount -o ro "${dev}p4" "$work/root"
 
-# --- FLOCKOS ---------------------------------------------------------------
+# --- IRONFLOCKOS ---------------------------------------------------------------
 check "autoboot.txt: boot-a by default, boot-b on tryboot" \
-  bash -c "[ \"\$(tr '\n' ' ' <'$work/flockos/autoboot.txt')\" = '[all] tryboot_a_b=1 boot_partition=2 [tryboot] boot_partition=3 ' ]"
+  bash -c "[ \"\$(tr '\n' ' ' <'$work/ironflockos/autoboot.txt')\" = '[all] tryboot_a_b=1 boot_partition=2 [tryboot] boot_partition=3 ' ]"
 
 # --- boot-a ----------------------------------------------------------------
 for f in start4.elf fixup4.dat kernel8.img kernel_2712.img initramfs8 initramfs_2712 \
@@ -84,37 +84,39 @@ for k in kernel8.img:rpi-v8 kernel_2712.img:rpi-2712; do
 done
 
 # --- slot A ----------------------------------------------------------------
-check "os-release names flockos-rpi-arm64-base" grep -qx 'IMAGE_ID=flockos-rpi-arm64-base' "$work/root/usr/lib/os-release"
+check "os-release names ironflockos-rpi-arm64-base" grep -qx 'IMAGE_ID=ironflockos-rpi-arm64-base' "$work/root/usr/lib/os-release"
 check "/boot/firmware is empty in the slot (the files are on boot-a)" \
   bash -c "[ -d '$work/root/boot/firmware' ] && [ -z \"\$(ls -A '$work/root/boot/firmware')\" ]"
 check "RAUC: compatible, the tryboot backend, boot partitions grouped with their root slots" \
-  bash -c "c='$work/root/etc/rauc/system.conf'; grep -qx compatible=flockos-rpi-arm64-base \$c && grep -qx bootloader=custom \$c && grep -qx bootloader-custom-backend=/usr/lib/flockos/rpi-tryboot \$c && grep -qx parent=rootfs.0 \$c && grep -qx parent=rootfs.1 \$c"
+  bash -c "c='$work/root/etc/rauc/system.conf'; grep -qx compatible=ironflockos-rpi-arm64-base \$c && grep -qx bootloader=custom \$c && grep -qx bootloader-custom-backend=/usr/lib/ironflockos/rpi-tryboot \$c && grep -qx parent=rootfs.0 \$c && grep -qx parent=rootfs.1 \$c"
 for tool in rpi-tryboot rpi-cmdline rauc-post-install; do
-  check "$tool is executable" test -x "$work/root/usr/lib/flockos/$tool"
+  check "$tool is executable" test -x "$work/root/usr/lib/ironflockos/$tool"
 done
 check "the backend reads the image's autoboot.txt: slot A is primary" \
-  bash -c "[ \"\$(FLOCKOS_AUTOBOOT='$work/flockos/autoboot.txt' '$work/root/usr/lib/flockos/rpi-tryboot' get-primary)\" = A ]"
+  bash -c "[ \"\$(IRONFLOCKOS_AUTOBOOT='$work/ironflockos/autoboot.txt' '$work/root/usr/lib/ironflockos/rpi-tryboot' get-primary)\" = A ]"
 check "repart.d: rootfs-b and data come on the first boot" \
   test -f "$work/root/usr/lib/repart.d/60-data.conf"
-check "fstab mounts FLOCKOS and /data" bash -c "grep -q '^PARTLABEL=FLOCKOS ' '$work/root/etc/fstab' && grep -q '^PARTLABEL=data ' '$work/root/etc/fstab'"
+check "fstab mounts IRONFLOCKOS and /data" bash -c "grep -q '^PARTLABEL=IRONFLOCKOS ' '$work/root/etc/fstab' && grep -q '^PARTLABEL=data ' '$work/root/etc/fstab'"
 check "the apps' data is /data/apps, the mount point in the image" \
   bash -c "grep -q '^/data/apps  *[/]apps  *none  *bind,.*nofail' '$work/root/etc/fstab' && test -d '$work/root/apps'"
-for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
-  docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
-  flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
-  flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
+for unit in ironflockos-ssh-hostkeys.service ironflockos-enroll.service ssh.service \
+  docker.service NetworkManager.service chrony.service ironflockos-ptp.service ironflockos-ptp.path \
+  ironflockos-ptp4l.service ironflockos-phc2sys.service ironflockos-proxy.service ironflockos-proxy.path \
+  ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$work/root/usr/lib/systemd/system/systemd-timesyncd.service"
 check "a factory reset runs before /data is mounted, and no mount stops the boot (ADR-0015)" \
-  bash -c "test -x '$work/root/usr/lib/flockos/factory-reset' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/flockos-factory-reset.service' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/flockos-data-missing.service' && ! grep -v '^#' '$work/root/etc/fstab' | grep . | grep -v nofail"
+  bash -c "test -x '$work/root/usr/lib/ironflockos/factory-reset' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/ironflockos-factory-reset.service' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/ironflockos-data-missing.service' && ! grep -v '^#' '$work/root/etc/fstab' | grep . | grep -v nofail"
 for setting in ptp.conf proxy.conf; do
-  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$work/root/etc/flockos/$setting')\" = /data/flockos/$setting ]"
+  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$work/root/etc/ironflockos/$setting')\" = /data/ironflockos/$setting ]"
 done
 check "rauc-mark-good is masked" bash -c "[ \"\$(systemctl --root='$work/root' is-enabled rauc-mark-good.service)\" = masked ]"
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
-  test ! -e "$work/root/usr/lib/systemd/system/flockos-mark-good.service"
+  test ! -e "$work/root/usr/lib/systemd/system/ironflockos-mark-good.service"
 check "the agent is baked in" test -x "$work/root/usr/lib/ironflock/device-agent"
+check "ironflock is baked in as /usr/bin/ironflock" test -x "$work/root/usr/bin/ironflock"
+check "nothing named ironflock-init in the image" bash -c "! find '$work/root' -xdev -name '*ironflock-init*' | grep -q ."
 # shellcheck disable=SC2016 # an awk program
 check "no account has a password" awk -F: '$2 !~ /^[!*]/ { bad = 1 } END { exit bad }' "$work/root/etc/shadow"
 
@@ -125,7 +127,9 @@ check "chroot: systemd runs" in_root /usr/bin/systemctl --version
 check "chroot: Docker's CLI runs" in_root /usr/bin/docker --version
 check "chroot: RAUC runs" in_root /usr/bin/rauc --version
 check "rpi-eeprom-update is there" test -x "$work/root/usr/bin/rpi-eeprom-update"
-check "chroot: ironflock-init runs" in_root /usr/sbin/ironflock-init version
+check "chroot: ironflock runs" in_root /usr/bin/ironflock version
+check "chroot: image.json names ironflock_version, not the init_version of ironflock-init" \
+  in_root jq -e '(.ironflock_version | type == "string" and length > 0) and (has("init_version") | not)' /usr/lib/ironflock/image.json
 check "chroot: the WiFi firmware has the Pi 4's NVRAM file" \
   bash -c "ls '$work/root/usr/lib/firmware/brcm/' | grep -q 'brcmfmac43455-sdio.raspberrypi,4-model-b'"
 

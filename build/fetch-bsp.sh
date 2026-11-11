@@ -12,7 +12,7 @@
 # still list that SHA-1: a republished BSP fails the build instead of
 # slipping in.
 #
-# FLOCKOS_BSP_CONF: for the unit tests.
+# IRONFLOCKOS_BSP_CONF: for the unit tests.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 src=$(cd "$here/.." && pwd)
@@ -24,7 +24,7 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
 fi
 cache=$1
 dest=${2:-}
-load_conf "${FLOCKOS_BSP_CONF:-$src/targets/jetson-orin/bsp.conf}"
+load_conf "${IRONFLOCKOS_BSP_CONF:-$src/targets/jetson-orin/bsp.conf}"
 : "${L4T_VERSION:?}" "${BSP_URL:?}" "${BSP_HASHES_URL:?}" "${BSP_SHA1:?}" "${BSP_SHA256:?}"
 require curl sha256sum sha1sum tar
 

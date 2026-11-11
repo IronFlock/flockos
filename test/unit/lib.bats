@@ -52,8 +52,8 @@ teardown() { rm -rf "$tmp"; }
 }
 
 @test "image_id names the RAUC compatible" {
-  [ "$(image_id amd64-efi base std)" = flockos-amd64-efi-base ]
-  [ "$(image_id rpi-arm64 base rt)" = flockos-rpi-arm64-base-rt ]
+  [ "$(image_id amd64-efi base std)" = ironflockos-amd64-efi-base ]
+  [ "$(image_id rpi-arm64 base rt)" = ironflockos-rpi-arm64-base-rt ]
 }
 
 @test "the matrix axes reject unknown names" {
@@ -73,12 +73,12 @@ teardown() { rm -rf "$tmp"; }
 }
 
 @test "uuid_for derives a version-4 UUID from the image id and a name" {
-  IMAGE_ID=flockos-amd64-efi-base
+  IMAGE_ID=ironflockos-amd64-efi-base
   a=$(uuid_for rootfs-a)
   [ "$a" = "$(uuid_for rootfs-a)" ]
   [ "$a" != "$(uuid_for rootfs-b)" ]
   [[ "$a" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$ ]]
-  IMAGE_ID=flockos-rpi-arm64-base
+  IMAGE_ID=ironflockos-rpi-arm64-base
   [ "$a" != "$(uuid_for rootfs-a)" ]
 }
 
@@ -99,7 +99,7 @@ repart() {
 
 @test "min_disk_size: every partition of the device's layout at its least, 1 GiB of /data and 2 MiB for the GPT" {
   gib=$((1 << 30)) mib=$((1 << 20))
-  # amd64-efi base: FLOCKOS, two 4 GiB slots (v0.14.0's image is 4564471808 bytes raw).
+  # amd64-efi base: IRONFLOCKOS, two 4 GiB slots (v0.14.0's image is 4564471808 bytes raw).
   repart amd64-efi base
   [ "$(min_disk_size "$tmp/repart.d" 4564471808)" = $((2 * mib + 256 * mib + 8 * gib + gib)) ]
   repart arm64-efi base
@@ -107,7 +107,7 @@ repart() {
   # nvidia: two 8 GiB slots.
   repart amd64-efi nvidia
   [ "$(min_disk_size "$tmp/repart.d" 8859439104)" = $((2 * mib + 256 * mib + 16 * gib + gib)) ]
-  # The Raspberry Pi: FLOCKOS, boot-a and boot-b besides the slots.
+  # The Raspberry Pi: IRONFLOCKOS, boot-a and boot-b besides the slots.
   repart rpi-arm64 base
   [ "$(min_disk_size "$tmp/repart.d" 4900016128)" = $((2 * mib + 64 * mib + 512 * mib + 8 * gib + gib)) ]
 }
@@ -138,7 +138,7 @@ repart() {
   [[ "$output" == *"2 partitions without SizeMinBytes"* ]]
 }
 
-@test "the Compute Engine images get the same disk, rounded up to whole GiB (ADR-0008 of device-init: 10 and 18 GiB)" {
+@test "the Compute Engine images get the same disk, rounded up to whole GiB (ADR-0008 of IronFlock/ironflock-cli: 10 and 18 GiB)" {
   load_conf "$BATS_TEST_DIRNAME/../../build/release.conf"
   [ "$GCE_DATA_MIN" = 1G ]
   gib=$((1 << 30))
@@ -160,31 +160,36 @@ repart() {
   [ "$(cat "$tmp/y.sizes")" = "$(printf 'raw_size=3000\nmin_disk_size=3000')" ]
 }
 
-# kernel ROOT VERSION: a kernel's module lists as the kernel package and
-# depmod leave them: modules.alias (depmod) and modules.builtin.modinfo
-# (NUL-separated <module>.<key>=<value> records, as the kernel installs it).
+# kernel ROOT VERSION: a kernel's module lists as a 6.12 kernel package and
+# depmod leave them: modules.alias (depmod); modules.builtin.modinfo
+# (NUL-separated <module>.<key>=<value> records), which holds only the
+# aliases a built-in driver declares by name, not its device table's: no
+# line for virtio_pci or nvme; modules.builtin, the built-in drivers' paths.
 kernel() {
   local d=$1/usr/lib/modules/$2
   mkdir -p "$d"
   printf '# Aliases extracted from modules themselves.\nalias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e\nalias virtio:d00000001v* virtio_net\n' >"$d/modules.alias"
-  printf 'nvme.license=GPL\0nvme.alias=pci:v*d*sv*sd*bc01sc08i02*\0ext4.alias=fs-ext4\0ext4.description=Fourth Extended Filesystem\0of_x.alias=of:N*T*Cbrcm,bcm2835-sdhost\0' >"$d/modules.builtin.modinfo"
+  printf 'nvme.license=GPL\0nvme.description=NVM Express device driver\0ext4.alias=fs-ext4\0ext4.description=Fourth Extended Filesystem\0virtio_pci.license=GPL\0' >"$d/modules.builtin.modinfo"
+  printf 'kernel/fs/ext4/ext4.ko\nkernel/drivers/virtio/virtio_pci.ko\nkernel/drivers/nvme/host/nvme.ko\n' >"$d/modules.builtin"
 }
 
-@test "hardware_list: each kernel's module aliases, then its built-in ones from modules.builtin.modinfo, under a comment line" {
+@test "hardware_list: each kernel's alias lines, then a builtin line per built-in driver, under a comment line" {
   kernel "$tmp/root" 6.12.48+deb13-amd64
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' '# kernel 6.12.48+deb13-amd64: modules.alias and the aliases of modules.builtin.modinfo' \
+  [ "$output" = "$(printf '%s\n' \
+    '# kernel 6.12.48+deb13-amd64: alias lines of modules.alias and modules.builtin.modinfo, builtin lines of modules.builtin' \
     'alias pci:v00008086d000015B8sv*sd*bc*sc*i* e1000e' 'alias virtio:d00000001v* virtio_net' \
-    'alias pci:v*d*sv*sd*bc01sc08i02* nvme' 'alias fs-ext4 ext4' 'alias of:N*T*Cbrcm,bcm2835-sdhost of_x')" ]
+    'alias fs-ext4 ext4' 'builtin ext4' 'builtin virtio_pci' 'builtin nvme')" ]
   # The Raspberry Pi's two kernels.
   kernel "$tmp/root" 6.12.47+rpt-rpi-2712
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64 6.12.47+rpt-rpi-2712
   [ "$(grep -c '^# kernel ' <<<"$output")" = 2 ]
-  [ "$(grep -c '^alias ' <<<"$output")" = 10 ]
+  [ "$(grep -c '^alias ' <<<"$output")" = 6 ]
+  [ "$(grep -c '^builtin ' <<<"$output")" = 6 ]
 }
 
-@test "hardware_list: a kernel without modules.alias or modules.builtin.modinfo stops the build" {
+@test "hardware_list: a kernel without modules.alias, modules.builtin.modinfo or modules.builtin stops the build" {
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -ne 0 ]
   [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.alias"* ]]
@@ -195,6 +200,11 @@ kernel() {
   run hardware_list "$tmp/root" 6.12.48+deb13-amd64
   [ "$status" -ne 0 ]
   [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.builtin.modinfo"* ]]
+  kernel "$tmp/root" 6.12.48+deb13-amd64
+  rm "$tmp/root/usr/lib/modules/6.12.48+deb13-amd64/modules.builtin"
+  run hardware_list "$tmp/root" 6.12.48+deb13-amd64
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"kernel 6.12.48+deb13-amd64 has no modules.builtin in"* ]]
 }
 
 @test "the build publishes each disk image's hardware list, gzip without a name or time" {

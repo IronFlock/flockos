@@ -5,12 +5,12 @@
 # installer stick.
 
 repo="$BATS_TEST_DIRNAME/../.."
-preset="$repo/overlay/usr/lib/systemd/system-preset/10-flockos-device.preset"
+preset="$repo/overlay/usr/lib/systemd/system-preset/10-ironflockos-device.preset"
 units="$repo/overlay/usr/lib/systemd/system"
 customize="$repo/build/customize.sh"
 
-device_units="flockos-proxy.service flockos-proxy.path flockos-network-profiles.service
-  flockos-network-profiles-trial.service flockos-apps-check.service"
+device_units="ironflockos-proxy.service ironflockos-proxy.path ironflockos-network-profiles.service
+  ironflockos-network-profiles-trial.service ironflockos-apps-check.service"
 
 @test "each of these units has its preset line, and each preset line its unit" {
   for u in $device_units; do
@@ -22,8 +22,8 @@ device_units="flockos-proxy.service flockos-proxy.path flockos-network-profiles.
     [ -f "$units/$unit" ] || { echo "$unit is not a unit of the image"; return 1; }
   done <"$preset"
   # A unit without [Install] needs no line: a path unit starts it.
-  ! grep -q '^\[Install\]' "$units/flockos-proxy-reload.service"
-  grep -qx 'Unit=flockos-proxy-reload.service' "$units/flockos-proxy.path"
+  ! grep -q '^\[Install\]' "$units/ironflockos-proxy-reload.service"
+  grep -qx 'Unit=ironflockos-proxy-reload.service' "$units/ironflockos-proxy.path"
 }
 
 @test "the image enables what the presets enable; the installer masks all of it" {
@@ -33,11 +33,11 @@ device_units="flockos-proxy.service flockos-proxy.path flockos-network-profiles.
   masked=$(sed -n '/^if \[ "$VARIANT" = installer \]; then/,/^else/p' <<<"$joined" |
     sed -n 's/^ *systemctl --root="$ROOT" mask //p' | tr -s ' ' '\n')
   for u in $device_units; do
-    [ "$u" = flockos-proxy.path ] && continue
+    [ "$u" = ironflockos-proxy.path ] && continue
     grep -qx "$u" <<<"$enabled" || { echo "the image does not enable $u"; return 1; }
     grep -qx "$u" <<<"$masked" || { echo "the installer does not mask $u"; return 1; }
   done
-  grep -qx flockos-proxy.path <<<"$masked"
+  grep -qx ironflockos-proxy.path <<<"$masked"
 }
 
 @test "the presets sort before the distribution's, as the time preset does" {
@@ -45,7 +45,7 @@ device_units="flockos-proxy.service flockos-proxy.path flockos-network-profiles.
 }
 
 @test "the factory reset's units need no preset: data.mount wants them, and the installer masks them" {
-  for u in flockos-factory-reset.service flockos-data-missing.service; do
+  for u in ironflockos-factory-reset.service ironflockos-data-missing.service; do
     ! grep -q '^\[Install\]' "$units/$u"
     [ -L "$units/data.mount.wants/$u" ] || [ -e "$units/data.mount.wants/$u" ]
     grep -q "mask .*$u" "$customize"

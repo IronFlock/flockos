@@ -1,12 +1,14 @@
 # Pinned versions of the base profile. Plain KEY=value data. The
 # distribution, its mirrors and the Docker CE pins are in distros/<distro>/.
 
-# device-init (IronFlock/device-init): ironflock-init bakes the agent and the
-# host defaults into the image and enrolls the device (WP-2.1 to WP-2.3). The
-# binary is checked against the bootstrap key in profiles/base/keys, as
-# install.sh does: IronFlock Bootstrap <security@ironflock.com>, fingerprint
-# F6C9 4D96 CE31 5377 ACA7 C8EA 4990 5433 7321 2788. The key file is pinned
-# by its SHA-256.
+# ironflock (IronFlock/ironflock-cli), the IronFlock command: `ironflock bake`
+# bakes the agent, the host defaults and itself (/usr/bin/ironflock) into the
+# image (build/bake.sh); the image's enrolment calls `ironflock enroll`
+# (overlay/usr/lib/ironflockos/enroll). Downloaded from cli/ below the download
+# base and checked against the bootstrap key in profiles/base/keys, as the
+# CLI's install.sh does: IronFlock Bootstrap <security@ironflock.com>,
+# fingerprint F6C9 4D96 CE31 5377 ACA7 C8EA 4990 5433 7321 2788. The key file
+# is pinned by its SHA-256.
 IRONFLOCK_DL_BASE=https://instance-registry.ironflock.com/dl
-DEVICE_INIT_VERSION=1.4.10
-DEVICE_INIT_KEYRING_SHA256=930b953cdce504a31d726f88874e1f6ca5f0ab8f89872b9d806636dc8284c637
+IRONFLOCK_VERSION=2.0.3
+IRONFLOCK_KEYRING_SHA256=930b953cdce504a31d726f88874e1f6ca5f0ab8f89872b9d806636dc8284c637

@@ -2,42 +2,54 @@
 
 An IronFlockOS release is the merge of a release pull request (`just release-patch`,
 `just release-minor`, `just release-major`: a `VERSION` bump with the title
-`release flockos v<version>`). Its push to `main` runs `release.yml`, which
-builds every image, signs the bundles, tests the release image, publishes the
-images and the signed catalog, and sets the tag last. Nothing is built, signed
-or published from a laptop.
+`release ironflockos v<version>`). Its push to `main` runs `release.yml`, which
+takes the images its pull request's dry run built (or builds them), signs the
+bundles, publishes the images and the signed catalog, and sets the tag last.
+Nothing is built, signed or published from a laptop. Every test runs before
+the merge ([below](#tests-before-the-merge)): a release that takes its pull
+request's images does not test them again; one that builds them boots its
+image of `amd64-efi base` in `e2e` before it publishes.
 
 ## The release run
 
 | Job | What it does | Identity |
 |-----|--------------|----------|
 | `verify` | Decides what the run is: a release, a re-run after the tag, or a dry run (harness `release.sh mode`) | none |
-| `build` | Every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM | none |
-| `sign` | Re-signs every bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)) | `flockos-release` |
-| `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code; `stage` waits for it | the harness workflow (Sigstore) |
-| `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
-| `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/flockos/<version>/` (`build/publish.sh stage`) | `flockos-publisher` |
-| `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/flockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `flockos-publisher` |
-| `promote` | The staged files to `gs://ironflock-downloads/flockos/<version>/`; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `flockos/release-notes.json`. Then the catalog, built on the published one and signed with the catalog key, to `flockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `flockos-release` (the catalog), `flockos-publisher` (the files) |
-| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `flockos-<target>-<variant>`, from which the virtual-device-manager creates IronFlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-flockos-images-for-virtual-devices.md)) | `flockos-publisher` |
+| `source` | Where the images come from: while the switch is on, a release reuses those of its pull request's dry run when it can prove they are the build of the release commit's tree, and builds them otherwise ([below](#reused-images)). The job summary says which and why | none |
+| `build` | Only when the release does not reuse: every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM. Each image's build also lists its files | none |
+| `manifest` | With a build: the manifest `build.tsv`, every file of every image with sha256 and size (`build/reuse.sh manifest`) | none |
+| `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), then against the keyring that the image itself carries, `/etc/rauc/keyring.pem` of its slot A, with the image's own RAUC settings (`build/verify-bundles.sh`, in a container without the release identity), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
+| `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code, one call per image; `stage` waits for it | the harness workflow (Sigstore) |
+| `e2e` | Only when the run built its images: the release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)). Skipped when the release reuses its pull request's images: that pull request's dry run booted the same bytes of `amd64-efi base`; the other release images are published without a test of their own bytes, in either case ([below](#tests-before-the-merge)) | none |
+| `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/ironflockos/<version>/`, eight uploads at a time, `SHA256SUMS` last (`build/publish.sh stage`). It also lists each file's sha256 and size for `promote` (`build/publish.sh meta`) | `ironflockos-publisher` |
+| `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/ironflockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `ironflockos-publisher` |
+| `promote` | The staged files to `gs://ironflock-downloads/ironflockos/<version>/`, eight at a time; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `ironflockos/release-notes.json`. Then the catalog, built on the published one from the list `stage` made (no image or bundle is downloaded) and signed with the catalog key, to `ironflockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `ironflockos-release` (the catalog), `ironflockos-publisher` (the files) |
+| `vm-images` | The Compute Engine images of `amd64-efi base`, `amd64-efi nvidia` and `arm64-efi base`, each made from the published image into its image family `ironflockos-<target>-<variant>`, from which the virtual-device-manager creates IronFlockOS VMs (`build/gce-image.sh`, [ADR-0010](adr/0010-ironflockos-images-for-virtual-devices.md)) | `ironflockos-publisher` |
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
-| `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `flockos-release`, `flockos-publisher` |
+| `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `ironflockos-release`, `ironflockos-publisher` |
+| `release-ok` | Last, always: every job the run's mode needs succeeded and every other was skipped (`build/release-check.sh`). A job skipped by mistake fails the run, and so a release pull request's dry run | none |
+
+Every job after the first names the result of each job it needs and runs only
+when they succeeded (or, for `build` and `e2e`, when `source` did not decide
+to reuse; `promote` takes a skipped `e2e` only when it did). GitHub would
+otherwise skip a job silently once any job before it was skipped, as `build`
+and `e2e` are when a release reuses its images.
 
 The workload identity pool gives the two IronFlockOS identities only to a push of
-`release.yml` on `main` and to runs on `v*` tags. `flockos-publisher` can write
+`release.yml` on `main` and to runs on `v*` tags. `ironflockos-publisher` can write
 the two IronFlockOS trees of the download bucket and make Compute Engine images named
-`flockos-*`, and nothing else.
+`ironflockos-*`, and nothing else.
 
-**The VM images.** An image is `flockos-<target>-<variant>-v<x-y-z>` in
-`record-1283`, stored in `eu`, in the family `flockos-<target>-<variant>`. The
+**The VM images.** An image is `ironflockos-<target>-<variant>-v<x-y-z>` in
+`record-1283`, stored in `eu`, in the family `ironflockos-<target>-<variant>`. The
 family serves the newest release, the test channel's. Its disk is the smallest
 the IronFlockOS layout fits (10 GiB for base, 18 GiB for nvidia), so a product's
 `minDiskSize_GB` must be at least that. The tarball Compute Engine reads goes to
-`staging/flockos/<version>/gce/` and is removed once the image exists. A re-run
+`staging/ironflockos/<version>/gce/` and is removed once the image exists. A re-run
 keeps an image made from the same file.
 
-**The catalog.** `tools/catalog` builds `dl/flockos/manifest.json`
+**The catalog.** `tools/catalog` builds `dl/ironflockos/manifest.json`
 ([manifest.schema.json](manifest.schema.json), ADR-0009):
 
 - The release goes to the **test** channel. The first release is
@@ -62,28 +74,38 @@ keeps an image made from the same file.
   have no `payloads`: their sticks carry the base image only, and readers take
   it so.
 - **The device-agent downloads a bundle from its own update base**, at
-  `<update base>/flockos/<version>/<file>`, where `<file>` is the last part of
+  `<update base>/ironflockos/<version>/<file>`, where `<file>` is the last part of
   the bundle's `url` (from device-agent 1.6.3). The `url`s
   name the copy on the download server; the catalog is signed, so no mirror
   can change them. On the cloud both are the same file. A device behind an
   IronFlock appliance reaches only the appliance, whose OS mirror serves the
   catalog unchanged and the bundles of the images its devices run, under the
   same paths. Size and sha256 still come from the signed catalog. The layout
-  `flockos/<version>/<file>` is therefore part of the contract with readers.
+  `ironflockos/<version>/<file>` is therefore part of the contract with readers.
 - FlockFlasher (from the release after v2.2.4) reloads the catalog when its
   board list is shown, at most every five minutes, so a new release appears
   without restarting it.
 - Each image names what `ironflock os install` needs of a disk
   ([below](#what-ironflock-os-install-reads)). Releases up to 0.14.0 do not.
 - The catalog is signed in the device-agent's envelope with the Cloud KMS key
-  `ironflock-release/flockos-catalog`. The tool verifies its own output, and
-  `catalog verify -pubkey pki/flockos-catalog.pub manifest.json` checks a
+  `ironflock-release/ironflockos-catalog`. The tool verifies its own output, and
+  `catalog verify -pubkey pki/ironflockos-catalog.pub manifest.json` checks a
   published one.
 
 **Dry runs** run every job on release pull requests (`ci.yml` calls
 `release.yml`) and on manual runs:
 
-- `sign` uses a throwaway stand-in for the bundle signer.
+- `source` does not look for another run: a dry run builds.
+- On a release pull request, `attest-build` has the harness attest the
+  manifest of the build, and `would-reuse` checks this run as the release run
+  will check it: a failure there fails the dry run. A manual run does neither:
+  it has no pull request.
+- `sign` uses a throwaway stand-in for the bundle signer. The check against
+  each image then first verifies the bundle with the stand-in's CA and the
+  image's settings (a positive control: rauc and the bundle work in that
+  container); the image's own keyring must then refuse it by rauc's
+  signature check, and accept the bundle signer's certificate. The
+  stand-in's CA never reaches an artifact.
 - `e2e` boots and reboots only: no release image accepts a stand-in bundle.
 - `stage` and `promote` print their storage calls (`DRY_RUN=1`).
 - `sources` looks up every source package as a release does, so one without
@@ -92,9 +114,94 @@ keeps an image made from the same file.
 - The catalog is signed with a throwaway key and verified.
 - `tag` and `assets` are skipped.
 
+## Reused images
+
+A release run takes the images its pull request's dry run built, and builds
+them only when it cannot prove they are the release commit's build
+([ADR-0018](adr/0018-the-release-reuses-the-dry-runs-images.md)). That saves
+the build, about 15 minutes.
+
+1. Each image build of a dry run lists every file it leaves, with sha256 and
+   size (`build/reuse.sh list`); `manifest` joins the lists into `build.tsv`.
+2. On a release pull request the harness attests `build.tsv` (`attest-build`).
+   Its certificate holds GitHub's word on the run: the pull request's ref, the
+   event, the workflow, the run, the runner and the merge commit it built.
+3. The release run's `source` job (`build/reuse.sh find`) finds the pull
+   request merged as the release commit (into `main`, from this repository),
+   its newest successful `ci.yml` run, and that run's manifest and image
+   artifacts (each once, none older than 24 hours or expiring within 6). It
+   verifies the manifest's attestation with every claim pinned, and compares
+   the tree of the merge commit in the certificate with the release commit's
+   tree. Then it downloads every image and checks every file against the
+   manifest.
+4. Only when all of that holds, `build`, `manifest` and `e2e` are skipped and
+   each `sign` job takes its image from that run, checks its files against
+   the manifest once more, and signs. Otherwise the release builds, tests
+   what it built in `e2e`, and the job summary says why.
+
+**The switch.** The lookup runs only while the repository variable
+`IRONFLOCKOS_REUSE` is `true` (Settings, Secrets and variables, Actions,
+Variables). Anything else is a build. A release pull request's dry run
+attests and checks its images either way.
+
+**The fall-back.** Each step of the lookup has a timeout, and any failure is
+a build. When the `source` job fails all the same, `build` runs and `sign`
+takes the built images; the run ends red for that job, but the release is
+made. Once `source` has decided to reuse, a `sign` job whose download fails
+or whose files differ from the manifest fails the release before it signs
+anything; a re-run looks up again.
+
+A reused image names the head commit of its release pull request, which has
+the release commit's tree, and that commit's time (`BUILD_ID`,
+`SOURCE_DATE_EPOCH`). GitHub keeps it as `refs/pull/<n>/head`. A built image
+names the release commit. The dry run checks the same steps on its own run
+(`would-reuse`).
+
+## Tests before the merge
+
+Every test runs in the release pull request's CI, before the merge
+([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)): the unit tests,
+every image as a development build in QEMU with the whole sequence (first
+boot, update into slot B, factory reset, fallback, crash), the installer
+sticks, and the dry run of `release.yml` with its release build of every
+image, whose `e2e` boots and reboots the release image of `amd64-efi base`.
+Of the release images, only that one is booted; the other seven are
+published without a test of their own bytes, their development builds
+tested in their place.
+
+The release run after the merge then only releases the images it takes from
+that pull request: it signs, attests, stages, publishes the source code,
+promotes, makes the VM images, tags and attaches the assets. What it checks,
+it checks before it publishes: the proof that the images are the release
+commit's build (`source`), every file against the manifest and every bundle
+against the root CA and, with `rauc info` and the image's own RAUC
+settings, against the keyring in slot A of its own image (`sign`), the
+catalog's signature and every file through the download proxy (`promote`),
+and each VM image against `SHA256SUMS` (`vm-images`).
+
+**The fall-back.** A release that builds its images itself (the switch is
+off, the lookup failed, `source` failed or was cancelled) runs `e2e` on its
+image of `amd64-efi base` before `promote`, with its own KMS-signed bundle,
+as before: nobody has booted the bytes of that build. Its other seven
+images are published without a test of their own bytes, as in a release
+that reuses.
+
+**What stays untested before the merge.** Before the merge, no release image
+installs a bundle, and no bundle with the release signature is installed
+anywhere: only the bundle signer in Cloud KMS makes such a bundle, and no
+pull request may reach it. When the release reuses its images, that stays
+so until devices get the release. The update into slot B, the factory
+reset, the fallback and the crash run on the development builds of the
+same tree. `sign` shows without a VM that each image's keyring in slot A
+accepts the release signature in `rauc info`; it does not install, and it
+does not read the keyring inside the bundle's root filesystem, which a
+device checks its next update with. Only the release image of `amd64-efi
+base` boots as a release build; the other release images are not booted at
+all, as before.
+
 ## What `ironflock os install` reads
 
-`ironflock os install` of device-init (its ADR-0008) writes an image onto the
+`ironflock os install` of IronFlock/ironflock-cli (its ADR-0008) writes an image onto the
 disk of a running machine. Besides an image's `url`, `sha256` and `size`, it
 reads these fields of `releases.<version>.images.<image-id>` in the catalog.
 Releases up to 0.14.0 have none of them.
@@ -110,22 +217,30 @@ refuses a release image without them, and a catalog with only one of them or
 with `min_disk_size` below `raw_size`.
 
 **The hardware list** tells which devices the image's kernels have a driver
-for. The build (`hardware_list` in `build/lib.sh`) takes each kernel's
-`modules.alias`, the drivers built as modules, and the drivers built into the
-kernel, which `modules.alias` leaves out: depmod writes those only into the
-binary `modules.builtin.alias.bin`, from the `<module>.alias=<pattern>`
-records of `modules.builtin.modinfo`, which the kernel package ships, and the
-build reads them from there. A kernel without either file stops the build.
-The file is gzip of text lines: `alias <pattern> <module>`, as depmod writes
-them, and before each kernel's lines a comment, `# kernel <version>: ...`.
-One kernel on the EFI targets; the Raspberry Pi image has two; Jetson, which
-has no disk image, has no list. A device has a driver when its modalias
-(`/sys/.../modalias`, such as `pci:v00008086d000015B8sv...`) matches a
-pattern by shell rules (`*`, `?`, `[...]`), as modprobe matches them, after
-it has turned `-` into `_` outside `[...]` in both. `os install` matches the
-disk controller and the network card. A match says nothing about a firmware
-file the driver may need. Every disk image has one, the installer too; it is
-in `SHA256SUMS`, and the signed catalog carries its hash. The SLSA provenance
+for. The build (`hardware_list` in `build/lib.sh`) writes, for each kernel,
+after a comment line (`# kernel <version>: ...`):
+
+- `alias <pattern> <module>` lines: the kernel's `modules.alias`, the drivers
+  built as modules, as depmod writes them; then the `<module>.alias=<pattern>`
+  records of `modules.builtin.modinfo`. On 6.12 those are only the aliases a
+  built-in driver declares by name (`fs-ext4`), not those of its device
+  table: a built-in driver such as `virtio_pci` has no `alias` line.
+- `builtin <module>` lines: every driver built into the kernel, from its
+  `modules.builtin` (`kernel/drivers/virtio/virtio_pci.ko` becomes
+  `builtin virtio_pci`).
+
+A kernel without one of the three files stops the build. One kernel on the
+EFI targets; the Raspberry Pi image has two; Jetson, which has no disk image,
+has no list. A device has a driver when its modalias (`/sys/.../modalias`,
+such as `pci:v00008086d000015B8sv...`) matches an `alias` pattern by shell
+rules (`*`, `?`, `[...]`), as modprobe matches them, after it has turned `-`
+into `_` outside `[...]` in both; or, for a driver built into the kernel, when
+the running machine's driver of the device (`/sys/.../driver/module`) has a
+`builtin` line. The releases 0.15.0 and older have no `builtin` lines: their
+lists miss the built-in drivers' device tables. `os install` matches the disk
+controller and the network card. A match says nothing about a firmware file
+the driver may need. Every disk image has one, the installer too; it is in
+`SHA256SUMS`, and the signed catalog carries its hash. The SLSA provenance
 covers the images and bundles, not it, as it does not cover the SBOMs
 either.
 
@@ -136,7 +251,7 @@ devices, with the sections `## Security`, `## New`, `## Fixed` and
 `## Changed`, in that order, the empty ones left out, and no heading of its
 own (`just check-release-notes`, part of `just lint`). They are optional.
 Commit the file before `just release-patch`: `promote` publishes every
-file of the release's commit as `flockos/release-notes.json`
+file of the release's commit as `ironflockos/release-notes.json`
 (`{version: markdown}`, `{}` without any; `build/publish.sh notes`) before
 the catalog names the release. Moving production does not publish them.
 
@@ -170,15 +285,15 @@ source of every package in its images next to them:
   no source, with the reason (Apache-2.0, MIT, NVIDIA's binary driver).
   A source package in neither the archives nor that file fails the release,
   so a new repository needs a decision there first.
-- The files go to the pool `flockos/sources/<archive>/<source>/<file>`
+- The files go to the pool `ironflockos/sources/<archive>/<source>/<file>`
   (`debian`, `raspberrypi`, `upstream`), which every release shares: a file
   there is never replaced, and only new ones are uploaded. The first release
   uploads about 1.7 GB.
-- `flockos/<version>/SOURCES` lists every file of the release, with the
+- `ironflockos/<version>/SOURCES` lists every file of the release, with the
   reason for each package without source. `dget <URL of a .dsc>` fetches a
   Debian source package. `check` makes sure `SOURCES` and the pool answer
   through the download proxy.
-- Each image says where `SOURCES` is in `/usr/share/doc/flockos/copyright`, so
+- Each image says where `SOURCES` is in `/usr/share/doc/ironflockos/copyright`, so
   a copy that is passed on carries the directions too.
 - Releases up to 0.11.0 have no `SOURCES`: their images record no source
   packages.
@@ -202,11 +317,11 @@ gh workflow run release.yml --ref v<version> -f promote-production=true
 That run of `release.yml` on the release's tag (mode `tag`) runs only the
 `production` job:
 
-1. It reads the published catalog and verifies it with `pki/flockos-catalog.pub`.
+1. It reads the published catalog and verifies it with `pki/ironflockos-catalog.pub`.
 2. It moves `production` to the tag's version, which must already be in the
    catalog: the same files, the same bundles. FlockFlasher's boards follow.
-3. It signs the catalog with the catalog key as `flockos-release`.
-4. It publishes the catalog as `flockos-publisher`.
+3. It signs the catalog with the catalog key as `ironflockos-release`.
+4. It publishes the catalog as `ironflockos-publisher`.
 5. It checks the catalog through the download proxy.
 
 The pool gives both identities to runs on `v*` tags. Nothing else of
@@ -215,26 +330,30 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
 ## Before the first release (once)
 
 1. **The RAUC PKI:** `tools/rauc-pki/ceremony.sh --yes` ([signing.md](signing.md)).
-   Done 2026-11-05.
+   Done 2026-11-05 under the old names, again 2026-11-11 under the names of ADR-0017.
 2. **The catalog key and the publisher:** `tools/release-setup.sh --yes`, by a
-   project owner on a branch. It creates the key, the `flockos-publisher`
-   identity and its bucket permissions, and writes `pki/flockos-catalog.pub`
+   project owner on a branch. It creates the key, the `ironflockos-publisher`
+   identity and its bucket permissions, and writes `pki/ironflockos-catalog.pub`
    for a pull request. Run it first without `--yes`: that shows every step and
    changes nothing. At the end it prints the line for step 5. Done
-   2026-11-05 (`pki/flockos-catalog.pub`, [pki/README.md](../pki/README.md)).
-3. **The download proxy** serves `gs://ironflock-downloads/flockos/` under
-   `https://instance-registry.ironflock.com/dl/flockos/` (registry-proxy
-   v0.2.9, 2026-11-05). Without it, `promote` would stop before the tag.
-   Done.
-4. **The VM images:** `tools/release-setup.sh --yes` again, after it has gained
-   the role `flockosVmImagePublisher` (ADR-0010). It keeps everything that
-   exists and adds the role and its binding for `flockos-publisher`. Until
-   then `vm-images` fails, and with it the tag; re-run the failed jobs after
-   it.
+   2026-11-11 (`pki/ironflockos-catalog.pub`, key id `036ef3bd`, [pki/README.md](../pki/README.md)).
+3. **The download proxy** serves `gs://ironflock-downloads/ironflockos/` under
+   `https://instance-registry.ironflock.com/dl/ironflockos/` (registry-proxy).
+   Without it, `promote` would stop before the tag. Done 2026-11-11
+   (registry-proxy v0.2.12).
+4. **The VM images:** `tools/release-setup.sh --yes` again, with the role
+   `ironflockosVmImagePublisher` (ADR-0010). It keeps everything that exists and
+   adds the role and its binding for `ironflockos-publisher`. Without them
+   `vm-images` fails, and with it the tag; re-run the failed jobs after it.
+   Done 2026-11-11.
 5. **The device-agent** trusts the catalog key: the line from step 2 goes into
-   `FLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
-   an agent release. `CATALOG_MIN_AGENT` names that release: device-agent
-   1.6.1 (#204).
+   `IRONFLOCKOS_CATALOG_PUBLIC_KEYS` (device-agent `src/osupdate/catalog.go`), in
+   an agent release. Done: device-agent 1.6.10, the live agent, trusts key
+   `036ef3bd`; it is also the first that knows `ID=ironflockos`. An older agent
+   does not read the new catalog at all. `CATALOG_MIN_AGENT` in
+   `build/release.conf` is not that release: it is a release's `min_agent`, the
+   oldest agent that may install its bundles (an older one updates itself
+   first), and stays 1.6.3.
 
 ## Not yet
 
@@ -243,6 +362,9 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
   from the previous release to this one and back through the agent's
   `perform_os_update`. That needs the test flock's credentials in the
   `release` environment, and an agent with the catalog key on the images.
+  Since [ADR-0019](adr/0019-every-test-runs-before-the-merge.md) it would
+  have to run before the merge, where no bundle of the release carries the
+  release signature and no catalog names it; how is open.
 - **The source code of Jetson images.** `build/sources.sh` knows Debian and the
   Raspberry Pi archive, not Ubuntu or NVIDIA's L4T repositories. Jetson's
   sources (Ubuntu's source packages, NVIDIA's `public_sources.tbz2`) come with

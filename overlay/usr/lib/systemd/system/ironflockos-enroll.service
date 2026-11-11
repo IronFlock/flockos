@@ -1,0 +1,19 @@
+# Enrolls the slot: on its first boot (no /var/lib/ironflockos/enrolled in this
+# slot) and whenever a .flock lies on the IRONFLOCKOS partition, whatever the
+# case of its name (as the script and ironflock match it). No network
+# needed; NetworkManager must run for the WiFi profile.
+[Unit]
+Description=IronFlockOS: enroll the device from its .flock
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/master-plan.md
+After=docker.service NetworkManager.service boot-efi.mount local-fs.target
+Wants=NetworkManager.service
+ConditionPathExists=|!/var/lib/ironflockos/enrolled
+ConditionPathExistsGlob=|/boot/efi/*.[Ff][Ll][Oo][Cc][Kk]
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/enroll
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

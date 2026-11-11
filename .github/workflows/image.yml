@@ -1,0 +1,119 @@
+# One IronFlockOS image, built in the build container (build/run-in-builder.sh)
+# and uploaded as the artifact <prefix>-<target>-<variant>[-rt].
+# build.yml calls it for every image (release.yml), ci.yml once per image, so
+# that each image's test starts as soon as that image is built.
+name: image
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+      variant:
+        type: string
+        required: true
+      kernel:
+        type: string
+        default: std
+      runner:
+        description: ubuntu-latest for amd64, ubuntu-24.04-arm for arm64 (the build container runs natively)
+        type: string
+        required: true
+      signing:
+        description: dev or release (build/signing.sh)
+        type: string
+        required: true
+      prefix:
+        description: the artifact's name, <prefix>-<target>-<variant>[-rt] (build.yml)
+        type: string
+        default: image
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ inputs.target }}
+      VARIANT: ${{ inputs.variant }}
+      KERNEL: ${{ inputs.kernel }}
+      SUFFIX: ${{ inputs.kernel == 'rt' && '-rt' || '' }}
+      IRONFLOCKOS_SIGNING: ${{ inputs.signing }}
+      # Empty but on a pull request.
+      IRONFLOCKOS_BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # Two commits deep: on a pull request HEAD is GitHub's test merge, and
+      # the image names the pull request's head when it has the same tree
+      # (build_commit in build/lib.sh).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: v1
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just (tools.lock)
+        run: '"$HARNESS/scripts/install-tool.sh" just'
+      - name: scratch space on the runner's second disk
+        run: |
+          sudo mkdir -p /mnt/ironflockos-work
+          df -h / /mnt
+      - name: just build ${{ env.TARGET }} ${{ env.VARIANT }} ${{ env.KERNEL }} (${{ env.IRONFLOCKOS_SIGNING }})
+        env:
+          IRONFLOCKOS_WORK: /mnt/ironflockos-work
+        run: just build "$TARGET" "$VARIANT" "$KERNEL"
+      # The release's SBOM of the image (CycloneDX, from the tree the build
+      # left in its scratch space), published with it.
+      - name: SBOM of the image (release builds)
+        if: inputs.signing == 'release'
+        run: |
+          "$HARNESS/scripts/install-tool.sh" trivy
+          image=ironflockos-$TARGET-$VARIANT$SUFFIX
+          version=$(tr -d '[:space:]' < VERSION)
+          sudo env "PATH=$PATH" trivy rootfs --quiet --scanners vuln --format cyclonedx \
+            --output "out/$image/$image-$version.cdx.json" "/mnt/ironflockos-work/$image/rootfs"
+          sudo chown "$(id -u):$(id -g)" "out/$image/$image-$version.cdx.json"
+      # Every file as built, for the manifest a release may reuse the images
+      # by (build/reuse.sh, ADR-0018).
+      - name: the list of the files as built (release builds)
+        if: inputs.signing == 'release'
+        run: |
+          mkdir -p "$RUNNER_TEMP/files"
+          build/reuse.sh list "out/ironflockos-$TARGET-$VARIANT$SUFFIX" > "$RUNNER_TEMP/files/ironflockos-$TARGET-$VARIANT$SUFFIX.tsv"
+      - name: upload the image and bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.prefix }}-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
+          path: out/ironflockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: upload the list (release builds)
+        if: inputs.signing == 'release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: files-${{ inputs.prefix }}-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
+          path: ${{ runner.temp }}/files/ironflockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}.tsv
+          if-no-files-found: error
+          retention-days: 3

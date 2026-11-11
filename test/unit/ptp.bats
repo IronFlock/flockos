@@ -4,7 +4,7 @@
 # clock (server).
 
 repo="$BATS_TEST_DIRNAME/../.."
-ptp="$repo/overlay/usr/lib/flockos/ptp"
+ptp="$repo/overlay/usr/lib/ironflockos/ptp"
 units="$repo/overlay/usr/lib/systemd/system"
 
 setup() {
@@ -16,7 +16,7 @@ setup() {
   printf '#!/bin/sh\necho "$*" >>"%s/phc2sys.log"\n' "$tmp" >"$tmp/bin/phc2sys"
   printf '#!/bin/sh\necho "$*" >>"%s/chronyc.log"\nexit ${CHRONYC_RC:-0}\n' "$tmp" >"$tmp/bin/chronyc"
   chmod +x "$tmp/bin/"*
-  export PATH="$tmp/bin:$PATH" FLOCKOS_PTP_CONF=$tmp/ptp.conf FLOCKOS_RUN=$tmp/run
+  export PATH="$tmp/bin:$PATH" IRONFLOCKOS_PTP_CONF=$tmp/ptp.conf IRONFLOCKOS_RUN=$tmp/run
 }
 
 teardown() { rm -rf "$tmp"; }
@@ -107,13 +107,13 @@ teardown() { rm -rf "$tmp"; }
   printf 'interface=enp88s0\n' >"$tmp/ptp.conf"
   run bash "$ptp" apply
   [ "$status" -eq 0 ]
-  [ "$(cat "$tmp/systemctl.log")" = "restart chrony.service flockos-ptp4l.service flockos-phc2sys.service" ]
+  [ "$(cat "$tmp/systemctl.log")" = "restart chrony.service ironflockos-ptp4l.service ironflockos-phc2sys.service" ]
   rm "$tmp/systemctl.log"
   bash "$ptp" apply
   [ ! -e "$tmp/systemctl.log" ]
   printf 'interface=enp88s0\ndomain=1\n' >"$tmp/ptp.conf"
   bash "$ptp" apply
-  [ "$(cat "$tmp/systemctl.log")" = "restart chrony.service flockos-ptp4l.service flockos-phc2sys.service" ]
+  [ "$(cat "$tmp/systemctl.log")" = "restart chrony.service ironflockos-ptp4l.service ironflockos-phc2sys.service" ]
 }
 
 @test "apply as a server leaves chrony alone, unless it drops a client's PTP source" {
@@ -121,16 +121,16 @@ teardown() { rm -rf "$tmp"; }
   bash "$ptp"
   printf 'interface=enp88s0\nrole=server\n' >"$tmp/ptp.conf"
   bash "$ptp" apply
-  [ "$(cat "$tmp/systemctl.log")" = "restart chrony.service flockos-ptp4l.service flockos-phc2sys.service" ]
+  [ "$(cat "$tmp/systemctl.log")" = "restart chrony.service ironflockos-ptp4l.service ironflockos-phc2sys.service" ]
   [ ! -e "$tmp/run/chrony/ptp.conf" ]
   rm "$tmp/systemctl.log"
   printf 'interface=enp88s0\nrole=server\npriority1=20\n' >"$tmp/ptp.conf"
   bash "$ptp" apply
-  [ "$(cat "$tmp/systemctl.log")" = "restart flockos-ptp4l.service flockos-phc2sys.service" ]
+  [ "$(cat "$tmp/systemctl.log")" = "restart ironflockos-ptp4l.service ironflockos-phc2sys.service" ]
   rm "$tmp/systemctl.log"
   rm "$tmp/ptp.conf"
   bash "$ptp" apply
-  [ "$(cat "$tmp/systemctl.log")" = "stop flockos-phc2sys.service flockos-ptp4l.service" ]
+  [ "$(cat "$tmp/systemctl.log")" = "stop ironflockos-phc2sys.service ironflockos-ptp4l.service" ]
 }
 
 @test "apply without an interface stops ptp4l and phc2sys and takes chrony's PTP source away" {
@@ -140,7 +140,7 @@ teardown() { rm -rf "$tmp"; }
   run bash "$ptp" apply
   [ "$status" -eq 0 ]
   [ -z "$(find "$tmp/run" -type f)" ]
-  [ "$(cat "$tmp/systemctl.log")" = "$(printf 'stop flockos-phc2sys.service flockos-ptp4l.service\ntry-restart chrony.service')" ]
+  [ "$(cat "$tmp/systemctl.log")" = "$(printf 'stop ironflockos-phc2sys.service ironflockos-ptp4l.service\ntry-restart chrony.service')" ]
 }
 
 @test "phc2sys as a client: samples to chrony's socket while ptp4l follows a master" {
@@ -167,22 +167,22 @@ teardown() { rm -rf "$tmp"; }
 }
 
 @test "the units, chrony and the script name the same files and socket" {
-  grep -qx 'ConditionPathExists=/run/flockos/ptp/ptp4l.conf' "$units/flockos-ptp4l.service"
-  grep -q -- '-f /run/flockos/ptp/ptp4l.conf$' "$units/flockos-ptp4l.service"
-  grep -qx 'ConditionPathExists=/run/flockos/ptp/phc2sys.env' "$units/flockos-phc2sys.service"
-  grep -qx 'ExecStart=/usr/lib/flockos/ptp phc2sys' "$units/flockos-phc2sys.service"
-  grep -qx 'PartOf=chrony.service' "$units/flockos-phc2sys.service"
+  grep -qx 'ConditionPathExists=/run/ironflockos/ptp/ptp4l.conf' "$units/ironflockos-ptp4l.service"
+  grep -q -- '-f /run/ironflockos/ptp/ptp4l.conf$' "$units/ironflockos-ptp4l.service"
+  grep -qx 'ConditionPathExists=/run/ironflockos/ptp/phc2sys.env' "$units/ironflockos-phc2sys.service"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/ptp phc2sys' "$units/ironflockos-phc2sys.service"
+  grep -qx 'PartOf=chrony.service' "$units/ironflockos-phc2sys.service"
   grep -q -- '--refclock_sock_address /run/chrony/ptp.sock' "$ptp"
   grep -q 'refclock SOCK /run/chrony/ptp.sock ' "$ptp"
-  grep -qx 'confdir /run/flockos/chrony' "$repo/overlay/etc/chrony/conf.d/10-flockos.conf"
-  grep -qx 'PathChanged=/data/flockos/ptp.conf' "$units/flockos-ptp.path"
-  grep -qx 'ExecStart=/usr/lib/flockos/ptp apply' "$units/flockos-ptp-reload.service"
-  grep -q '^Before=chrony.service' "$units/flockos-ptp.service"
-  grep -q 'ln -sfn /data/flockos/ptp.conf "$ROOT/etc/flockos/ptp.conf"' "$repo/build/customize.sh"
-  grep -q 'chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service' "$repo/build/customize.sh"
+  grep -qx 'confdir /run/ironflockos/chrony' "$repo/overlay/etc/chrony/conf.d/10-ironflockos.conf"
+  grep -qx 'PathChanged=/data/ironflockos/ptp.conf' "$units/ironflockos-ptp.path"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/ptp apply' "$units/ironflockos-ptp-reload.service"
+  grep -q '^Before=chrony.service' "$units/ironflockos-ptp.service"
+  grep -q 'ln -sfn /data/ironflockos/ptp.conf "$ROOT/etc/ironflockos/ptp.conf"' "$repo/build/customize.sh"
+  grep -q 'chrony.service ironflockos-ptp.service ironflockos-ptp4l.service ironflockos-phc2sys.service' "$repo/build/customize.sh"
   # The first boot's presets keep that set, and nothing that takes chrony's place.
-  p=$repo/overlay/usr/lib/systemd/system-preset/10-flockos-time.preset
-  for u in chrony.service flockos-ptp.service flockos-ptp.path flockos-ptp4l.service flockos-phc2sys.service; do
+  p=$repo/overlay/usr/lib/systemd/system-preset/10-ironflockos-time.preset
+  for u in chrony.service ironflockos-ptp.service ironflockos-ptp.path ironflockos-ptp4l.service ironflockos-phc2sys.service; do
     grep -qx "enable $u" "$p"
   done
   for u in chronyd-restricted.service timemaster.service chrony-wait.service; do

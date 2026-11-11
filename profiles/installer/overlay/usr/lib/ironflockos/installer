@@ -1,0 +1,125 @@
+#!/bin/bash
+# ironflockos-installer: writes the embedded IronFlockOS image to an internal disk
+# (master plan, section 3.6; WP-3.1). Runs as ironflockos-installer.service on the
+# console of the installer USB stick.
+#
+#   1. reads installer.conf and the device's *.flock from the stick's IRONFLOCKOS
+#      partition (FlockFlasher put them there)
+#   2. picks the target disk by installer.conf's rule, never the stick
+#      itself, and asks on the console unless confirm=no
+#   3. writes the payload image, copies the .flock onto the new disk's
+#      IRONFLOCKOS partition, registers the disk as the first UEFI boot entry
+#   4. powers off (or reboots)
+#
+# The installed disk then boots like a flashed one: systemd-repart grows it,
+# the device enrolls with the .flock. A log goes to the stick's IRONFLOCKOS
+# partition (ironflockos-installer.log).
+#
+# Env for tests: IRONFLOCKOS_ESP, IRONFLOCKOS_PAYLOAD_DIR, IRONFLOCKOS_DRY_RUN=1 (print
+# what would be written, write nothing).
+set -euo pipefail
+# shellcheck source=profiles/installer/overlay/usr/lib/ironflockos/installer-lib.sh
+. "$(dirname "$0")/installer-lib.sh"
+
+esp=${IRONFLOCKOS_ESP:-/boot/efi}
+payload_dir=${IRONFLOCKOS_PAYLOAD_DIR:-/usr/share/ironflockos/payload}
+dry=${IRONFLOCKOS_DRY_RUN:-0}
+log=$esp/ironflockos-installer.log
+
+say() { printf '%s\n' "$*" | tee -a "$log" >&2; }
+fail() {
+  say "INSTALL FAILED: $*"
+  say "Nothing was installed if this happened before 'writing'. Fix installer.conf on the stick's IRONFLOCKOS partition and boot the stick again."
+  exit 1
+}
+run() {
+  if [ "$dry" = 1 ]; then
+    say "would run: $*"
+  else
+    "$@"
+  fi
+}
+
+: >"$log" 2>/dev/null || log=/dev/null
+say "IronFlockOS installer $(sed -n 's/^VERSION_ID=//p' /etc/os-release 2>/dev/null | tr -d '"')"
+
+installer_conf "$esp/installer.conf" || fail "installer.conf is not valid (see above)"
+payload=$(installer_payload "$payload_dir" "$CONF_PAYLOAD") || fail "no image to install"
+# The build stores the image size next to it.
+payload_bytes=$(cat "$payload.size" 2>/dev/null || echo 0)
+[[ "$payload_bytes" =~ ^[0-9]+$ ]] || payload_bytes=0
+
+# The newest .flock, whatever the case of its name (as the device's enrolment
+# takes it).
+flock=""
+for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk]; do
+  [ -f "$f" ] || continue
+  if [ -z "$flock" ] || [ "$f" -nt "$flock" ]; then flock=$f; fi
+done
+[ -n "$flock" ] || say "warning: no .flock on the stick: the installed device stays unenrolled until it gets one"
+
+root_source=$(findmnt -no SOURCE / 2>/dev/null || true)
+boot_disk=$(lsblk -no PKNAME "$root_source" 2>/dev/null | head -n 1 || true)
+disks=$(lsblk --json --bytes -d -o NAME,SIZE,TYPE,TRAN,RM,RO,MODEL)
+candidates=$(installer_candidates "$disks" "$boot_disk" "$CONF_ALLOW_USB" "$payload_bytes")
+say "image: $(basename "$payload") ($(installer_human "$payload_bytes"))"
+say "disks the image may go to:"
+if [ -n "$candidates" ]; then
+  while read -r name size tran model; do
+    say "  /dev/$name  $(installer_human "$size")  $tran  ${model//_/ }"
+  done <<<"$candidates"
+else
+  say "  none"
+fi
+target=$(installer_select "$CONF_DISK" "$candidates") || fail "no target disk (rule: disk=$CONF_DISK)"
+say "target: $target (rule: disk=$CONF_DISK)"
+
+if [ "$CONF_CONFIRM" = yes ]; then
+  say "Everything on $target will be erased. Type 'yes' and Enter to install, anything else to stop."
+  read -r answer || answer=""
+  [ "$answer" = yes ] || fail "stopped on the console"
+fi
+
+say "writing $(basename "$payload") to $target ..."
+if [ "$dry" = 1 ]; then
+  say "would write $payload to $target"
+else
+  zstd -dc "$payload" | dd of="$target" bs=4M iflag=fullblock oflag=direct conv=fsync status=progress
+  blockdev --rereadpt "$target" || partprobe "$target" || true
+  udevadm settle
+fi
+
+esp_target=$(installer_partition "$target" 1)
+# The .flock, and the site's proxy (docs/build.md, "Proxy"), which the
+# installed device takes over on its first boot.
+carry=()
+[ -n "$flock" ] && carry+=("$flock")
+[ -f "$esp/proxy.conf" ] && carry+=("$esp/proxy.conf")
+if [ ${#carry[@]} -gt 0 ]; then
+  for f in "${carry[@]}"; do
+    say "copying $(basename "$f") to the new IRONFLOCKOS partition ($esp_target)"
+  done
+  if [ "$dry" != 1 ]; then
+    mnt=$(mktemp -d)
+    mount -t vfat "$esp_target" "$mnt"
+    cp "${carry[@]}" "$mnt/"
+    sync
+    umount "$mnt"
+    rmdir "$mnt"
+  fi
+fi
+
+say "registering $target as the first UEFI boot entry"
+if loader=$(installer_loader); then
+  run efibootmgr --quiet --create --disk "$target" --part 1 --label IronFlockOS --loader "$loader" ||
+    say "warning: no UEFI boot entry (the disk still boots from its removable-media path)"
+else
+  say "warning: no UEFI loader known for $(uname -m): no boot entry (the disk boots from its removable-media path)"
+fi
+
+say "IronFlockOS is installed on $target. Remove the stick; the device starts from $target."
+sync
+case "$CONF_AFTER" in
+  reboot) run systemctl reboot ;;
+  *) run systemctl poweroff ;;
+esac

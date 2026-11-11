@@ -20,9 +20,9 @@ setup() {
 }
 
 @test "system.conf names the slots by GPT name and uses verity bundles only" {
-  COMPATIBLE=flockos-amd64-efi-base run render "$repo/targets/amd64-efi/system.conf"
+  COMPATIBLE=ironflockos-amd64-efi-base run render "$repo/targets/amd64-efi/system.conf"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"compatible=flockos-amd64-efi-base"* ]]
+  [[ "$output" == *"compatible=ironflockos-amd64-efi-base"* ]]
   [[ "$output" == *"device=/dev/disk/by-partlabel/rootfs-a"* ]]
   [[ "$output" == *"device=/dev/disk/by-partlabel/rootfs-b"* ]]
   [[ "$output" == *"bundle-formats=verity"* ]]
@@ -46,16 +46,16 @@ setup() {
 
 @test "the genimage layout gives slot A the slot size" {
   IMAGE_NAME=x.img DISK_UUID=u ESP_UUID=u ROOT_A_UUID=u ROOT_PART_TYPE=$ROOT_PART_TYPE SLOT_SIZE=4G \
-    ESP_PART_NAME=FLOCKOS ROOT_PART_NAME=rootfs-a run render "$repo/targets/amd64-efi/genimage.cfg"
+    ESP_PART_NAME=IRONFLOCKOS ROOT_PART_NAME=rootfs-a run render "$repo/targets/amd64-efi/genimage.cfg"
   [ "$status" -eq 0 ]
   [[ "$output" == *"partition rootfs-a"* ]]
   [[ "$output" == *"size = 4G"* ]]
-  [[ "$output" == *"partition FLOCKOS"* ]]
+  [[ "$output" == *"partition IRONFLOCKOS"* ]]
 }
 
 @test "the installer's partitions have names of their own" {
-  run grep -c 'PARTLABEL=FLOCKOS\|PARTLABEL=rootfs' "$repo/profiles/installer/overlay/etc/fstab"
+  run grep -c 'PARTLABEL=IRONFLOCKOS\|PARTLABEL=rootfs' "$repo/profiles/installer/overlay/etc/fstab"
   [ "$output" = 0 ]
-  grep -q 'PARTLABEL=flockos-installer-esp' "$repo/profiles/installer/overlay/etc/fstab"
-  grep -q 'ESP_PART_NAME=flockos-installer-esp ROOT_PART_NAME=flockos-installer' "$repo/build/build.sh"
+  grep -q 'PARTLABEL=ironflockos-installer-esp' "$repo/profiles/installer/overlay/etc/fstab"
+  grep -q 'ESP_PART_NAME=ironflockos-installer-esp ROOT_PART_NAME=ironflockos-installer' "$repo/build/build.sh"
 }

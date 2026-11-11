@@ -1,0 +1,108 @@
+# The installer stick of an EFI target, carrying every image of its target
+# (INSTALLER_PAYLOADS in target.conf), which the caller has built before as
+# the artifacts <prefix>-<target>-*; installer.conf on the stick picks the one
+# to install. build.yml calls it for both EFI targets (release.yml), ci.yml
+# once per target.
+name: installer
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+      runner:
+        type: string
+        required: true
+      signing:
+        description: dev or release (build/signing.sh)
+        type: string
+        required: true
+      prefix:
+        description: the artifacts' names, <prefix>-<target>-<variant>[-rt] (build.yml)
+        type: string
+        default: image
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ inputs.target }}
+      IRONFLOCKOS_SIGNING: ${{ inputs.signing }}
+      # Empty but on a pull request.
+      IRONFLOCKOS_BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # Two commits deep: on a pull request HEAD is GitHub's test merge, and
+      # the image names the pull request's head when it has the same tree
+      # (build_commit in build/lib.sh).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IronFlock/workflows
+          ref: v1
+          path: .harness
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            tools.lock
+          sparse-checkout-cone-mode: false
+      - name: move harness out of the workspace
+        run: |
+          mv .harness "$RUNNER_TEMP/harness"
+          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
+      - name: install just (tools.lock)
+        run: '"$HARNESS/scripts/install-tool.sh" just'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: ${{ inputs.prefix }}-${{ env.TARGET }}-*
+          path: dl
+      - name: one directory per image, as the build left it
+        env:
+          PREFIX: ${{ inputs.prefix }}
+        run: |
+          mkdir -p out
+          for d in dl/"$PREFIX-$TARGET"-*; do mv "$d" "out/ironflockos-${d#dl/"$PREFIX"-}"; done
+          ls out/
+      - name: just build ${{ env.TARGET }} installer (${{ env.IRONFLOCKOS_SIGNING }})
+        env:
+          IRONFLOCKOS_WORK: /mnt/ironflockos-work
+        run: |
+          sudo mkdir -p /mnt/ironflockos-work
+          just build "$TARGET" installer
+      # Every file as built, for the manifest a release may reuse the images
+      # by (build/reuse.sh, ADR-0018).
+      - name: the list of the files as built (release builds)
+        if: inputs.signing == 'release'
+        run: |
+          mkdir -p "$RUNNER_TEMP/files"
+          build/reuse.sh list "out/ironflockos-$TARGET-installer" > "$RUNNER_TEMP/files/ironflockos-$TARGET-installer.tsv"
+      - name: upload the installer image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.prefix }}-${{ env.TARGET }}-installer
+          path: out/ironflockos-${{ env.TARGET }}-installer/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: upload the list (release builds)
+        if: inputs.signing == 'release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: files-${{ inputs.prefix }}-${{ env.TARGET }}-installer
+          path: ${{ runner.temp }}/files/ironflockos-${{ env.TARGET }}-installer.tsv
+          if-no-files-found: error
+          retention-days: 3

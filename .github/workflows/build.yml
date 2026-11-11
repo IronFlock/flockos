@@ -1,14 +1,15 @@
-# The IronFlockOS images, each built in the build container
-# (build/run-in-builder.sh): every target, variant and kernel, and the
-# installer sticks of amd64-efi and arm64-efi, each carrying every image of
-# its target.
-# Called by ci.yml with signing dev (throwaway keys, images and bundles trust
-# only each other) and by release.yml with signing release (the images trust
-# the IronFlockOS root CA; each bundle is sealed with a key of its build and gets
-# its release signature in release.yml's sign job). Each image is the
-# artifact <prefix>-<target>-<variant>[-rt]: image-* from ci.yml,
-# release-image-* from release.yml, which a release pull request's ci runs in
-# the same workflow run.
+# Every IronFlockOS image, each built in the build container
+# (build/run-in-builder.sh, image.yml): every target, variant and kernel, and
+# the installer sticks of amd64-efi and arm64-efi (installer.yml), each
+# carrying every image of its target.
+# Called by release.yml with signing release (the images trust the
+# IronFlockOS root CA; each bundle is sealed with a key of its build and gets
+# its release signature in release.yml's sign job). ci.yml builds the same
+# images one job each, with signing dev, so that each image's test starts as
+# soon as its image is built. Each image is the artifact
+# <prefix>-<target>-<variant>[-rt]: image-* from ci.yml, release-image-* from
+# release.yml, which a release pull request's ci runs in the same workflow
+# run.
 name: build
 
 on:
@@ -29,18 +30,13 @@ on:
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   # The base variant with both kernels on the EFI targets (master plan,
   # section 3.11); nvidia and the Pi with the standard kernel. amd64 on x86
-  # runners, arm64 on arm64 runners: the build container runs natively.
+  # runners, arm64 on arm64 runners: the build container runs natively. The
+  # same list as ci.yml's image jobs (test/unit/release-signing.bats).
   image:
     name: image (${{ matrix.target }}, ${{ matrix.variant }}${{ matrix.kernel == 'rt' && ', rt' || '' }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -71,59 +67,14 @@ jobs:
             variant: base
             kernel: std
             runner: ubuntu-24.04-arm
-    env:
-      TARGET: ${{ matrix.target }}
-      VARIANT: ${{ matrix.variant }}
-      KERNEL: ${{ matrix.kernel }}
-      SUFFIX: ${{ matrix.kernel == 'rt' && '-rt' || '' }}
-      FLOCKOS_SIGNING: ${{ inputs.signing }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: v1
-          path: .harness
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-            tools.lock
-          sparse-checkout-cone-mode: false
-      - name: move harness out of the workspace
-        run: |
-          mv .harness "$RUNNER_TEMP/harness"
-          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
-      - name: install just (tools.lock)
-        run: '"$HARNESS/scripts/install-tool.sh" just'
-      - name: scratch space on the runner's second disk
-        run: |
-          sudo mkdir -p /mnt/flockos-work
-          df -h / /mnt
-      - name: just build ${{ env.TARGET }} ${{ env.VARIANT }} ${{ env.KERNEL }} (${{ env.FLOCKOS_SIGNING }})
-        env:
-          FLOCKOS_WORK: /mnt/flockos-work
-        run: just build "$TARGET" "$VARIANT" "$KERNEL"
-      # The release's SBOM of the image (CycloneDX, from the tree the build
-      # left in its scratch space), published with it.
-      - name: SBOM of the image (release builds)
-        if: inputs.signing == 'release'
-        run: |
-          "$HARNESS/scripts/install-tool.sh" trivy
-          image=flockos-$TARGET-$VARIANT$SUFFIX
-          version=$(tr -d '[:space:]' < VERSION)
-          sudo env "PATH=$PATH" trivy rootfs --quiet --scanners vuln --format cyclonedx \
-            --output "out/$image/$image-$version.cdx.json" "/mnt/flockos-work/$image/rootfs"
-          sudo chown "$(id -u):$(id -g)" "out/$image/$image-$version.cdx.json"
-      - name: upload the image and bundle
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ${{ inputs.prefix }}-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
-          path: out/flockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 3
+    uses: ./.github/workflows/image.yml
+    with:
+      target: ${{ matrix.target }}
+      variant: ${{ matrix.variant }}
+      kernel: ${{ matrix.kernel }}
+      runner: ${{ matrix.runner }}
+      signing: ${{ inputs.signing }}
+      prefix: ${{ inputs.prefix }}
 
   # The installer sticks of the EFI targets, each carrying every variant of its
   # target built above (INSTALLER_PAYLOADS in target.conf); installer.conf on
@@ -131,8 +82,6 @@ jobs:
   installer:
     name: installer (${{ matrix.target }})
     needs: [image]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -143,51 +92,9 @@ jobs:
             runner: ubuntu-latest
           - target: arm64-efi
             runner: ubuntu-24.04-arm
-    env:
-      TARGET: ${{ matrix.target }}
-      FLOCKOS_SIGNING: ${{ inputs.signing }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: IronFlock/workflows
-          ref: v1
-          path: .harness
-          persist-credentials: false
-          sparse-checkout: |
-            scripts
-            tools.lock
-          sparse-checkout-cone-mode: false
-      - name: move harness out of the workspace
-        run: |
-          mv .harness "$RUNNER_TEMP/harness"
-          echo "HARNESS=$RUNNER_TEMP/harness" >> "$GITHUB_ENV"
-      - name: install just (tools.lock)
-        run: '"$HARNESS/scripts/install-tool.sh" just'
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: ${{ inputs.prefix }}-${{ env.TARGET }}-*
-          path: dl
-      - name: one directory per image, as the build left it
-        env:
-          PREFIX: ${{ inputs.prefix }}
-        run: |
-          mkdir -p out
-          for d in dl/"$PREFIX-$TARGET"-*; do mv "$d" "out/flockos-${d#dl/"$PREFIX"-}"; done
-          ls out/
-      - name: just build ${{ env.TARGET }} installer (${{ env.FLOCKOS_SIGNING }})
-        env:
-          FLOCKOS_WORK: /mnt/flockos-work
-        run: |
-          sudo mkdir -p /mnt/flockos-work
-          just build "$TARGET" installer
-      - name: upload the installer image
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ${{ inputs.prefix }}-${{ env.TARGET }}-installer
-          path: out/flockos-${{ env.TARGET }}-installer/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 3
+    uses: ./.github/workflows/installer.yml
+    with:
+      target: ${{ matrix.target }}
+      runner: ${{ matrix.runner }}
+      signing: ${{ inputs.signing }}
+      prefix: ${{ inputs.prefix }}

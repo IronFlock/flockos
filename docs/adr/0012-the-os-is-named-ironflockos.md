@@ -1,6 +1,7 @@
 # ADR-0012: The OS is named IronFlockOS, and machine identifiers keep flockos
 
-Status: accepted, 2026-11-09.
+Status: accepted, 2026-11-09. The identifiers that keep `flockos` below are renamed after
+all: [ADR-0017](0017-every-name-is-ironflockos.md), 2026-11-11.
 
 ## Context
 

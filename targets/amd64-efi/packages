@@ -10,7 +10,7 @@ grub-common
 firmware-intel-graphics
 firmware-sof-signed
 # The Secure Boot chain (ADR-0011), which build/mkimage.sh copies onto the
-# FLOCKOS partition: Debian's shim, signed by Microsoft; MokManager, which
+# IRONFLOCKOS partition: Debian's shim, signed by Microsoft; MokManager, which
 # shim starts when a check fails; Debian's signed GRUB. Debian's kernels are
 # signed already. Listed here so packages.tsv and the SBOM carry them.
 shim-signed

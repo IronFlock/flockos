@@ -4,7 +4,7 @@
 # same image as CI; CI stays the build of record.
 
 VERSION := `cat VERSION | tr -d '[:space:]'`
-RELEASE_NAME := "flockos"
+RELEASE_NAME := "ironflockos"
 VERSION_FILE := "VERSION"
 
 # Every file _write-version changes; the release commit holds exactly these.
@@ -78,7 +78,7 @@ build TARGET="amd64-efi" VARIANT="base" KERNEL="std":
 
 # Build only an image's root tree (no disk image, no bundle), for the rootfs scan; in ROOTFS_WORK when set (the harness)
 rootfs TARGET="amd64-efi" VARIANT="base" KERNEL="std":
-    FLOCKOS_STAGES=rootfs FLOCKOS_WORK="${ROOTFS_WORK:-${FLOCKOS_WORK:-flockos-work}}" build/run-in-builder.sh {{ TARGET }} {{ VARIANT }} {{ KERNEL }}
+    IRONFLOCKOS_STAGES=rootfs IRONFLOCKOS_WORK="${ROOTFS_WORK:-${IRONFLOCKOS_WORK:-ironflockos-work}}" build/run-in-builder.sh {{ TARGET }} {{ VARIANT }} {{ KERNEL }}
 
 # Re-sign a release build's sealed bundles in out/ (dry-run: a throwaway stand-in signer)
 sign-bundles MODE="dry-run":
@@ -144,7 +144,7 @@ promote CHANNEL RELEASE="":
         exit 1
     fi
     # Read for the question below; the workflow verifies the catalog itself.
-    catalog=$(curl -fsS --proto '=https' --retry 3 https://instance-registry.ironflock.com/dl/flockos/manifest.json | jq -r .payload | base64 -d)
+    catalog=$(curl -fsS --proto '=https' --retry 3 https://instance-registry.ironflock.com/dl/ironflockos/manifest.json | jq -r .payload | base64 -d)
     current=$(jq -r '.channels.production // "none"' <<<"$catalog")
     version=${2:-$(jq -r '.channels.test // empty' <<<"$catalog")}
     version=${version#v}

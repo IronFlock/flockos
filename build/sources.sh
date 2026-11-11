@@ -17,7 +17,7 @@
 #
 # A plan line is "<source> <version> <pool path> <URL> <hash> <note>", tab
 # separated. The pool path is <archive>/<source>/<file> below
-# DL_BASE/flockos/sources/ (archive: debian, raspberrypi or upstream), the
+# DL_BASE/ironflockos/sources/ (archive: debian, raspberrypi or upstream), the
 # hash "SHA256:<hex>", "SHA1:<hex>" or "-" (an upstream tarball). A source
 # package whose source is not published has "-" for pool path, URL and hash
 # and its reason as the note.
@@ -171,7 +171,7 @@ resolve() {
       "$DISTRO_SECURITY_MIRROR" "$DISTRO_SUITE" "$DISTRO_COMPONENTS" "$DISTRO_KEYRING"
     printf 'Types: deb-src\nURIs: %s\nSuites: %s\nComponents: main\nSigned-By:\n' "$rpi" "$DISTRO_SUITE"
     sed -e 's/^$/./' -e 's/^/ /' "$repo/targets/rpi-arm64/apt/raspberrypi.asc"
-  } >/etc/apt/sources.list.d/flockos-sources.sources
+  } >/etc/apt/sources.list.d/ironflockos-sources.sources
   apt-get -qq -o Acquire::Retries=5 update >&2
   # apt leaves out a file it finds in the current directory.
   cd "$(mktemp -d)"
@@ -209,7 +209,7 @@ index() {
 #
 # source	version	URL or -	reason
 HEADER
-  awk -F'\t' -v base="$DL_BASE/flockos/sources/" '
+  awk -F'\t' -v base="$DL_BASE/ironflockos/sources/" '
     $3 == "-" { print $1 "\t" $2 "\t-\t" $6; next }
     { print $1 "\t" $2 "\t" base $3 }' "$plan" | LC_ALL=C sort -u
 }

@@ -11,7 +11,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=build/lib.sh
 . "$here/lib.sh"
-: "${WORK:?}" "${OUT:?}" "${IMAGE_ID:?}" "${NAME:?}" "${FLOCKOS_VERSION:?}" "${TARGET:?}" "${VARIANT:?}"
+: "${WORK:?}" "${OUT:?}" "${IMAGE_ID:?}" "${NAME:?}" "${IRONFLOCKOS_VERSION:?}" "${TARGET:?}" "${VARIANT:?}"
 require rauc mksquashfs
 # shellcheck disable=SC1091 # written by build/signing.sh
 . "$WORK/pki/signing.env"
@@ -33,9 +33,9 @@ fi
 cat >"$content/manifest.raucm" <<MANIFEST
 [update]
 compatible=$IMAGE_ID
-version=$FLOCKOS_VERSION
+version=$IRONFLOCKOS_VERSION
 build=$build_id
-description=IronFlockOS $FLOCKOS_VERSION ($TARGET, $VARIANT)
+description=IronFlockOS $IRONFLOCKOS_VERSION ($TARGET, $VARIANT)
 
 [bundle]
 format=verity

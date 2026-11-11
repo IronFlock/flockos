@@ -56,9 +56,9 @@ setup() {
 }
 
 @test "RAUC: the custom backend over APP and APP_b" {
-  run bash -c ". '$repo/build/lib.sh'; COMPATIBLE=flockos-jetson-orin-base render '$t/system.conf'"
+  run bash -c ". '$repo/build/lib.sh'; COMPATIBLE=ironflockos-jetson-orin-base render '$t/system.conf'"
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qx 'compatible=flockos-jetson-orin-base'
+  printf '%s\n' "$output" | grep -qx 'compatible=ironflockos-jetson-orin-base'
   printf '%s\n' "$output" | grep -qx 'bootloader=custom'
   printf '%s\n' "$output" | grep -A1 '^\[slot.rootfs.0\]' | grep -qx 'device=/dev/disk/by-partlabel/APP'
   printf '%s\n' "$output" | grep -A1 '^\[slot.rootfs.1\]' | grep -qx 'device=/dev/disk/by-partlabel/APP_b'
@@ -66,10 +66,10 @@ setup() {
 }
 
 @test "the build makes jetson-orin in the base variant with the standard kernel only" {
-  export FLOCKOS_VERSION=0.0.0 FLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
-  FLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin nvidia std
+  export IRONFLOCKOS_VERSION=0.0.0 IRONFLOCKOS_COMMIT=0 SOURCE_DATE_EPOCH=0
+  IRONFLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin nvidia std
   [ "$status" -ne 0 ] && [[ "$output" == *"jetson-orin is built in the base variant only"* ]]
-  FLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin base rt
+  IRONFLOCKOS_STAGES=rootfs run bash "$repo/build/build.sh" jetson-orin base rt
   [ "$status" -ne 0 ] && [[ "$output" == *"the rt kernel is built for the EFI targets only"* ]]
 }
 
@@ -77,7 +77,7 @@ setup() {
   run bash -c ". '$repo/build/lib.sh'; load_conf '$t/target.conf'; SLOT=A ROOT_PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e render '$t/boot/extlinux.conf'"
   [ "$status" -eq 0 ]
   [[ "$output" != *"@"*"@"* ]]
-  printf '%s\n' "$output" | grep -qx 'DEFAULT flockos'
+  printf '%s\n' "$output" | grep -qx 'DEFAULT ironflockos'
   printf '%s\n' "$output" | grep -qE '^[[:space:]]+LINUX /boot/Image$'
   printf '%s\n' "$output" | grep -qE '^[[:space:]]+INITRD /boot/initrd$'
   append=$(printf '%s\n' "$output" | sed -n 's/^[[:space:]]*APPEND //p')
@@ -87,11 +87,11 @@ setup() {
   [[ " $append " == *" panic=10 "* ]]
 }
 
-extlinux_tool="$repo/targets/jetson-orin/overlay/usr/lib/flockos/tegra-extlinux"
+extlinux_tool="$repo/targets/jetson-orin/overlay/usr/lib/ironflockos/tegra-extlinux"
 
 @test "tegra-extlinux points the bundle's extlinux.conf at slot B" {
   dir=$(mktemp -d)
-  printf '# a comment with root=x\nDEFAULT flockos\nLABEL flockos\n\tLINUX /boot/Image\n\tAPPEND ${cbootargs} root=PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e rw rootwait console=ttyTCU0,115200 rauc.slot=A\n' >"$dir/extlinux.conf"
+  printf '# a comment with root=x\nDEFAULT ironflockos\nLABEL ironflockos\n\tLINUX /boot/Image\n\tAPPEND ${cbootargs} root=PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e rw rootwait console=ttyTCU0,115200 rauc.slot=A\n' >"$dir/extlinux.conf"
   run "$extlinux_tool" "$dir/extlinux.conf" 5c0ffee0-1234-4abc-8def-0123456789ab B
   [ "$status" -eq 0 ]
   grep -qx $'\tAPPEND ${cbootargs} root=PARTUUID=5c0ffee0-1234-4abc-8def-0123456789ab rw rootwait console=ttyTCU0,115200 rauc.slot=B' "$dir/extlinux.conf"
@@ -204,8 +204,8 @@ print(app_b.find("size").text.strip(), app_b.get("id"))
 @test "the Jetson image is slot A's filesystem, and the ESP is /boot/efi" {
   grep -q 'tegra) bash "$here/mkimage-tegra.sh"' "$repo/build/build.sh"
   grep -q 'files=(\*.rootfs.ext4.zst)' "$repo/build/build.sh"
-  grep -q 's|^PARTLABEL=FLOCKOS  /boot/efi |PARTLABEL=esp      /boot/efi |' "$repo/build/customize.sh"
-  grep -q '^PARTLABEL=FLOCKOS  /boot/efi ' "$repo/overlay/etc/fstab"
+  grep -q 's|^PARTLABEL=IRONFLOCKOS  /boot/efi |PARTLABEL=esp          /boot/efi |' "$repo/build/customize.sh"
+  grep -q '^PARTLABEL=IRONFLOCKOS  /boot/efi ' "$repo/overlay/etc/fstab"
 }
 
 @test "tegra-flash-package checks its arguments before it touches anything" {

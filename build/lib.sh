@@ -42,6 +42,25 @@ load_conf() {
   done <"$file"
 }
 
+# build_commit REPO [COMMIT]: "<commit> <epoch>", the commit a build names
+# (BUILD_ID) and its time (SOURCE_DATE_EPOCH): COMMIT when it is given and has
+# the tree of REPO's HEAD, else HEAD. CI on a pull request passes the pull
+# request's head: GitHub keeps it (refs/pull/<n>/head), while HEAD there is a
+# test merge that GitHub drops, and a release may reuse those images.
+build_commit() {
+  local repo=$1 want=${2:-} commit
+  commit=$(git -C "$repo" rev-parse HEAD)
+  if [ -n "$want" ] && [ "$want" != "$commit" ]; then
+    if [[ "$want" =~ ^[0-9a-f]{40}$ ]] && git -C "$repo" cat-file -e "$want^{commit}" 2>/dev/null &&
+      [ "$(git -C "$repo" rev-parse "$want^{tree}")" = "$(git -C "$repo" rev-parse "HEAD^{tree}")" ]; then
+      commit=$want
+    else
+      warn "$want is no commit here with the tree of HEAD: the build names HEAD, $commit"
+    fi
+  fi
+  printf '%s %s\n' "$commit" "$(git -C "$repo" log -1 --format=%ct "$commit")"
+}
+
 # slot_fill EXT4_IMAGE: how full a root slot's filesystem is, as
 # "<used percent> <used bytes> <size bytes>" from its superblock (ext4's own
 # overhead included).
@@ -59,11 +78,11 @@ slot_fill() {
 # check_slot_fill EXT4_IMAGE NAME: a root slot's size is fixed for a
 # device's lifetime (rootfs-b and /data are made once, on the first boot), so
 # every later release has to fit the slots of the oldest device in the field.
-# This warns (and annotates the CI run) from FLOCKOS_SLOT_FILL_WARN percent
-# and fails the build from FLOCKOS_SLOT_FILL_MAX, releases before a tree
+# This warns (and annotates the CI run) from IRONFLOCKOS_SLOT_FILL_WARN percent
+# and fails the build from IRONFLOCKOS_SLOT_FILL_MAX, releases before a tree
 # outgrows its slot.
 check_slot_fill() {
-  local warn_at=${FLOCKOS_SLOT_FILL_WARN:-75} max=${FLOCKOS_SLOT_FILL_MAX:-90} pct used size msg
+  local warn_at=${IRONFLOCKOS_SLOT_FILL_WARN:-75} max=${IRONFLOCKOS_SLOT_FILL_MAX:-90} pct used size msg
   read -r pct used size <<<"$(slot_fill "$1")"
   msg="$2: the root slot is ${pct}% full ($((used >> 20)) MiB of $((size >> 20)) MiB)"
   if [ "$pct" -ge "$max" ]; then
@@ -160,14 +179,18 @@ min_disk_size() {
 
 # hardware_list ROOT KERNEL...: the devices the kernels of the tree ROOT have a
 # driver for, which `ironflock os install` matches a machine's disk controller
-# and network card against: the "alias <pattern> <module>" lines of each
-# kernel's modules.alias (drivers built as modules), then the same lines for
-# the drivers built into the kernel, which modules.alias leaves out, each
-# kernel's after a comment line. depmod puts the built-in ones only into the
-# binary modules.builtin.alias.bin; it reads them from modules.builtin.modinfo
-# ("<module>.alias=<pattern>" records, NUL-separated), which the kernel
-# package ships (Debian's and the Raspberry Pi's 6.12 kernels do), and so
-# does this. Fails when a kernel lacks either file.
+# and network card against. For each kernel, after a comment line:
+#   - "alias <pattern> <module>" lines: the kernel's modules.alias (drivers
+#     built as modules), then the aliases of modules.builtin.modinfo
+#     ("<module>.alias=<pattern>" records, NUL-separated). On 6.12 that file
+#     holds only the aliases a built-in driver declares by name (fs-ext4),
+#     not those of its device table: a built-in driver such as virtio_pci
+#     has no alias line at all.
+#   - "builtin <module>" lines: every driver built into the kernel, from
+#     modules.builtin ("kernel/drivers/virtio/virtio_pci.ko"), the file's
+#     base name without .ko.
+# Debian's and the Raspberry Pi's 6.12 kernel packages ship modules.builtin
+# and modules.builtin.modinfo. Fails when a kernel lacks any of the three.
 hardware_list() {
   local root=$1 v dir
   shift
@@ -176,9 +199,12 @@ hardware_list() {
     [ -s "$dir/modules.alias" ] || die "kernel $v has no modules.alias in ${dir#"$root"} (depmod)"
     [ -s "$dir/modules.builtin.modinfo" ] ||
       die "kernel $v has no modules.builtin.modinfo in ${dir#"$root"}: no list of its built-in drivers"
-    echo "# kernel $v: modules.alias and the aliases of modules.builtin.modinfo"
+    [ -s "$dir/modules.builtin" ] ||
+      die "kernel $v has no modules.builtin in ${dir#"$root"}: no list of its built-in drivers"
+    echo "# kernel $v: alias lines of modules.alias and modules.builtin.modinfo, builtin lines of modules.builtin"
     grep '^alias ' "$dir/modules.alias" || true
     tr '\0' '\n' <"$dir/modules.builtin.modinfo" | sed -n 's/^\([^.=]*\)\.alias=\(..*\)$/alias \2 \1/p'
+    sed -n 's|^.*/||; s|^\(..*\)\.ko$|builtin \1|p' "$dir/modules.builtin"
   done
 }
 
@@ -199,10 +225,10 @@ valid_target() { case "$1" in amd64-efi | arm64-efi | rpi-arm64 | jetson-orin) r
 valid_variant() { case "$1" in base | nvidia | installer) return 0 ;; *) return 1 ;; esac }
 valid_kernel() { case "$1" in std | rt) return 0 ;; *) return 1 ;; esac }
 
-# image_id TARGET VARIANT KERNEL: flockos-<target>-<variant>[-rt], the RAUC
+# image_id TARGET VARIANT KERNEL: ironflockos-<target>-<variant>[-rt], the RAUC
 # compatible and IMAGE_ID of the image.
 image_id() {
-  local id="flockos-$1-$2"
+  local id="ironflockos-$1-$2"
   [ "$3" = rt ] && id="$id-rt"
   printf '%s' "$id"
 }
@@ -211,7 +237,7 @@ image_id() {
 # target has the same partition and filesystem ids.
 uuid_for() {
   local h
-  h=$(printf 'flockos:%s:%s' "${IMAGE_ID:?}" "$1" | sha256sum | cut -c1-32)
+  h=$(printf 'ironflockos:%s:%s' "${IMAGE_ID:?}" "$1" | sha256sum | cut -c1-32)
   printf '%s-%s-4%s-8%s-%s' "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}"
 }
 

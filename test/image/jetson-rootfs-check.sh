@@ -2,7 +2,7 @@
 # Checks of jetson-orin's root tree without a Jetson (WP-6.2): Ubuntu 24.04
 # with NVIDIA's L4T packages at the pinned versions, IronFlockOS on top, and the
 # tree's own binaries run in a chroot (native on an arm64 host). The tree is
-# what `just rootfs jetson-orin base` leaves in FLOCKOS_WORK; the boot is a
+# what `just rootfs jetson-orin base` leaves in IRONFLOCKOS_WORK; the boot is a
 # hardware check once the layout and flash package exist (WP-6.4, WP-6.6).
 #   sudo test/image/jetson-rootfs-check.sh ROOT
 set -euo pipefail
@@ -49,7 +49,7 @@ version_of() { dpkg-query --admindir="$root/var/lib/dpkg" -W -f '${Version}' "$1
 
 # --- identity --------------------------------------------------------------
 osr=$root/usr/lib/os-release
-check "os-release names flockos-jetson-orin-base" grep -qx 'IMAGE_ID=flockos-jetson-orin-base' "$osr"
+check "os-release names ironflockos-jetson-orin-base" grep -qx 'IMAGE_ID=ironflockos-jetson-orin-base' "$osr"
 check "os-release: ID_LIKE is Ubuntu's" grep -qx 'ID_LIKE="ubuntu debian"' "$osr"
 check "the distribution is Ubuntu 24.04" grep -qx 'DISTRIB_CODENAME=noble' "$root/etc/lsb-release"
 
@@ -81,7 +81,7 @@ check "extlinux.conf boots /boot/Image with /boot/initrd" \
 check "extlinux.conf mounts slot A by PARTUUID and names it for RAUC" \
   bash -c "grep -E '^[[:space:]]+APPEND ' '$ext' | grep -E ' root=PARTUUID=[0-9a-f-]{36} ' | grep -q ' rauc.slot=A'"
 check "tegra-extlinux is executable (rauc-post-install points written slots at themselves)" \
-  test -x "$root/usr/lib/flockos/tegra-extlinux"
+  test -x "$root/usr/lib/ironflockos/tegra-extlinux"
 
 # --- apt -------------------------------------------------------------------
 sl=$root/etc/apt/sources.list.d
@@ -90,34 +90,38 @@ check "sources: Ubuntu, Docker, NVIDIA's L4T" \
 check "Ubuntu's sources are signed by ubuntu-archive-keyring" \
   grep -qx 'Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg' "$sl/ubuntu.sources"
 check "the keyring is in the tree" test -s "$root/usr/share/keyrings/ubuntu-archive-keyring.gpg"
-check "the L4T pins are kept" grep -q "Pin: version $L4T_PACKAGE_VERSION" "$root/etc/apt/preferences.d/flockos-l4t.pref"
+check "the L4T pins are kept" grep -q "Pin: version $L4T_PACKAGE_VERSION" "$root/etc/apt/preferences.d/ironflockos-l4t.pref"
 
 # --- IronFlockOS ---------------------------------------------------------------
 check "RAUC: compatible, the custom backend, APP and APP_b" \
-  bash -c "c='$root/etc/rauc/system.conf'; grep -qx compatible=flockos-jetson-orin-base \$c && grep -qx bootloader=custom \$c && grep -qx device=/dev/disk/by-partlabel/APP \$c && grep -qx device=/dev/disk/by-partlabel/APP_b \$c"
+  bash -c "c='$root/etc/rauc/system.conf'; grep -qx compatible=ironflockos-jetson-orin-base \$c && grep -qx bootloader=custom \$c && grep -qx device=/dev/disk/by-partlabel/APP \$c && grep -qx device=/dev/disk/by-partlabel/APP_b \$c"
 check "no repart.d (NVIDIA's flash writes the layout)" test ! -e "$root/usr/lib/repart.d"
 check "fstab: /boot/efi is NVIDIA's ESP, /data the layout's data partition" \
-  bash -c "grep -q '^PARTLABEL=esp  *[/]boot[/]efi  *vfat ' '$root/etc/fstab' && grep -q '^PARTLABEL=data  *[/]data ' '$root/etc/fstab' && ! grep -q '^PARTLABEL=FLOCKOS' '$root/etc/fstab'"
+  bash -c "grep -q '^PARTLABEL=esp  *[/]boot[/]efi  *vfat ' '$root/etc/fstab' && grep -q '^PARTLABEL=data  *[/]data ' '$root/etc/fstab' && ! grep -q '^PARTLABEL=IRONFLOCKOS' '$root/etc/fstab'"
 check "the apps' data is /data/apps, the mount point in the tree" \
   bash -c "grep -q '^/data/apps  *[/]apps  *none  *bind,.*nofail' '$root/etc/fstab' && test -d '$root/apps'"
-for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
-  docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
-  flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
-  flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
+for unit in ironflockos-ssh-hostkeys.service ironflockos-enroll.service ssh.service \
+  docker.service NetworkManager.service chrony.service ironflockos-ptp.service ironflockos-ptp.path \
+  ironflockos-ptp4l.service ironflockos-phc2sys.service ironflockos-proxy.service ironflockos-proxy.path \
+  ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$root/usr/lib/systemd/system/systemd-timesyncd.service"
 check "a factory reset runs before /data is mounted, and no mount stops the boot (ADR-0015)" \
-  bash -c "test -x '$root/usr/lib/flockos/factory-reset' && test -e '$root/usr/lib/systemd/system/data.mount.wants/flockos-factory-reset.service' && test -e '$root/usr/lib/systemd/system/data.mount.wants/flockos-data-missing.service' && ! grep -v '^#' '$root/etc/fstab' | grep . | grep -v nofail"
+  bash -c "test -x '$root/usr/lib/ironflockos/factory-reset' && test -e '$root/usr/lib/systemd/system/data.mount.wants/ironflockos-factory-reset.service' && test -e '$root/usr/lib/systemd/system/data.mount.wants/ironflockos-data-missing.service' && ! grep -v '^#' '$root/etc/fstab' | grep . | grep -v nofail"
 for setting in ptp.conf proxy.conf; do
-  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/flockos/$setting')\" = /data/flockos/$setting ]"
+  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/ironflockos/$setting')\" = /data/ironflockos/$setting ]"
 done
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
-  test ! -e "$root/usr/lib/systemd/system/flockos-mark-good.service"
+  test ! -e "$root/usr/lib/systemd/system/ironflockos-mark-good.service"
 for unit in rauc-mark-good.service nv-l4t-bootloader-config.service nv-rootfs-validation-config.service; do
   check "$unit is masked" bash -c "[ \"\$(systemctl --root='$root' is-enabled $unit)\" = masked ]"
 done
 check "the agent is baked in" test -x "$root/usr/lib/ironflock/device-agent"
+check "ironflock is baked in as /usr/bin/ironflock" test -x "$root/usr/bin/ironflock"
+check "image.json names ironflock_version, not the init_version of ironflock-init" \
+  jq -e '(.ironflock_version | type == "string" and length > 0) and (has("init_version") | not)' "$root/usr/lib/ironflock/image.json"
+check "nothing named ironflock-init in the tree" bash -c "! find '$root' -xdev -name '*ironflock-init*' | grep -q ."
 check "Docker has the nvidia runtime" \
   jq -e '.runtimes.nvidia.path == "/usr/bin/nvidia-container-runtime"' "$root/etc/docker/daemon.json"
 check "NVIDIA's container CSVs (the host files a GPU container gets)" \
@@ -135,7 +139,7 @@ check "chroot: systemd runs" in_root /usr/bin/systemctl --version
 check "chroot: Docker's CLI runs" in_root /usr/bin/docker --version
 check "chroot: containerd runs" in_root /usr/bin/containerd --version
 check "chroot: RAUC runs" in_root /usr/bin/rauc --version
-check "chroot: ironflock-init runs" in_root /usr/sbin/ironflock-init version
+check "chroot: ironflock runs" in_root /usr/bin/ironflock version
 check "chroot: nvidia-ctk runs" in_root /usr/bin/nvidia-ctk --version
 check "chroot: nvidia-container-cli runs" in_root /usr/bin/nvidia-container-cli --version
 check "nvbootctrl is there (the RAUC backend's tool, WP-6.3)" test -x "$root/usr/sbin/nvbootctrl"

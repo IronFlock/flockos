@@ -1,0 +1,21 @@
+[Unit]
+Description=IronFlockOS: proxy and NTP servers from /etc/ironflockos/proxy.conf
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+# /data, the IRONFLOCKOS partition and the agent's .flock copy on /opt/ironflock,
+# after them but not requiring /data or IRONFLOCKOS: without them (ADR-0015) the
+# proxy still reaches the agent from what there is.
+After=local-fs.target ironflockos-data-layout.service boot-efi.mount data.mount
+RequiresMountsFor=/opt/ironflock
+# Everything that reads /run/ironflockos/proxy.env or the NTP servers, at its
+# start. Not after ironflockos-enroll, which runs after Docker: on a first boot
+# the .flock is still on the IRONFLOCKOS partition, where this reads it.
+Before=containerd.service docker.service ironflock-device-agent.service chrony.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ironflockos/proxy
+
+[Install]
+WantedBy=multi-user.target
+Also=ironflockos-proxy.path

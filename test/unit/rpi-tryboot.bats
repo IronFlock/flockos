@@ -4,17 +4,17 @@
 # vcmailbox that records what it was asked.
 
 repo="$BATS_TEST_DIRNAME/../.."
-backend="$repo/targets/rpi-arm64/overlay/usr/lib/flockos/rpi-tryboot"
+backend="$repo/targets/rpi-arm64/overlay/usr/lib/ironflockos/rpi-tryboot"
 
 setup() {
   dir=$(mktemp -d)
-  export FLOCKOS_AUTOBOOT=$dir/autoboot.txt
-  export FLOCKOS_BOOTLOADER_DT=$dir/dt
-  export FLOCKOS_TRYBOOT_STATE=$dir/data/rauc/state
-  export FLOCKOS_VCMAILBOX=$dir/vcmailbox
-  mkdir -p "$FLOCKOS_BOOTLOADER_DT"
-  printf '#!/bin/sh\necho "$*" >>%s/mailbox.log\n' "$dir" >"$FLOCKOS_VCMAILBOX"
-  chmod +x "$FLOCKOS_VCMAILBOX"
+  export IRONFLOCKOS_AUTOBOOT=$dir/autoboot.txt
+  export IRONFLOCKOS_BOOTLOADER_DT=$dir/dt
+  export IRONFLOCKOS_TRYBOOT_STATE=$dir/data/rauc/state
+  export IRONFLOCKOS_VCMAILBOX=$dir/vcmailbox
+  mkdir -p "$IRONFLOCKOS_BOOTLOADER_DT"
+  printf '#!/bin/sh\necho "$*" >>%s/mailbox.log\n' "$dir" >"$IRONFLOCKOS_VCMAILBOX"
+  chmod +x "$IRONFLOCKOS_VCMAILBOX"
   autoboot 2
   booted 2 0
 }
@@ -26,21 +26,21 @@ teardown() { rm -rf "$dir"; }
 autoboot() {
   local other=3
   [ "$1" = 2 ] || other=2
-  printf '[all]\ntryboot_a_b=1\nboot_partition=%s\n[tryboot]\nboot_partition=%s\n' "$1" "$other" >"$FLOCKOS_AUTOBOOT"
+  printf '[all]\ntryboot_a_b=1\nboot_partition=%s\n[tryboot]\nboot_partition=%s\n' "$1" "$other" >"$IRONFLOCKOS_AUTOBOOT"
 }
 # booted PARTITION TRYBOOT: what the firmware reports, as 32-bit big-endian cells.
 booted() {
-  printf "\\x00\\x00\\x00\\x0$1" >"$FLOCKOS_BOOTLOADER_DT/partition"
-  printf "\\x00\\x00\\x00\\x0$2" >"$FLOCKOS_BOOTLOADER_DT/tryboot"
+  printf "\\x00\\x00\\x00\\x0$1" >"$IRONFLOCKOS_BOOTLOADER_DT/partition"
+  printf "\\x00\\x00\\x00\\x0$2" >"$IRONFLOCKOS_BOOTLOADER_DT/tryboot"
 }
 section() { # section NAME: boot_partition of [NAME]
-  awk -v s="[$1]" '/^\[.*\]$/ { in_s = ($0 == s); next } in_s && /^boot_partition=/ { sub(/^boot_partition=/, ""); print }' "$FLOCKOS_AUTOBOOT"
+  awk -v s="[$1]" '/^\[.*\]$/ { in_s = ($0 == s); next } in_s && /^boot_partition=/ { sub(/^boot_partition=/, ""); print }' "$IRONFLOCKOS_AUTOBOOT"
 }
 mailbox() { cat "$dir/mailbox.log" 2>/dev/null || true; }
-state() { sed -n "s/^$1=//p" "$FLOCKOS_TRYBOOT_STATE" 2>/dev/null || true; }
+state() { sed -n "s/^$1=//p" "$IRONFLOCKOS_TRYBOOT_STATE" 2>/dev/null || true; }
 
 @test "the image's autoboot.txt is what the backend writes for slot A" {
-  run diff "$repo/targets/rpi-arm64/boot/autoboot.txt" "$FLOCKOS_AUTOBOOT"
+  run diff "$repo/targets/rpi-arm64/boot/autoboot.txt" "$IRONFLOCKOS_AUTOBOOT"
   [ "$status" -eq 0 ]
 }
 
@@ -53,10 +53,10 @@ state() { sed -n "s/^$1=//p" "$FLOCKOS_TRYBOOT_STATE" 2>/dev/null || true; }
 }
 
 @test "get-primary fails on a missing or foreign autoboot.txt" {
-  printf '[all]\nboot_partition=5\n' >"$FLOCKOS_AUTOBOOT"
+  printf '[all]\nboot_partition=5\n' >"$IRONFLOCKOS_AUTOBOOT"
   run "$backend" get-primary
   [ "$status" -ne 0 ]
-  rm "$FLOCKOS_AUTOBOOT"
+  rm "$IRONFLOCKOS_AUTOBOOT"
   run "$backend" get-primary
   [ "$status" -ne 0 ]
 }
@@ -70,7 +70,7 @@ state() { sed -n "s/^$1=//p" "$FLOCKOS_TRYBOOT_STATE" 2>/dev/null || true; }
 }
 
 @test "get-current fails without the firmware's device-tree node" {
-  rm -r "$FLOCKOS_BOOTLOADER_DT"
+  rm -r "$IRONFLOCKOS_BOOTLOADER_DT"
   run "$backend" get-current
   [ "$status" -ne 0 ]
   [[ "$output" == *"not started by the Raspberry Pi firmware"* ]]
@@ -82,7 +82,7 @@ state() { sed -n "s/^$1=//p" "$FLOCKOS_TRYBOOT_STATE" 2>/dev/null || true; }
   [ "$(mailbox)" = "0x00038064 4 0 1" ]
   [ "$(section all)" = 2 ] && [ "$(section tryboot)" = 3 ]
   [ "$(state B)" = trying ]
-  [ ! -e "$FLOCKOS_AUTOBOOT.new" ]
+  [ ! -e "$IRONFLOCKOS_AUTOBOOT.new" ]
 }
 
 @test "set-primary of the primary drops a pending tryboot" {
@@ -209,7 +209,7 @@ state() { sed -n "s/^$1=//p" "$FLOCKOS_TRYBOOT_STATE" 2>/dev/null || true; }
   [ "$status" -ne 0 ]
 }
 
-cmdline_tool="$repo/targets/rpi-arm64/overlay/usr/lib/flockos/rpi-cmdline"
+cmdline_tool="$repo/targets/rpi-arm64/overlay/usr/lib/ironflockos/rpi-cmdline"
 
 @test "rpi-cmdline points the bundle's cmdline.txt at slot B" {
   printf 'console=serial0,115200 console=tty1 root=PARTUUID=029565df-068d-4b3e-8d32-fc21d85f7d1e rootfstype=ext4 rootwait rw rauc.slot=A\n' >"$dir/cmdline.txt"
@@ -237,7 +237,7 @@ cmdline_tool="$repo/targets/rpi-arm64/overlay/usr/lib/flockos/rpi-cmdline"
 @test "rauc-post-install needs the boot slot's root slot" {
   RAUC_SLOTS="0 1" RAUC_TARGET_SLOTS="1" RAUC_SLOT_CLASS_1=boot RAUC_SLOT_DEVICE_1=/dev/null \
     RAUC_SLOT_PARENT_1=rootfs.1 RAUC_SLOT_NAME_0=rootfs.0 RAUC_SLOT_DEVICE_0=/dev/null RAUC_SLOT_BOOTNAME_0=A \
-    RAUC_MOUNT_PREFIX=$dir run sh "$repo/overlay/usr/lib/flockos/rauc-post-install"
+    RAUC_MOUNT_PREFIX=$dir run sh "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
   [ "$status" -ne 0 ]
   [[ "$output" == *"no root slot 'rootfs.1'"* ]]
 }
@@ -245,7 +245,7 @@ cmdline_tool="$repo/targets/rpi-arm64/overlay/usr/lib/flockos/rpi-cmdline"
 @test "rauc-post-install refuses a root slot of a boot slot that is not a block device" {
   RAUC_SLOTS="0 1" RAUC_TARGET_SLOTS="1" RAUC_SLOT_CLASS_1=boot RAUC_SLOT_DEVICE_1=/dev/null \
     RAUC_SLOT_PARENT_1=rootfs.1 RAUC_SLOT_NAME_0=rootfs.1 RAUC_SLOT_DEVICE_0=$dir/nope RAUC_SLOT_BOOTNAME_0=B \
-    RAUC_MOUNT_PREFIX=$dir run sh "$repo/overlay/usr/lib/flockos/rauc-post-install"
+    RAUC_MOUNT_PREFIX=$dir run sh "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
   [ "$status" -ne 0 ]
   [[ "$output" == *"is not a block device"* ]]
 }
