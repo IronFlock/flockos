@@ -337,10 +337,12 @@ jobs:
   # release.yml on main (a release merge) and to runs on v* tags. One job per
   # image: it re-signs the image's bundle with the bundle signer in Cloud KMS
   # through PKCS#11 and checks it against the IronFlockOS root CA
-  # (build/sign-bundles.sh), and uploads the image's files as
-  # signed-<mode>-<image>, which every later job takes. The installer has no
-  # bundle and passes through as it is. A dry run does the same with a
-  # throwaway stand-in for the signer.
+  # (build/sign-bundles.sh), then against the keyring the image itself
+  # carries (build/verify-bundles.sh, ADR-0019), and uploads the image's
+  # files as signed-<mode>-<image>, which every later job takes. The
+  # installer has no bundle and passes through as it is. A dry run does the
+  # same with a throwaway stand-in for the signer, whose bundles the image's
+  # keyring must refuse.
   sign:
     name: sign (${{ matrix.image }})
     needs: [verify, source, manifest]
@@ -392,9 +394,17 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
+      # Then the bundle as signed against the keyring its image carries
+      # (build/verify-bundles.sh), which unpacks the image on the runner's
+      # second disk.
       - name: sign the bundle (${{ env.MODE }})
         if: env.BUNDLE == 'true'
-        run: build/sign-in-builder.sh "$MODE" out
+        env:
+          IRONFLOCKOS_WORK: /mnt/ironflockos-sign
+        run: |
+          sudo mkdir -p "$IRONFLOCKOS_WORK"
+          sudo chown "$(id -u):$(id -g)" "$IRONFLOCKOS_WORK"
+          build/sign-in-builder.sh "$MODE" out
       - name: the installer has no bundle
         if: env.BUNDLE != 'true'
         run: |

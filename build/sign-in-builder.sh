@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Run build/sign-bundles.sh in the build container (build/builder.conf).
+# Run build/sign-bundles.sh in the build container (build/builder.conf), then
+# build/verify-bundles.sh: every bundle as signed against the keyring its
+# image carries.
 #   sign-in-builder.sh release|dry-run [DIR]
 #
 # DIR (default out) holds the images of a release build, one directory each.
 # For release, GOOGLE_APPLICATION_CREDENTIALS names the credentials file of
 # the workload identity (google-github-actions/auth in release.yml); it is
-# mounted read-only. Always linux/amd64: Google's PKCS#11 library exists for
-# amd64 only.
+# mounted read-only. IRONFLOCKOS_WORK, when set, is the scratch space of
+# verify-bundles.sh, which unpacks each image there. Always linux/amd64:
+# Google's PKCS#11 library exists for amd64 only.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/.." && pwd)
@@ -30,6 +33,11 @@ if [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
   creds=(-v "$GOOGLE_APPLICATION_CREDENTIALS:/run/ironflockos/gcp-credentials.json:ro"
     -e GOOGLE_APPLICATION_CREDENTIALS=/run/ironflockos/gcp-credentials.json)
 fi
+scratch=()
+if [ -n "${IRONFLOCKOS_WORK:-}" ]; then
+  [ -d "$IRONFLOCKOS_WORK" ] || die "IRONFLOCKOS_WORK names no directory"
+  scratch=(-v "$(cd "$IRONFLOCKOS_WORK" && pwd):/work" -e IRONFLOCKOS_WORK=/work)
+fi
 
 log "signing the bundles in $out ($mode) in $BUILDER_IMAGE"
 # shellcheck disable=SC2016 # expanded by the container's shell
@@ -38,6 +46,7 @@ docker run --rm \
   -v "$repo:/src:ro" \
   -v "$out:/out" \
   ${creds[@]+"${creds[@]}"} \
+  ${scratch[@]+"${scratch[@]}"} \
   -e IRONFLOCKOS_HOST_UID="$(id -u)" \
   -e IRONFLOCKOS_HOST_GID="$(id -g)" \
   -e DEBIAN_FRONTEND=noninteractive \
@@ -45,5 +54,6 @@ docker run --rm \
   bash -c 'set -e
     apt-get -qq -o Acquire::Retries=5 update
     apt-get -qq -y -o Acquire::Retries=5 install --no-install-recommends \
-      rauc openssl libengine-pkcs11-openssl curl ca-certificates >/dev/null
-    exec bash /src/build/sign-bundles.sh "$1" /out' sign "$mode"
+      rauc openssl libengine-pkcs11-openssl curl ca-certificates e2fsprogs fdisk jq >/dev/null
+    bash /src/build/sign-bundles.sh "$1" /out
+    exec bash /src/build/verify-bundles.sh "$1" /out' sign "$mode"
