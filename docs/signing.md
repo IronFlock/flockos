@@ -92,14 +92,16 @@ runs the build's packages never holds the release identity:
    The signed bundle must verify as the device verifies it: against the root
    CA, with `check-purpose=codesign` and the signing time. It must not verify
    against the sealing CA any more. `SHA256SUMS` is rewritten.
-   Then `build/verify-bundles.sh`, in the same container, checks every bundle
-   against the keyring its own image carries: it unpacks the disk image next
-   to the bundle, reads `/etc/rauc/keyring.pem` of slot A (`rootfs-a`) with
-   debugfs, and verifies the bundle against it the same way. A bundle the
-   image's keyring refuses stops the release before anything is staged. A
-   release that reuses its pull request's images runs no QEMU test after the
-   merge; this check is what shows, without a VM, that the images accept the
-   release signature ([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)).
+   Then `build/verify-bundles.sh`, in a container of its own that gets
+   neither the release identity nor write access to the images, checks every
+   bundle against the keyring its own image carries: it unpacks the disk
+   image next to the bundle, reads `/etc/rauc/keyring.pem` of slot A
+   (`rootfs-a`) with debugfs, and verifies the bundle against it the same
+   way. A bundle the image's keyring refuses stops the release before
+   anything is staged. A release that reuses its pull request's images runs
+   no QEMU test after the merge; this check is what shows, without a VM, that
+   the images accept the release signature
+   ([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)).
    The `attest` job then attests the SLSA build provenance of every image and
    bundle (Build Level 3). It is the harness's `attest-provenance.yml`, which
    runs none of this repository's code. `sign` holds a workload identity and

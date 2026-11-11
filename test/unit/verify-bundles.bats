@@ -203,10 +203,21 @@ bundle() {
 
 @test "the sign job checks every bundle against its image's keyring before anything is published" {
   sib="$repo/build/sign-in-builder.sh"
-  # in the container, after sign-bundles.sh, with the tools it needs
-  [ "$(grep -n 'bash /src/build/sign-bundles.sh' "$sib" | cut -d: -f1)" -lt "$(grep -n 'exec bash /src/build/verify-bundles.sh' "$sib" | cut -d: -f1)" ]
-  packages=$(grep -A1 'install --no-install-recommends' "$sib" | tail -n 1)
-  for pkg in rauc e2fsprogs fdisk jq; do [[ " $packages " == *" $pkg "* ]] || { echo "$pkg: $packages"; return 1; }; done
+  # two containers: sign-bundles.sh, then verify-bundles.sh
+  [ "$(grep -c '^docker run ' "$sib")" = 2 ]
+  signs=$(awk '/^docker run / { n++ } n == 1' "$sib")
+  checks=$(awk '/^docker run / { n++ } n == 2' "$sib")
+  [[ "$signs" == *'exec bash /src/build/sign-bundles.sh "$1" /out'* ]]
+  [[ "$checks" == *'exec bash /src/build/verify-bundles.sh "$1" /out'* ]]
+  # the check, which reads the images' file systems, gets neither the
+  # release identity nor write access to the images
+  [[ "$signs" == *'${creds[@]+"${creds[@]}"}'* ]]
+  [[ "$checks" != *creds* && "$checks" != *GOOGLE* ]]
+  [[ "$checks" == *'-v "$out:/out:ro"'* ]]
+  # with the tools it needs, and its scratch space
+  packages=$(grep -A1 'install --no-install-recommends' <<<"$checks" | tail -n 1)
+  for pkg in rauc openssl e2fsprogs fdisk jq; do [[ " $packages " == *" $pkg "* ]] || { echo "$pkg: $packages"; return 1; }; done
+  [[ "$checks" == *'${scratch[@]+"${scratch[@]}"}'* ]]
   # release.yml's sign job runs it on the runner's second disk; stage needs sign
   wf=$repo/.github/workflows/release.yml
   sign=$(awk '$0 == "  sign:" { f = 1; next } f && /^  [a-z][a-z-]*:$/ { exit } f' "$wf")
