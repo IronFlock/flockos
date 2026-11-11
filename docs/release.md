@@ -13,7 +13,7 @@ or published from a laptop.
 | Job | What it does | Identity |
 |-----|--------------|----------|
 | `verify` | Decides what the run is: a release, a re-run after the tag, or a dry run (harness `release.sh mode`) | none |
-| `source` | Where the images come from: a release reuses those of its pull request's dry run when it can prove they are the build of the release commit's tree, and builds them otherwise ([below](#reused-images)). The job summary says which and why | none |
+| `source` | Where the images come from: while the switch is on, a release reuses those of its pull request's dry run when it can prove they are the build of the release commit's tree, and builds them otherwise ([below](#reused-images)). The job summary says which and why | none |
 | `build` | Only when the release does not reuse: every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM. Each image's build also lists its files | none |
 | `manifest` | With a build: the manifest `build.tsv`, every file of every image with sha256 and size (`build/reuse.sh manifest`) | none |
 | `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
@@ -130,6 +130,18 @@ the build, about 15 minutes.
    `sign` job takes its image from that run, checks its files against the
    manifest once more, and signs. Otherwise the release builds, and the job
    summary says why.
+
+**The switch.** The lookup runs only while the repository variable
+`IRONFLOCKOS_REUSE` is `true` (Settings, Secrets and variables, Actions,
+Variables). Anything else is a build. A release pull request's dry run
+attests and checks its images either way.
+
+**The fall-back.** Each step of the lookup has a timeout, and any failure is
+a build. When the `source` job fails all the same, `build` runs and `sign`
+takes the built images; the run ends red for that job, but the release is
+made. Once `source` has decided to reuse, a `sign` job whose download fails
+or whose files differ from the manifest fails the release before it signs
+anything; a re-run looks up again.
 
 A reused image names the head commit of its release pull request, which has
 the release commit's tree, and that commit's time (`BUILD_ID`,

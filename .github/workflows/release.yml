@@ -116,11 +116,15 @@ jobs:
   # is this commit's, and every image's artifact, which it downloads and
   # checks file by file against the manifest. Anything it cannot prove, or
   # any error, and the release builds as before. A dry run always builds.
+  # The lookup runs only while the repository variable IRONFLOCKOS_REUSE is
+  # true; anything else is a build. Each step of the lookup has a timeout and
+  # may fail, the job's timeout is above their sum, and when the job fails
+  # all the same, build runs and sign takes the built images.
   source:
     needs: [verify]
     if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read
@@ -135,10 +139,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: the pull request's dry run (release only)
+      - name: the pull request's dry run (release only, while IRONFLOCKOS_REUSE is true)
         id: lookup
-        if: env.MODE == 'release'
+        if: env.MODE == 'release' && vars.IRONFLOCKOS_REUSE == 'true'
         continue-on-error: true
+        timeout-minutes: 10
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -148,6 +153,7 @@ jobs:
         id: download
         if: steps.lookup.outcome == 'success'
         continue-on-error: true
+        timeout-minutes: 20
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-image-*
@@ -158,18 +164,34 @@ jobs:
         id: files
         if: steps.download.outcome == 'success'
         continue-on-error: true
+        timeout-minutes: 10
         run: |
           mkdir images
           for d in dl/release-image-*; do mv "$d" "images/ironflockos-${d#dl/release-image-}"; done
           build/reuse.sh files "$RUNNER_TEMP/reuse/build.tsv" images
           cp "$RUNNER_TEMP/reuse/build.tsv" build.tsv
+      # The verified manifest goes to the sign jobs under a name of its own,
+      # so that it never meets the manifest of a build.
+      - name: the verified manifest, for the sign jobs
+        id: keep
+        if: steps.files.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-reused-manifest
+          path: build.tsv
+          if-no-files-found: error
+          retention-days: 7
       - name: reuse or build
         id: decide
         if: always()
         env:
+          SWITCH: ${{ vars.IRONFLOCKOS_REUSE }}
           LOOKUP: ${{ steps.lookup.outcome }}
           DOWNLOAD: ${{ steps.download.outcome }}
           FILES: ${{ steps.files.outcome }}
+          KEEP: ${{ steps.keep.outcome }}
           WHY: ${{ steps.lookup.outputs.why }}
           RUN: ${{ steps.lookup.outputs.run-id }}
           PR: ${{ steps.lookup.outputs.pr }}
@@ -180,12 +202,16 @@ jobs:
         run: |
           if [ "$MODE" != release ]; then
             why="a dry run builds its images"
+          elif [ "$SWITCH" != true ]; then
+            why="reuse is switched off (the repository variable IRONFLOCKOS_REUSE is not true)"
           elif [ "$LOOKUP" != success ]; then
             why=${WHY:-the lookup failed (see its log)}
           elif [ "$DOWNLOAD" != success ]; then
             why="the images of run $RUN did not download"
           elif [ "$FILES" != success ]; then
             why="the images of run $RUN are not the files its manifest lists"
+          elif [ "$KEEP" != success ]; then
+            why="the verified manifest did not upload"
           else
             why=""
           fi
@@ -198,22 +224,14 @@ jobs:
             echo "run-id=$THIS_RUN" >> "$GITHUB_OUTPUT"
             echo "**Images: built** in this run: $why." >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: the verified manifest, for the sign jobs
-        if: steps.decide.outputs.reuse == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-build-manifest
-          path: build.tsv
-          if-no-files-found: error
-          retention-days: 7
 
   # Every image as a release build (build.yml): the images trust the IronFlockOS
   # root CA, and each bundle is sealed with a throwaway key of its build. No
   # job of the build holds the release identity. Skipped when the release
-  # reuses its pull request's images.
+  # reuses its pull request's images; it runs when source failed.
   build:
     needs: [verify, source]
-    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && needs.source.outputs.reuse != 'true' }}
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
@@ -225,7 +243,7 @@ jobs:
   # image as built, by sha256 and size, from the build's lists.
   manifest:
     needs: [verify, source, build]
-    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && needs.source.outputs.reuse != 'true' }}
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -328,9 +346,11 @@ jobs:
     needs: [verify, source, manifest]
     # After the manifest of this run's build, or without it when the
     # release reuses its pull request's images (no build, no manifest job).
-    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && (needs.manifest.result == 'success' || (needs.source.outputs.reuse == 'true' && needs.manifest.result == 'skipped')) }}
+    # Once source has decided to reuse, a sign job cannot fall back to a
+    # build: a download that fails here fails the release.
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.manifest.result == 'success' || ((needs.source.result == 'success' && needs.source.outputs.reuse == 'true') && needs.manifest.result == 'skipped')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
@@ -343,22 +363,26 @@ jobs:
       MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
       IMAGE: ${{ matrix.image }}
       BUNDLE: ${{ !endsWith(matrix.image, '-installer') }}
+      # This run reuses the images source verified (the build was skipped).
+      REUSED: ${{ needs.source.result == 'success' && needs.source.outputs.reuse == 'true' && needs.manifest.result == 'skipped' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The manifest of this run (its build's, or the reused one source
+      # The manifest (this run's build's, or the reused one source
       # verified), and the image as built: by this run, or by the pull
       # request's run that source verified.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 5
         with:
-          name: release-build-manifest
+          name: ${{ env.REUSED == 'true' && 'release-reused-manifest' || 'release-build-manifest' }}
           path: manifest
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        timeout-minutes: 20
         with:
           name: release-image-${{ matrix.image }}
           path: out/ironflockos-${{ matrix.image }}
-          run-id: ${{ needs.source.outputs.run-id }}
+          run-id: ${{ env.REUSED == 'true' && needs.source.outputs.run-id || github.run_id }}
           github-token: ${{ github.token }}
       - name: every file as the manifest lists it
         run: build/reuse.sh files manifest/build.tsv out "$IMAGE"

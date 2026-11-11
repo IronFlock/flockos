@@ -26,6 +26,23 @@ prove that this run built the release commit's tree. Otherwise it builds them
 as before. Anything it cannot prove, and any error, means a build, never a
 failed release. The job summary says which way it went and why.
 
+### The switch and the fall-back
+
+- The lookup runs only while the repository variable `IRONFLOCKOS_REUSE` is
+  `true`. Anything else, the variable unset included, is a build. The dry
+  run's `attest-build` and `would-reuse` run regardless, so a release pull
+  request shows whether its images could be reused.
+- Each step of the lookup has a timeout (10 minutes for the lookup, 20 for
+  the download, 10 for the file check, 5 for keeping the verified manifest)
+  and may fail; any failure is a build. The job's timeout (60 minutes) is
+  above their sum.
+- When the `source` job fails all the same, `build` runs and `sign` takes the
+  built images. The run ends red for the failed job, but the release is made.
+- Once `source` has decided to reuse, there is no way back: a `sign` job whose
+  download fails (20 minutes at most) or whose files differ from the manifest
+  fails the release, before it signs anything. A re-run of the release run
+  looks up again and builds when the lookup no longer holds.
+
 ### The evidence
 
 - **The manifest.** Each image build lists every file it leaves, with sha256

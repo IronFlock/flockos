@@ -390,15 +390,28 @@ refused() {
 @test "release.yml: a release reuses only what source verified, and builds otherwise" {
   wf=$repo/.github/workflows/release.yml
   job() { awk -v job="  $1:" '$0 == job { f = 1; print; next } f && /^  [a-z][a-z-]*:$/ { exit } f' "$wf"; }
-  # source: every step of the lookup may fail; the decision step always runs
-  [ "$(job source | grep -c 'continue-on-error: true')" = 3 ]
+  # source: the lookup only while the switch is on; every step of it may
+  # fail and has a timeout, the job's timeout is above their sum; the
+  # decision step always runs
+  [[ "$(job source)" == *"if: env.MODE == 'release' && vars.IRONFLOCKOS_REUSE == 'true'"* ]]
+  [ "$(job source | grep -c 'continue-on-error: true')" = 4 ]
+  steps=$(job source | awk '/continue-on-error: true/ { c = 1; next } c && /timeout-minutes:/ { s += $2; c = 0 } END { print s }')
+  [ "$steps" -gt 0 ]
+  [ "$(job source | awk '/^    timeout-minutes:/ { print $2 }')" -gt $((steps + 5)) ]
+  [ "$(job source | grep -c 'timeout-minutes:')" = 5 ]
   [[ "$(job source)" == *'build/reuse.sh find "$COMMIT"'* ]]
   [[ "$(job source)" == *'if: always()'* ]]
   [[ "$(job source)" == *'**Images: built** in this run'* ]]
-  # build only without reuse; sign checks every file against the manifest
-  [[ "$(job build)" == *"needs.source.outputs.reuse != 'true'"* ]]
+  [[ "$(job source)" == *'IRONFLOCKOS_REUSE is not true'* ]]
+  # build without reuse, also when source failed
+  [[ "$(job build)" == *"(needs.source.result != 'success' || needs.source.outputs.reuse != 'true')"* ]]
+  # sign: the reused manifest under its own name and the verified run only
+  # when it reuses, else this run's; timeouts on its downloads; every file
+  # against the manifest
+  [[ "$(job sign)" == *"name: \${{ env.REUSED == 'true' && 'release-reused-manifest' || 'release-build-manifest' }}"* ]]
+  [[ "$(job sign)" == *"run-id: \${{ env.REUSED == 'true' && needs.source.outputs.run-id || github.run_id }}"* ]]
+  [ "$(job sign | grep -c 'uses: actions/download-artifact@')" = "$(job sign | grep -A1 'uses: actions/download-artifact@' | grep -c 'timeout-minutes:')" ]
   [[ "$(job sign)" == *'build/reuse.sh files manifest/build.tsv out "$IMAGE"'* ]]
-  [[ "$(job sign)" == *'run-id: ${{ needs.source.outputs.run-id }}'* ]]
   # the dry run attests its manifest and checks its own run, on pull requests
   [[ "$(job attest-build)" == *"github.event_name == 'pull_request'"* ]]
   [[ "$(job attest-build)" == *'dry-run: false'* ]]

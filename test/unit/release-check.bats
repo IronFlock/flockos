@@ -98,11 +98,11 @@ run_check() {
   [ "$status" -ne 0 ]
 }
 
-@test "a release that builds: build and manifest succeed" {
+@test "a release that builds: build and manifest succeed; source may have failed" {
   run_check release false
   [ "$status" -eq 0 ]
   run_check release false source=failure
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   run_check release false build=skipped manifest=skipped
   [ "$status" -ne 0 ]
   run_check release false source=skipped

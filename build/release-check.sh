@@ -9,7 +9,7 @@
 # source's. The table:
 #
 #   verify skipped     a push that releases nothing: every job skipped
-#   release, dry-run   source: succeeded
+#   release, dry-run   source: succeeded (it may have failed when the run built)
 #                      build, manifest: skipped when it reused, else succeeded
 #                      attest-build, would-reuse: succeeded in a dry run of a
 #                        pull request that built, else skipped
@@ -52,7 +52,7 @@ want() {
     release | dry-run)
       if [ "$(result source)" = success ] && [ "$reuse" = true ]; then reused=true; fi
       case "$1" in
-        source) echo success ;;
+        source) if [ "$reused" = true ]; then echo success; else echo "success failure"; fi ;;
         build | manifest) if [ "$reused" = true ]; then echo skipped; else echo success; fi ;;
         attest-build | would-reuse)
           if [ "$mode" = dry-run ] && [ "$event" = pull_request ] && [ "$reused" = false ]; then echo success; else echo skipped; fi
