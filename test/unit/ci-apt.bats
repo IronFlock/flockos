@@ -2,7 +2,8 @@
 # build/ci-apt.sh: apt-get on a CI runner, with public resolvers when the
 # runner's resolver does not know the archive's names or apt-get fails. The
 # tests run it against stand-ins for apt-get, getent and timeout; the two
-# workflow steps that install packages on a runner must use it.
+# workflow steps that install packages on a runner must use it, and no step
+# of this repository's workflows may run apt or apt-get itself.
 
 repo="$BATS_TEST_DIRNAME/../.."
 script="$repo/build/ci-apt.sh"
@@ -101,9 +102,33 @@ EOF
   [ ! -e "$t/calls" ]
 }
 
+# apt_calls FILE...: the lines of FILE... that run apt or apt-get update or
+# install, with any options between the command and the verb; a line that
+# ends in a backslash is joined with the next.
+apt_calls() {
+  awk '{ if (sub(/\\$/, "")) { buf = buf $0 " "; next } print FILENAME ":" FNR ": " buf $0; buf = "" }' "$@" |
+    grep -E '(^|[^[:alnum:]_.-])apt(-get)?[[:space:]]+([^|;&]*[[:space:]])?(update|install)([[:space:]]|$)'
+}
+
 @test "the workflows install packages on a runner only through ci-apt.sh" {
-  run grep -rnE 'apt(-get)? +(update|install)' "$repo/.github/workflows"
-  [ "$status" -eq 1 ]
+  # The pattern: the calls it must find, and the lines it must leave alone.
+  for call in 'apt-get install -y mtools' 'apt-get -y install mtools' 'apt-get -qq update' 'sudo apt install x' \
+    'sudo apt-get -o Acquire::Retries=5 install x' 'sudo apt-get --yes --no-install-recommends install x' \
+    'DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get update' $'sudo apt-get -y \\\n  install x'; do
+    printf '%s\n' "$call" >"$t/call"
+    apt_calls "$t/call" >/dev/null || { echo "missed: $call"; return 1; }
+  done
+  for line in 'build/ci-apt.sh qemu-utils mtools' 'apt-cache policy rauc' 'apt-mark hold rauc' \
+    'rauc install x.raucb' '# apt in the build container finds the sources' '--no-install-recommends'; do
+    printf '%s\n' "$line" >"$t/call"
+    ! apt_calls "$t/call" >/dev/null || { echo "matched: $line"; return 1; }
+  done
+  # No step of this repository's workflows runs apt or apt-get itself. The
+  # test cannot see the steps of reusable workflows from other repositories:
+  # the shared harness, IronFlock/workflows, has its own fallback for that
+  # since v1.7.3 (scripts/apt-install.sh).
+  run apt_calls "$repo"/.github/workflows/*.yml
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
   grep -q 'build/ci-apt.sh \$QEMU_PACKAGES qemu-utils mtools' "$repo/.github/workflows/qemu-test.yml"
   grep -q 'build/ci-apt.sh qemu-system-x86 qemu-utils ovmf mtools' "$repo/.github/workflows/release.yml"
 }
