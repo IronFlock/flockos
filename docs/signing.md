@@ -101,7 +101,8 @@ runs the build's packages never holds the release identity:
    the bundle, reads `/etc/rauc/keyring.pem` and `/etc/rauc/system.conf` of
    slot A (`rootfs-a`) with debugfs, and runs `rauc info` on the bundle with
    the image's `compatible`, `bundle-formats` and `[keyring]` section, the
-   keyring being the one read from the image. Unlike a device it installs
+   keyring being the one read from the image (an image whose `path=` names
+   another file fails the check). Unlike a device it installs
    nothing and gets none of the image's slots, bootloader or handlers. A
    bundle the image's keyring refuses, or one of another `compatible`, stops
    the release before anything is staged. A release that reuses its pull

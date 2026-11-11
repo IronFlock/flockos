@@ -75,7 +75,8 @@ and `/etc/rauc/system.conf` from slot A (the partition `rootfs-a`) with
 debugfs. It runs `rauc info` on the bundle with the image's own settings:
 its `compatible` and `bundle-formats` and its whole `[keyring]` section
 (code-signing purpose, the signing time), the keyring being the one read
-from the image. What differs from a device: `rauc info` checks the
+from the image. An image whose `path=` names another file than
+`/etc/rauc/keyring.pem` fails the check. What differs from a device: `rauc info` checks the
 signature and the format, it installs nothing; it does not get the image's
 slots, bootloader, handlers and data directory (`bootloader=noop`). The
 bundle's `compatible` must be the image's, as an install requires. A bundle

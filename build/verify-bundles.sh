@@ -15,7 +15,8 @@
 #
 # rauc info gets the image's own settings for the check (rauc_conf): from
 # [system] compatible and bundle-formats, and the whole [keyring] section,
-# its path= naming the keyring read from the image. It does not get the
+# its path= naming the keyring read from the image (the image's path= must
+# be /etc/rauc/keyring.pem, the file read). It does not get the
 # image's slots, bootloader, handlers and data directory, which a signature
 # check does not read; bootloader is noop. The bundle's compatible must be
 # the image's, as an install requires.
@@ -98,7 +99,9 @@ image_rauc() {
 
 # rauc_conf SYSTEM_CONF KEYRING: the image's settings for rauc info (see the
 # top), the keyring KEYRING. Fails on a [keyring] section without exactly one
-# path=, with a directory=, or a [system] section without compatible=.
+# path=, with a path= other than /etc/rauc/keyring.pem (the file image_rauc
+# reads: with another path the check would use a keyring the device does
+# not), with a directory=, or a [system] section without compatible=.
 rauc_conf() {
   awk -v keyring="$2" '
     function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
@@ -109,7 +112,7 @@ rauc_conf() {
       if (sec == "[system]" && (key == "compatible" || key == "bundle-formats")) sys[key] = value
       if (sec == "[keyring]") {
         if (key == "directory") bad = 1
-        if (key == "path") { paths++; value = keyring }
+        if (key == "path") { paths++; if (value != "/etc/rauc/keyring.pem") bad = 1; value = keyring }
         settings = settings key "=" value "\n"
       }
     }
@@ -154,7 +157,7 @@ for bundle in "$dir"/*/*.raucb; do
   image_rauc "$img"
   keyring=$work/keyring.pem
   rauc_conf "$work/system.conf" "$keyring" >"$work/image.conf" ||
-    die "$name.img.gz: its /etc/rauc/system.conf has no compatible, or no single keyring path, or a keyring directory"
+    die "$name.img.gz: its /etc/rauc/system.conf has no compatible, or no single keyring path, or a keyring directory, or a keyring other than /etc/rauc/keyring.pem"
   compatible=$(sed -n 's/^compatible=//p' "$work/image.conf")
   [ "$compatible" = "$id" ] || die "$name.img.gz is compatible $compatible, not $id"
   ca=$(openssl x509 -in "$keyring" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')

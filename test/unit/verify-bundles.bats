@@ -258,6 +258,13 @@ bundle() {
   run bash "$verify" release "$tmp/out"
   [ "$status" -ne 0 ]
   [[ "$output" == *"no single keyring path, or a keyring directory"* ]]
+  # a keyring path other than the file the check reads: the device would
+  # check its updates with a keyring the check never saw
+  system_conf | sed 's|^path=.*|path=/etc/rauc/other-ca.pem|' >"$tmp/path.conf"
+  image "$root_ca" "$tmp/path.conf"
+  run bash "$verify" release "$tmp/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"or a keyring other than /etc/rauc/keyring.pem"* ]]
   # a bundle for another image, which the device would refuse to install
   image "$root_ca"
   bundle "$signer" ironflockos-amd64-efi-nvidia
@@ -378,6 +385,8 @@ bundle() {
   # tree: google-github-actions/auth leaves the release identity's
   # credentials file (gha-creds-*.json) there.
   [[ "$checks" != *'"$repo:'* && "$checks" != *'$GITHUB_WORKSPACE'* ]]
+  # ... and by no other way to mount than the -v arguments counted below
+  [[ "$checks" != *--mount* && "$checks" != *--volumes-from* && "$checks" != *--volume* ]]
   mounts=$(grep -o -- '-v "[^"]*"' <<<"$checks" | sort)
   [ "$mounts" = "$(printf '%s\n' '-v "$out:/out:ro"' '-v "$repo/build/lib.sh:/src/build/lib.sh:ro"' \
     '-v "$repo/build/verify-bundles.sh:/src/build/verify-bundles.sh:ro"' '-v "$repo/pki:/src/pki:ro"' | sort)" ] ||
