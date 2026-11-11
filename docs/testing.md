@@ -7,7 +7,7 @@ CI has no GPU, no Raspberry Pi and no Jetson.
 | Layer | Command | Where |
 |-------|---------|-------|
 | unit | `just test` (bats, `test/unit/`) | `gate` job |
-| image in QEMU | `just qemu-test TARGET VARIANT` (`test/qemu/run.py`) | `image-test` job, under KVM |
+| image in QEMU | `just qemu-test TARGET VARIANT` (`test/qemu/run.py`) | `test-<image>` jobs (`qemu-test.yml`), each after its own image, under KVM |
 | hardware | the checklist below | a person with the device, evidence attached to the work-package issue |
 
 Next to these, `security.yml` scans the packages of every image, through the
@@ -184,7 +184,7 @@ Sequence:
    A second crash right after that boot, before the slot has stayed up for two
    minutes, counts as a failed try: the device comes up on slot A.
 
-**Install test** (`--variant installer`, the `install-test` job, for amd64-efi
+**Install test** (`--variant installer`, the `install-test-<target>` jobs, for amd64-efi
 under KVM and arm64-efi emulated): the installer image is attached as a USB stick with `installer.conf` set to
 `payload=ironflockos-<target>-base` (the stick carries every image of its target)
 and `confirm=no`, and the test `.flock`, next to a blank 20 GiB NVMe. The stick

@@ -19,7 +19,7 @@ UEFI x86 edge PCs and industrial PCs (master plan, sections 3.2 and 3.7).
 
 | Board | UEFI version | Date | Result | Notes |
 |-------|--------------|------|--------|-------|
-| QEMU q35 + OVMF (CI) | Ubuntu 24.04 `ovmf` | every pull request | `image-test`, `install-test` | KVM on GitHub runners; `base` and `nvidia` (no GPU); Secure Boot on with Microsoft's keys (`OVMF_VARS_4M.ms.fd`), off for `base-rt` |
+| QEMU q35 + OVMF (CI) | Ubuntu 24.04 `ovmf` | every pull request | `test-<image>`, `install-test-<target>` | KVM on GitHub runners; `base` and `nvidia` (no GPU); Secure Boot on with Microsoft's keys (`OVMF_VARS_4M.ms.fd`), off for `base-rt` |
 
 Hardware entries are added by WP-1.9 (`docs/testing.md`, hardware checklist).
 

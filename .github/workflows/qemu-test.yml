@@ -1,0 +1,111 @@
+# One image of ci.yml in QEMU (test/qemu/run.py), as soon as that image is
+# built: ci.yml calls it once per image, each after the image's own build
+# job, not after the whole build.
+#
+# An image (variant base or nvidia): first boot, reboot, update into slot B
+# with the bundle of the same build, factory reset, fallback of an untested
+# slot, crash. The installer stick (variant installer, WP-3.2): it installs
+# the base image (installer.conf payload=) to a blank NVMe unattended; the
+# NVMe then boots alone.
+name: qemu-test
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+      variant:
+        description: base, nvidia or installer
+        type: string
+        required: true
+      kernel:
+        type: string
+        default: std
+      runner:
+        type: string
+        required: true
+      qemu:
+        description: the QEMU and UEFI firmware packages of the runner's Ubuntu
+        type: string
+        required: true
+      secure-boot:
+        description: Secure Boot on, with Microsoft's keys as PCs ship (ADR-0011)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # docker save of this image is loaded and run inside the VM.
+  HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
+
+jobs:
+  test:
+    name: test
+    runs-on: ${{ inputs.runner }}
+    # arm64 runners have no KVM: the arm64 image boots emulated (TCG).
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ inputs.target }}
+      VARIANT: ${{ inputs.variant }}
+      KERNEL: ${{ inputs.kernel }}
+      IMAGE: ironflockos-${{ inputs.target }}-${{ inputs.variant }}${{ inputs.kernel == 'rt' && '-rt' || '' }}
+      SECURE_BOOT: ${{ inputs.secure-boot && '--secure-boot' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-${{ inputs.target }}-${{ inputs.variant }}${{ inputs.kernel == 'rt' && '-rt' || '' }}
+          path: out/${{ env.IMAGE }}
+      - name: install QEMU, UEFI firmware and mtools
+        env:
+          QEMU_PACKAGES: ${{ inputs.qemu }}
+        run: |
+          sudo apt-get update -qq
+          # shellcheck disable=SC2086 # a space-separated list of package names
+          sudo apt-get install -y -qq --no-install-recommends $QEMU_PACKAGES qemu-utils mtools
+      - name: give the runner KVM, where it has one
+        run: |
+          if [ ! -e /dev/kvm ]; then echo "no /dev/kvm: the VM runs emulated"; exit 0; fi
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: hello-world image for the VM
+        if: inputs.variant != 'installer'
+        run: |
+          docker pull "$HELLO_WORLD"
+          docker tag "$HELLO_WORLD" hello-world:latest
+          docker save -o "$RUNNER_TEMP/hello-world.tar" hello-world:latest
+      - name: QEMU test
+        run: |
+          sudo mkdir -p /mnt/ironflockos-qemu
+          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-qemu
+          args=(--target "$TARGET" --variant "$VARIANT" --work /mnt/ironflockos-qemu --keep)
+          if [ "$VARIANT" != installer ]; then
+            args+=(--kernel "$KERNEL" --docker-image-tar "$RUNNER_TEMP/hello-world.tar")
+          fi
+          # shellcheck disable=SC2086 # SECURE_BOOT is one flag or nothing
+          python3 -I test/qemu/run.py "${args[@]}" $SECURE_BOOT
+      - name: console and shell logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qemu-logs-${{ inputs.target }}-${{ inputs.variant }}${{ inputs.kernel == 'rt' && '-rt' || '' }}
+          path: |
+            /mnt/ironflockos-qemu/console-installer.log
+            /mnt/ironflockos-qemu/console.log
+            /mnt/ironflockos-qemu/shell.log
+            /mnt/ironflockos-qemu/ironflockos-installer.log
+          if-no-files-found: ignore
+          retention-days: 7

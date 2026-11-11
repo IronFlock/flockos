@@ -1,7 +1,12 @@
 # Gate (just lint / test, IronFlock/workflows shell-gate.yml), the image
-# build, the QEMU image test, workflow lint, the release intent and, on
-# release pull requests, release.yml as a dry run. `ci-ok` is the required
+# builds, the QEMU test of each image, workflow lint, the release intent and,
+# on release pull requests, release.yml as a dry run. `ci-ok` is the required
 # check of the main-branch ruleset.
+#
+# Debian images built and booted on every pull request (master plan, 3.8):
+# amd64-efi base and nvidia (without a GPU, WP-4.1) on x86 runners,
+# arm64-efi base on arm64 runners (WP-7.1). NVIDIA's repositories of the
+# nvidia variant are x86_64 only.
 #
 # Pull requests into main only: the ruleset lets nothing reach main without
 # ci-ok. The release intent decides whether the merge releases.
@@ -22,14 +27,6 @@ concurrency:
 defaults:
   run:
     shell: bash
-
-env:
-  # Debian images built and booted on every pull request (master plan, 3.8):
-  # amd64-efi base and nvidia (without a GPU, WP-4.1) on x86 runners,
-  # arm64-efi base on arm64 runners (WP-7.1), as the jobs' matrix. NVIDIA's
-  # repositories of the nvidia variant are x86_64 only.
-  # docker save of this image is loaded and run inside the VM.
-  HELLO_WORLD: hello-world@sha256:c567b231f65614688711a75f31518a064258a51d442117a3e771a3a8fdba78ef
 
 jobs:
   # lint and unit tests through the shared shell gate (tools from the
@@ -65,182 +62,114 @@ jobs:
             go -C "$m" test -race -count=1 ./...
           done
 
-  # Every image, with throwaway keys (build.yml): the targets, variants and
-  # kernels, and the amd64-efi installer stick.
-  build:
-    uses: ./.github/workflows/build.yml
+  # Every image with throwaway keys, one job each (image.yml; the images of
+  # build.yml, test/unit/release-signing.bats), and the installer sticks of
+  # the EFI targets (installer.yml), each after the images of its target.
+  # Each test below needs only the job of its own image: a matrix that needs
+  # a matrix would wait for every image and both sticks.
+  image-amd64-efi-base:
+    uses: ./.github/workflows/image.yml
     permissions:
       contents: read
-    with:
-      signing: dev
+    with: {target: amd64-efi, variant: base, kernel: std, runner: ubuntu-latest, signing: dev}
+  image-amd64-efi-base-rt:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+    with: {target: amd64-efi, variant: base, kernel: rt, runner: ubuntu-latest, signing: dev}
+  image-amd64-efi-nvidia:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+    with: {target: amd64-efi, variant: nvidia, kernel: std, runner: ubuntu-latest, signing: dev}
+  image-arm64-efi-base:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+    with: {target: arm64-efi, variant: base, kernel: std, runner: ubuntu-24.04-arm, signing: dev}
+  image-arm64-efi-base-rt:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+    with: {target: arm64-efi, variant: base, kernel: rt, runner: ubuntu-24.04-arm, signing: dev}
+  image-rpi-arm64-base:
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+    with: {target: rpi-arm64, variant: base, kernel: std, runner: ubuntu-24.04-arm, signing: dev}
+  installer-amd64-efi:
+    needs: [image-amd64-efi-base, image-amd64-efi-base-rt, image-amd64-efi-nvidia]
+    uses: ./.github/workflows/installer.yml
+    permissions:
+      contents: read
+    with: {target: amd64-efi, runner: ubuntu-latest, signing: dev}
+  installer-arm64-efi:
+    needs: [image-arm64-efi-base, image-arm64-efi-base-rt]
+    uses: ./.github/workflows/installer.yml
+    permissions:
+      contents: read
+    with: {target: arm64-efi, runner: ubuntu-24.04-arm, signing: dev}
 
-  # Boots the image under KVM and runs test/qemu/run.py: first boot, reboot,
-  # update into slot B with the bundle of the same build, fallback of an
-  # untested slot. Secure Boot is on, with Microsoft's keys as PCs ship
-  # (ADR-0011), except for the rt images, which keep the path with Secure
-  # Boot off tested.
-  image-test:
-    name: image-test (${{ matrix.target }}, ${{ matrix.variant }}${{ matrix.kernel == 'rt' && ', rt' || '' }}${{ matrix.secure_boot && ', secure boot' || '' }})
-    needs: [build]
-    runs-on: ${{ matrix.runner }}
-    # arm64 runners have no KVM: the arm64 image boots emulated (TCG).
-    timeout-minutes: 75
+  # Each image under QEMU (qemu-test.yml, test/qemu/run.py), KVM on amd64,
+  # emulated (TCG) on the arm64 runners, which have no KVM: first boot,
+  # reboot, update into slot B with the bundle of the same build, factory
+  # reset, fallback of an untested slot, crash. Secure Boot is on, with
+  # Microsoft's keys as PCs ship (ADR-0011), except for the rt images, which
+  # keep the path with Secure Boot off tested.
+  test-amd64-efi-base:
+    needs: [image-amd64-efi-base]
+    uses: ./.github/workflows/qemu-test.yml
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: amd64-efi
-            variant: base
-            kernel: std
-            runner: ubuntu-latest
-            qemu: qemu-system-x86 ovmf
-            secure_boot: true
-          - target: amd64-efi
-            variant: base
-            kernel: rt
-            runner: ubuntu-latest
-            qemu: qemu-system-x86 ovmf
-            secure_boot: false
-          - target: amd64-efi
-            variant: nvidia
-            kernel: std
-            runner: ubuntu-latest
-            qemu: qemu-system-x86 ovmf
-            secure_boot: true
-          - target: arm64-efi
-            variant: base
-            kernel: std
-            runner: ubuntu-24.04-arm
-            qemu: qemu-system-arm qemu-efi-aarch64
-            secure_boot: true
-          - target: arm64-efi
-            variant: base
-            kernel: rt
-            runner: ubuntu-24.04-arm
-            qemu: qemu-system-arm qemu-efi-aarch64
-            secure_boot: false
-    env:
-      TARGET: ${{ matrix.target }}
-      VARIANT: ${{ matrix.variant }}
-      KERNEL: ${{ matrix.kernel }}
-      SUFFIX: ${{ matrix.kernel == 'rt' && '-rt' || '' }}
-      SECURE_BOOT: ${{ matrix.secure_boot && '--secure-boot' || '' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: image-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
-          path: out/ironflockos-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
-      - name: install QEMU, UEFI firmware and mtools
-        env:
-          QEMU_PACKAGES: ${{ matrix.qemu }}
-        run: |
-          sudo apt-get update -qq
-          # shellcheck disable=SC2086 # a space-separated list of package names
-          sudo apt-get install -y -qq --no-install-recommends $QEMU_PACKAGES qemu-utils mtools
-      - name: give the runner KVM, where it has one
-        run: |
-          if [ ! -e /dev/kvm ]; then echo "no /dev/kvm: the VM runs emulated"; exit 0; fi
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules >/dev/null
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
-      - name: hello-world image for the VM
-        run: |
-          docker pull "$HELLO_WORLD"
-          docker tag "$HELLO_WORLD" hello-world:latest
-          docker save -o "$RUNNER_TEMP/hello-world.tar" hello-world:latest
-      - name: QEMU image test
-        run: |
-          sudo mkdir -p /mnt/ironflockos-qemu
-          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-qemu
-          # shellcheck disable=SC2086 # SECURE_BOOT is one flag or nothing
-          python3 -I test/qemu/run.py --target "$TARGET" --variant "$VARIANT" --kernel "$KERNEL" \
-            --work /mnt/ironflockos-qemu --keep --docker-image-tar "$RUNNER_TEMP/hello-world.tar" $SECURE_BOOT
-      - name: console and shell logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: qemu-logs-${{ env.TARGET }}-${{ env.VARIANT }}${{ env.SUFFIX }}
-          path: |
-            /mnt/ironflockos-qemu/console.log
-            /mnt/ironflockos-qemu/shell.log
-          if-no-files-found: ignore
-          retention-days: 7
+    with: {target: amd64-efi, variant: base, kernel: std, runner: ubuntu-latest, qemu: qemu-system-x86 ovmf, secure-boot: true}
+  test-amd64-efi-base-rt:
+    needs: [image-amd64-efi-base-rt]
+    uses: ./.github/workflows/qemu-test.yml
+    permissions:
+      contents: read
+    with: {target: amd64-efi, variant: base, kernel: rt, runner: ubuntu-latest, qemu: qemu-system-x86 ovmf, secure-boot: false}
+  test-amd64-efi-nvidia:
+    needs: [image-amd64-efi-nvidia]
+    uses: ./.github/workflows/qemu-test.yml
+    permissions:
+      contents: read
+    with: {target: amd64-efi, variant: nvidia, kernel: std, runner: ubuntu-latest, qemu: qemu-system-x86 ovmf, secure-boot: true}
+  test-arm64-efi-base:
+    needs: [image-arm64-efi-base]
+    uses: ./.github/workflows/qemu-test.yml
+    permissions:
+      contents: read
+    with: {target: arm64-efi, variant: base, kernel: std, runner: ubuntu-24.04-arm, qemu: qemu-system-arm qemu-efi-aarch64, secure-boot: true}
+  test-arm64-efi-base-rt:
+    needs: [image-arm64-efi-base-rt]
+    uses: ./.github/workflows/qemu-test.yml
+    permissions:
+      contents: read
+    with: {target: arm64-efi, variant: base, kernel: rt, runner: ubuntu-24.04-arm, qemu: qemu-system-arm qemu-efi-aarch64, secure-boot: false}
 
-  # The installer stick (WP-3.2) carries every image of its target just built;
-  # the test installs the base image (installer.conf payload=).
-  # The stick installs to a blank NVMe unattended; the NVMe then boots alone.
-  # Both boot with Secure Boot on and Microsoft's keys (ADR-0011).
-  install-test:
-    name: install-test (${{ matrix.target }}, secure boot)
-    needs: [build]
-    runs-on: ${{ matrix.runner }}
-    # arm64 runners have no KVM: the arm64 installer runs emulated (TCG).
-    timeout-minutes: 90
+  # The installer stick (WP-3.2) carries every image of its target; the test
+  # installs the base image (installer.conf payload=) to a blank NVMe
+  # unattended, and the NVMe then boots alone. Both with Secure Boot on and
+  # Microsoft's keys (ADR-0011).
+  install-test-amd64-efi:
+    needs: [installer-amd64-efi]
+    uses: ./.github/workflows/qemu-test.yml
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: amd64-efi
-            runner: ubuntu-latest
-            qemu: qemu-system-x86 ovmf
-          - target: arm64-efi
-            runner: ubuntu-24.04-arm
-            qemu: qemu-system-arm qemu-efi-aarch64
-    env:
-      TARGET: ${{ matrix.target }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: image-${{ env.TARGET }}-installer
-          path: out/ironflockos-${{ env.TARGET }}-installer
-      - name: install QEMU, UEFI firmware and mtools
-        env:
-          QEMU_PACKAGES: ${{ matrix.qemu }}
-        run: |
-          sudo apt-get update -qq
-          # shellcheck disable=SC2086 # a space-separated list of package names
-          sudo apt-get install -y -qq --no-install-recommends $QEMU_PACKAGES qemu-utils mtools
-      - name: give the runner KVM, where it has one
-        run: |
-          if [ ! -e /dev/kvm ]; then echo "no /dev/kvm: the VM runs emulated"; exit 0; fi
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules >/dev/null
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: QEMU install test
-        run: |
-          sudo mkdir -p /mnt/ironflockos-install
-          sudo chown "$(id -u):$(id -g)" /mnt/ironflockos-install
-          python3 -I test/qemu/run.py --target "$TARGET" --variant installer --work /mnt/ironflockos-install --keep --secure-boot
-      - name: console and shell logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: qemu-logs-${{ env.TARGET }}-installer
-          path: |
-            /mnt/ironflockos-install/console-installer.log
-            /mnt/ironflockos-install/console.log
-            /mnt/ironflockos-install/shell.log
-            /mnt/ironflockos-install/ironflockos-installer.log
-          if-no-files-found: ignore
-          retention-days: 7
+    with: {target: amd64-efi, variant: installer, runner: ubuntu-latest, qemu: qemu-system-x86 ovmf, secure-boot: true}
+  install-test-arm64-efi:
+    needs: [installer-arm64-efi]
+    uses: ./.github/workflows/qemu-test.yml
+    permissions:
+      contents: read
+    with: {target: arm64-efi, variant: installer, runner: ubuntu-24.04-arm, qemu: qemu-system-arm qemu-efi-aarch64, secure-boot: true}
 
   # The Raspberry Pi image without a Pi (no QEMU for its firmware boot):
   # layout, autoboot.txt, the boot files and cmdline.txt of boot-a, slot A's
   # tree, and the image's own binaries in a chroot on the arm64 runner. The
   # boot itself is the hardware checklist (docs/testing.md).
   rpi-check:
-    needs: [build]
+    needs: [image-rpi-arm64-base]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
@@ -386,16 +315,38 @@ jobs:
   # be skipped, on a no-release pull request).
   ci-ok:
     if: ${{ always() }}
-    needs: [gate, pki-tool, build, image-test, rpi-check, install-test, workflows, intent, release-build]
+    needs:
+      - gate
+      - pki-tool
+      - image-amd64-efi-base
+      - image-amd64-efi-base-rt
+      - image-amd64-efi-nvidia
+      - image-arm64-efi-base
+      - image-arm64-efi-base-rt
+      - image-rpi-arm64-base
+      - installer-amd64-efi
+      - installer-arm64-efi
+      - test-amd64-efi-base
+      - test-amd64-efi-base-rt
+      - test-amd64-efi-nvidia
+      - test-arm64-efi-base
+      - test-arm64-efi-base-rt
+      - install-test-amd64-efi
+      - install-test-arm64-efi
+      - rpi-check
+      - workflows
+      - intent
+      - release-build
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: all ci jobs succeeded
         env:
-          REQUIRED: ${{ needs.gate.result }} ${{ needs.pki-tool.result }} ${{ needs.build.result }} ${{ needs.image-test.result }} ${{ needs.rpi-check.result }} ${{ needs.install-test.result }} ${{ needs.workflows.result }} ${{ needs.intent.result }}
-          RELEASE_BUILD: ${{ needs.release-build.result }}
+          NEEDS: ${{ toJSON(needs) }}
           KIND: ${{ needs.intent.outputs.kind }}
         run: |
-          echo "required: $REQUIRED, release-build: $RELEASE_BUILD ($KIND)"
-          for r in $REQUIRED; do [ "$r" = success ] || exit 1; done
-          if [ "$KIND" = release ]; then [ "$RELEASE_BUILD" = success ]; else [ "$RELEASE_BUILD" = skipped ]; fi
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          jq -e 'del(."release-build") | [.[].result] | all(. == "success")' <<<"$NEEDS" >/dev/null
+          release_build=$(jq -r '."release-build".result' <<<"$NEEDS")
+          echo "release-build: $release_build ($KIND)"
+          if [ "$KIND" = release ]; then [ "$release_build" = success ]; else [ "$release_build" = skipped ]; fi

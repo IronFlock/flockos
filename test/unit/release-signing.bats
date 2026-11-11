@@ -83,6 +83,8 @@ images() {
     function flush() { if (t != "") print t, v, k; t = "" }
     $0 == job { in_job = 1; next }
     in_job && /^  [a-z][a-z-]*:$/ { exit }
+    # the matrix only, not the inputs a reusable workflow gets from it
+    in_job && /^    (uses|with):/ { exit }
     in_job && /- target:/ { flush(); t = $3; v = ""; k = "std" }
     in_job && /^ +variant:/ { v = $2 }
     in_job && /^ +kernel:/ { k = $2 }
@@ -90,13 +92,59 @@ images() {
   ' "$repo/.github/workflows/$1" | sort -u
 }
 
-@test "every image CI tests is one build.yml builds" {
+# ci_jobs PREFIX: the "job target variant kernel" of ci.yml's jobs named
+# PREFIX-*, from their one-line `with:` (no kernel: std).
+ci_jobs() {
+  awk -v prefix="  $1-" '
+    /^  [a-z][a-z0-9-]*:$/ { job = substr($1, 1, length($1) - 1); in_job = (index($0, prefix) == 1); next }
+    in_job && /^    with: \{/ {
+      t = v = ""; k = "std"
+      n = split($0, kv, /[{},] */)
+      for (i = 1; i <= n; i++) {
+        split(kv[i], p, /: */)
+        gsub(/^ +| +$/, "", p[1])
+        if (p[1] == "target") t = p[2]
+        if (p[1] == "variant") v = p[2]
+        if (p[1] == "kernel") k = p[2]
+      }
+      print job, t, v, k
+    }
+  ' "$repo/.github/workflows/ci.yml" | sort -u
+}
+
+@test "ci.yml builds exactly the images build.yml builds, one job each" {
   built=$(images build.yml image)
   [ "$(echo "$built" | wc -l)" -ge 6 ]
-  tested=$(images ci.yml image-test)
-  [ -n "$tested" ]
-  missing=$(comm -13 <(echo "$built") <(echo "$tested"))
-  [ -z "$missing" ] || { echo "ci.yml image-test uses images build.yml does not build: $missing"; return 1; }
+  [ "$(ci_jobs image | cut -d' ' -f2- | sort -u)" = "$built" ]
+  # each job is named after its image
+  ci_jobs image | while read -r job t v k; do
+    suffix=""
+    if [ "$k" = rt ]; then suffix=-rt; fi
+    [ "$job" = "image-$t-$v$suffix" ] || { echo "$job builds $t $v $k"; return 1; }
+  done
+}
+
+@test "every image CI tests is one build.yml builds, and its test needs only that image's job" {
+  built=$(images build.yml image)
+  tested=$(ci_jobs test)
+  [ "$(echo "$tested" | wc -l)" -ge 5 ]
+  echo "$tested" | while read -r job t v k; do
+    suffix=""
+    if [ "$k" = rt ]; then suffix=-rt; fi
+    image=$t-$v$suffix
+    [ "$job" = "test-$image" ] || { echo "$job tests $image"; return 1; }
+    echo "$built" | grep -qx "$t $v $k" || { echo "$job: build.yml does not build $t $v $k"; return 1; }
+    needs=$(awk -v job="  $job:" '$0 == job { f = 1; next } f && /^  [a-z]/ { exit } f && /^    needs:/ { print; exit }' "$repo/.github/workflows/ci.yml")
+    [ "$needs" = "    needs: [image-$image]" ] || { echo "$job: $needs"; return 1; }
+  done
+}
+
+@test "ci-ok needs every job of ci.yml but the switched-off Jetson jobs" {
+  wf=$repo/.github/workflows/ci.yml
+  jobs=$(awk '/^jobs:/ { f = 1; next } f && /^  [a-z][a-z0-9-]*:$/ { sub(/:$/, "", $1); print $1 }' "$wf" | grep -vxE 'ci-ok|jetson-rootfs|jetson-flash' | sort)
+  needs=$(awk '$0 == "  ci-ok:" { f = 1; next } f && /^    needs:/ { n = 1; next } n && /^      - / { print $2; next } n { exit }' "$wf" | sort)
+  [ -n "$jobs" ]
+  [ "$jobs" = "$needs" ]
 }
 
 @test "security.yml scans exactly the images build.yml builds" {
@@ -128,13 +176,14 @@ print(len(entries))
 @test "release.yml's build names its artifacts apart from ci.yml's (a release pull request runs both in one run)" {
   wf=$repo/.github/workflows
   grep -A6 'uses: ./.github/workflows/build.yml' "$wf/release.yml" | grep -qx '      prefix: release-image'
-  grep -q 'pattern: release-image-\*' "$wf/release.yml"
   ! grep -qE 'pattern: image-|name: image-' "$wf/release.yml"
-  ! grep -A6 'uses: ./.github/workflows/build.yml' "$wf/ci.yml" | grep -q 'prefix:'
-  # every artifact build.yml uploads or downloads carries the prefix
-  ! grep -E '^\s+(name|pattern): image-' "$wf/build.yml"
-  [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 2 ]
-  [ "$(grep -c 'pattern: ${{ inputs.prefix }}-' "$wf/build.yml")" -eq 1 ]
+  ! grep -E 'prefix:' "$wf/ci.yml"
+  # every artifact image.yml and installer.yml upload or download carries the prefix
+  ! grep -E '^\s+(name|pattern): image-' "$wf/build.yml" "$wf/image.yml" "$wf/installer.yml"
+  [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/image.yml")" -eq 1 ]
+  [ "$(grep -c 'name: ${{ inputs.prefix }}-' "$wf/installer.yml")" -eq 1 ]
+  [ "$(grep -c 'pattern: ${{ inputs.prefix }}-' "$wf/installer.yml")" -eq 1 ]
+  [ "$(grep -c 'prefix: ${{ inputs.prefix }}' "$wf/build.yml")" -eq 2 ]
 }
 
 @test "the assets job downloads the release's checksums and SBOMs, not its images" {

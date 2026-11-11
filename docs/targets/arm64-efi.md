@@ -18,7 +18,7 @@ Raspberry Pi and Jetson Orin have their own targets.
 
 | Board | UEFI version | Date | Result | Notes |
 |-------|--------------|------|--------|-------|
-| QEMU virt + AAVMF (CI) | Ubuntu 24.04 `qemu-efi-aarch64` | every pull request | `image-test`, `install-test` | arm64 runner without KVM: emulated (TCG); Secure Boot on with Microsoft's keys (`AAVMF_VARS.ms.fd`), off for `base-rt` |
+| QEMU virt + AAVMF (CI) | Ubuntu 24.04 `qemu-efi-aarch64` | every pull request | `test-<image>`, `install-test-<target>` | arm64 runner without KVM: emulated (TCG); Secure Boot on with Microsoft's keys (`AAVMF_VARS.ms.fd`), off for `base-rt` |
 
 ## Notes
 
