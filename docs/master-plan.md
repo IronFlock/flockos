@@ -451,7 +451,9 @@ the harness `report` convention) and a CycloneDX SBOM. Proposed harness extensio
 4. `e2e`: QEMU boots the staged `amd64-efi` image, enrolls into the test flock
    (`IRONFLOCK_E2E_FLOCKS` from the `release` environment, as device-init does), checks
    the device is online through the API, and performs a RAUC update **from the previous
-   release's image to this one** and back.
+   release's image to this one** and back. (Since [ADR-0019](adr/0019-every-test-runs-before-the-merge.md),
+   every test runs before the merge: a release that reuses its pull request's images
+   skips `e2e`.)
 5. `promote`: copy to `gs://ironflock-downloads/ironflockos/<target>/<version>/`, write and
    sign `dl/ironflockos/manifest.json`, create the GitHub Release with checksums, SBOMs and
    attestation links.

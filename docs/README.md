@@ -36,5 +36,6 @@
 | [0016](adr/0016-network-profiles-from-the-ironflockos-partition.md) | NetworkManager profiles on the IRONFLOCKOS partition (`network/<name>.nmconnection`) become the device's profiles on `/data` before NetworkManager starts, for `ironflock os install`; files NetworkManager could not read are renamed, not taken | accepted |
 | [0017](adr/0017-every-name-is-ironflockos.md) | Every name of the OS is ironflockos: ids, `compatible`, `os-release`, partition, downloads, device paths and units, VM images, keys and accounts (new ones in Cloud KMS and IAM); FlockFlasher and FlockAgent keep their names | accepted |
 | [0018](adr/0018-the-release-reuses-the-dry-runs-images.md) | The release reuses the images of its pull request's dry run when the harness's attestation of the build's manifest and the trees prove they are the release commit's build; otherwise it builds | accepted |
+| [0019](adr/0019-every-test-runs-before-the-merge.md) | Every test runs before the merge: a release that reuses its pull request's images skips `e2e`, and `sign` checks each bundle against the keyring in its own image; a release that builds its images tests them before it publishes; the update of a release image with a release bundle stays untested before the merge | accepted |
 
 Planned: `migration.md`, how devices of the previous OS move to IronFlockOS (a reflash).

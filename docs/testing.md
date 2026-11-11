@@ -63,8 +63,8 @@ With `--secure-boot` the firmware is the build with Microsoft's keys enrolled
 and Secure Boot on (`OVMF_CODE_4M.secboot.fd` with `OVMF_VARS_4M.ms.fd` on q35
 with SMM; `AAVMF_CODE.ms.fd` with `AAVMF_VARS.ms.fd`), as PCs ship (ADR-0011).
 CI boots that way in every image test except the `-rt` ones, which keep the path
-with Secure Boot off tested, in both install tests and in the release's
-end-to-end test.
+with Secure Boot off tested, in both install tests and in `release.yml`'s
+`e2e` (below).
 
 Sequence:
 
@@ -207,6 +207,19 @@ KVM). `--only boot` stops after the
 reboot, `--only update` after the update. On failure the work directory with
 `console.log` and `shell.log` is kept; in CI both are uploaded as the
 `qemu-logs-*` artifact.
+
+**The release images.** The tests above run on development builds, which
+trust a throwaway CA of their own build. A release pull request also runs
+`release.yml` as a dry run, which builds the release images (they trust the
+IronFlockOS root CA) and boots the one of `amd64-efi base` in its `e2e` job
+with `--only boot`: its bundle carries the dry run's stand-in signature,
+which a release image refuses, so the update and every step after it cannot
+run. Every test runs before the merge
+([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)): the release run
+that reuses those images does not test them again; its `sign` job checks
+each bundle against the keyring in its image without a VM. Only a release
+run that has to build its images runs `e2e` in full, with its own
+KMS-signed bundle, before it publishes them.
 
 ## Raspberry Pi image checks
 

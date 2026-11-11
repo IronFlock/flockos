@@ -4,9 +4,11 @@ An IronFlockOS release is the merge of a release pull request (`just release-pat
 `just release-minor`, `just release-major`: a `VERSION` bump with the title
 `release ironflockos v<version>`). Its push to `main` runs `release.yml`, which
 takes the images its pull request's dry run built (or builds them), signs the
-bundles, tests the release image, publishes the images and the signed
-catalog, and sets the tag last. Nothing is built, signed
-or published from a laptop.
+bundles, publishes the images and the signed catalog, and sets the tag last.
+Nothing is built, signed or published from a laptop. Every test runs before
+the merge ([below](#tests-before-the-merge)): a release that takes its pull
+request's images does not test them again; one that builds them tests them
+before it publishes.
 
 ## The release run
 
@@ -16,9 +18,9 @@ or published from a laptop.
 | `source` | Where the images come from: while the switch is on, a release reuses those of its pull request's dry run when it can prove they are the build of the release commit's tree, and builds them otherwise ([below](#reused-images)). The job summary says which and why | none |
 | `build` | Only when the release does not reuse: every image as a release build (`build.yml`, `signing: release`): the images trust the IronFlockOS root CA, each bundle is sealed with a key of its build, each image gets its CycloneDX SBOM. Each image's build also lists its files | none |
 | `manifest` | With a build: the manifest `build.tsv`, every file of every image with sha256 and size (`build/reuse.sh manifest`) | none |
-| `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
+| `sign` | One job per image: re-signs the image's bundle with the bundle signer in Cloud KMS and checks it against the root CA (`build/sign-bundles.sh`, [signing.md](signing.md)), then against the keyring that the image itself carries, `/etc/rauc/keyring.pem` of its slot A (`build/verify-bundles.sh`), and uploads the image's files as `signed-<mode>-<image>`, which every later job takes. The installer has no bundle and passes through | `ironflockos-release` |
 | `attest` | The SLSA Build Level 3 provenance of every image and bundle as signed, by the harness's `attest-provenance.yml`, which runs none of this repository's code, one call per image; `stage` waits for it | the harness workflow (Sigstore) |
-| `e2e` | The release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)) | none |
+| `e2e` | Only when the run built its images: the release image of `amd64-efi base` in QEMU under KVM: first boot, enrollment from the test `.flock`, reboot, the update into slot B with its own KMS-signed bundle, the fallback (`test/qemu/run.py`, [testing.md](testing.md)). Skipped when the release reuses its pull request's images, which that pull request tested ([below](#tests-before-the-merge)) | none |
 | `stage` | The signed files, each image's hardware list and one `SHA256SUMS` to `gs://ironflock-downloads/staging/ironflockos/<version>/`, eight uploads at a time, `SHA256SUMS` last (`build/publish.sh stage`). It also lists each file's sha256 and size for `promote` (`build/publish.sh meta`) | `ironflockos-publisher` |
 | `sources` | The [source code](#source-code) of every package in the images: the files the pool `gs://ironflock-downloads/ironflockos/sources/` lacks go there, and the index `SOURCES` to the staging tree (`build/sources.sh plan`, `build/publish.sh sources`) | `ironflockos-publisher` |
 | `promote` | The staged files to `gs://ironflock-downloads/ironflockos/<version>/`, eight at a time; a published file is never replaced by different bytes. Then the [release notes](#release-notes) to `ironflockos/release-notes.json`. Then the catalog, built on the published one from the list `stage` made (no image or bundle is downloaded) and signed with the catalog key, to `ironflockos/manifest.json`, last. Then every file and the catalog must answer through the download proxy | `ironflockos-release` (the catalog), `ironflockos-publisher` (the files) |
@@ -29,9 +31,10 @@ or published from a laptop.
 | `release-ok` | Last, always: every job the run's mode needs succeeded and every other was skipped (`build/release-check.sh`). A job skipped by mistake fails the run, and so a release pull request's dry run | none |
 
 Every job after the first names the result of each job it needs and runs only
-when they succeeded (or, for `build`, when `source` did not decide to reuse).
-GitHub would otherwise skip a job silently once any job before it was
-skipped, as `build` is when a release reuses its images.
+when they succeeded (or, for `build` and `e2e`, when `source` did not decide
+to reuse; `promote` takes a skipped `e2e` only when it did). GitHub would
+otherwise skip a job silently once any job before it was skipped, as `build`
+and `e2e` are when a release reuses its images.
 
 The workload identity pool gives the two IronFlockOS identities only to a push of
 `release.yml` on `main` and to runs on `v*` tags. `ironflockos-publisher` can write
@@ -97,7 +100,9 @@ keeps an image made from the same file.
   manifest of the build, and `would-reuse` checks this run as the release run
   will check it: a failure there fails the dry run. A manual run does neither:
   it has no pull request.
-- `sign` uses a throwaway stand-in for the bundle signer.
+- `sign` uses a throwaway stand-in for the bundle signer. The keyring in each
+  image must refuse the stand-in's bundle and accept the bundle signer's
+  certificate.
 - `e2e` boots and reboots only: no release image accepts a stand-in bundle.
 - `stage` and `promote` print their storage calls (`DRY_RUN=1`).
 - `sources` looks up every source package as a release does, so one without
@@ -126,10 +131,10 @@ the build, about 15 minutes.
    the tree of the merge commit in the certificate with the release commit's
    tree. Then it downloads every image and checks every file against the
    manifest.
-4. Only when all of that holds, `build` and `manifest` are skipped and each
-   `sign` job takes its image from that run, checks its files against the
-   manifest once more, and signs. Otherwise the release builds, and the job
-   summary says why.
+4. Only when all of that holds, `build`, `manifest` and `e2e` are skipped and
+   each `sign` job takes its image from that run, checks its files against
+   the manifest once more, and signs. Otherwise the release builds, tests
+   what it built in `e2e`, and the job summary says why.
 
 **The switch.** The lookup runs only while the repository variable
 `IRONFLOCKOS_REUSE` is `true` (Settings, Secrets and variables, Actions,
@@ -148,6 +153,39 @@ the release commit's tree, and that commit's time (`BUILD_ID`,
 `SOURCE_DATE_EPOCH`). GitHub keeps it as `refs/pull/<n>/head`. A built image
 names the release commit. The dry run checks the same steps on its own run
 (`would-reuse`).
+
+## Tests before the merge
+
+Every test runs in the release pull request's CI, before the merge
+([ADR-0019](adr/0019-every-test-runs-before-the-merge.md)): the unit tests,
+every image as a development build in QEMU with the whole sequence (first
+boot, update into slot B, factory reset, fallback, crash), the installer
+sticks, and the dry run of `release.yml` with its release build of every
+image, whose `e2e` boots and reboots the release image of `amd64-efi base`.
+
+The release run after the merge then only releases the images it takes from
+that pull request: it signs, attests, stages, publishes the source code,
+promotes, makes the VM images, tags and attaches the assets. What it checks,
+it checks before it publishes: the proof that the images are the release
+commit's build (`source`), every file against the manifest and every bundle
+against the root CA and against the keyring in its own image (`sign`), the
+catalog's signature and every file through the download proxy (`promote`),
+and each VM image against `SHA256SUMS` (`vm-images`).
+
+**The fall-back.** A release that builds its images itself (the switch is
+off, the lookup failed, `source` failed or was cancelled) tests them in `e2e`
+before `promote`, with its own KMS-signed bundle, as before. Images that
+nobody tested are never published.
+
+**What stays untested before the merge.** Before the merge, no release image
+installs a bundle with the release signature: only the bundle signer in Cloud
+KMS makes such a bundle, and no pull request may reach it. When the release
+reuses its images, that stays so until devices get the release. The update
+into slot B, the factory reset, the fallback and the crash run on the
+development builds of the same tree. `sign` shows without a VM that each
+image's keyring accepts the release signature. Only the release image of
+`amd64-efi base` boots as a release build; the other release images are not
+booted at all, as before.
 
 ## What `ironflock os install` reads
 
@@ -312,6 +350,9 @@ The pool gives both identities to runs on `v*` tags. Nothing else of
   from the previous release to this one and back through the agent's
   `perform_os_update`. That needs the test flock's credentials in the
   `release` environment, and an agent with the catalog key on the images.
+  Since [ADR-0019](adr/0019-every-test-runs-before-the-merge.md) it would
+  have to run before the merge, where no bundle of the release carries the
+  release signature and no catalog names it; how is open.
 - **The source code of Jetson images.** `build/sources.sh` knows Debian and the
   Raspberry Pi archive, not Ubuntu or NVIDIA's L4T repositories. Jetson's
   sources (Ubuntu's source packages, NVIDIA's `public_sources.tbz2`) come with

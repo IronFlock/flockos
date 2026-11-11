@@ -175,10 +175,12 @@ bundles from the same build. CI is the build of record
 Pull requests into `main` are squash-merged and need the checks `ci-ok` and
 `security / report`. CI builds every image and tests the EFI images and installers in
 QEMU. A release is a version bump: `just release-patch` (or `release-minor`,
-`release-major`) opens the pull request `release ironflockos v<version>`. Its merge runs
-`release.yml`, which builds every image, signs the bundles in Cloud KMS, tests the
-release image in QEMU with Secure Boot on, publishes the images and the signed catalog,
-and sets the tag last ([docs/release.md](docs/release.md)).
+`release-major`) opens the pull request `release ironflockos v<version>`, whose CI also
+builds the release images and runs every test. Its merge runs `release.yml`, which
+reuses those images when it can (otherwise it builds and tests them itself), signs the
+bundles in Cloud KMS, checks each against the keyring in its image, publishes the
+images and the signed catalog, and sets the tag last ([docs/release.md](docs/release.md),
+ADR-0018, ADR-0019).
 
 ## Documentation
 

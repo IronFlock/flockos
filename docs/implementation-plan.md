@@ -430,6 +430,10 @@ Done 2026-11-05: [ADR-0009](adr/0009-phase-2-decisions-hostname-channels-firmwar
   the first real release has the `amd64-efi/base` image downloadable and the manifest
   signature verifying with the agent's verifier. That release was `v0.10.0`
   (2026-11-06), not `v1.0.0` as first planned: `v1.0.0` is milestone M3 (WP-2.10).
+- Since [ADR-0019](adr/0019-every-test-runs-before-the-merge.md) (2026-11-11) every
+  test runs before the merge: a release that reuses its pull request's images skips
+  `e2e`, and `sign` checks each bundle against the keyring in its own image; `e2e`
+  runs only in a release that builds its images itself.
 
 ### WP-2.7 FlockFlasher: signed catalog, variants, `IRONFLOCKOS` targeting (4 days, `flasher`)
 
