@@ -71,9 +71,8 @@ jobs:
         env:
           QEMU_PACKAGES: ${{ inputs.qemu }}
         run: |
-          sudo apt-get update -qq
           # shellcheck disable=SC2086 # a space-separated list of package names
-          sudo apt-get install -y -qq --no-install-recommends $QEMU_PACKAGES qemu-utils mtools
+          build/ci-apt.sh $QEMU_PACKAGES qemu-utils mtools
       - name: give the runner KVM, where it has one
         run: |
           if [ ! -e /dev/kvm ]; then echo "no /dev/kvm: the VM runs emulated"; exit 0; fi
