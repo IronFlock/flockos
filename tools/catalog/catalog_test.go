@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ func boardDefs(t *testing.T) []BoardDef {
 
 func TestBuildRelease(t *testing.T) {
 	dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base")
-	rel, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8")
+	rel, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8", nil)
 	must(t, err)
 	if rel.BuildID != "20261120T095512Z-g1a2b3c4" || rel.BuildTime != "2026-11-20T09:55:12Z" || rel.MinAgent != "1.5.8" {
 		t.Fatalf("release %+v", rel)
@@ -164,7 +165,83 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base")
 			mutate(dir)
-			if _, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8"); err == nil {
+			if _, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8", nil); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+// fileListOf writes the file list of dir as build/publish.sh files does, and
+// removes the files it lists: the promote job has only the list.
+func fileListOf(t *testing.T, dir string) string {
+	t.Helper()
+	var lines []string
+	matches, err := filepath.Glob(filepath.Join(dir, "*", "*"))
+	must(t, err)
+	for _, p := range matches {
+		base := filepath.Base(p)
+		if !strings.HasSuffix(base, ".img.gz") && !strings.HasSuffix(base, ".raucb") && !strings.HasSuffix(base, ".modules.alias.gz") {
+			continue
+		}
+		a, err := artifact(p, "")
+		must(t, err)
+		lines = append(lines, fmt.Sprintf("%s\t%d\t%s", a.SHA256, a.Size, base))
+		must(t, os.Remove(p))
+	}
+	list := filepath.Join(t.TempDir(), "files.tsv")
+	must(t, os.WriteFile(list, []byte(strings.Join(lines, "\n")+"\n"), 0o644))
+	return list
+}
+
+func TestBuildReleaseFromAFileList(t *testing.T) {
+	ids := []string{"ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base"}
+	hashed, err := buildRelease(release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", ids...), repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8", nil)
+	must(t, err)
+	dir := release(t, "1.0.0", "20261120T095512Z-g1a2b3c4", ids...)
+	files, err := readFileList(fileListOf(t, dir))
+	must(t, err)
+	listed, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8", files)
+	must(t, err)
+	a, _ := json.Marshal(hashed)
+	b, _ := json.Marshal(listed)
+	if !bytes.Equal(a, b) {
+		t.Fatalf("from the list:\n%s\nhashed:\n%s", b, a)
+	}
+	// A file the list lacks is missing: the base's bundle, the installer's image.
+	for _, name := range []string{"ironflockos-amd64-efi-base-1.0.0.raucb", "ironflockos-amd64-efi-installer-1.0.0.img.gz", "ironflockos-rpi-arm64-base-1.0.0.modules.alias.gz"} {
+		short := FileList{}
+		for k, v := range files {
+			if k != name {
+				short[k] = v
+			}
+		}
+		if _, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8", short); err == nil {
+			t.Fatalf("accepted a list without %s", name)
+		}
+	}
+	// The installer with a bundle in the list.
+	files["ironflockos-amd64-efi-installer-1.0.0.raucb"] = Artifact{SHA256: strings.Repeat("a", 64), Size: 1}
+	if _, err := buildRelease(dir, repoRoot, "1.0.0", "https://dl.example/ironflockos/1.0.0", "1.5.8", files); err == nil {
+		t.Fatal("accepted an installer with a bundle")
+	}
+}
+
+func TestReadFileListRefuses(t *testing.T) {
+	sum := strings.Repeat("0", 64)
+	for name, text := range map[string]string{
+		"two columns":   sum + "\tx.img.gz\n",
+		"no hash":       "abc\t1\tx.img.gz\n",
+		"no size":       sum + "\t-1\tx.img.gz\n",
+		"a path":        sum + "\t1\tdir/x.img.gz\n",
+		"a name twice":  sum + "\t1\tx.img.gz\n" + sum + "\t2\tx.img.gz\n",
+		"an empty line": sum + "\t1\tx.img.gz\n\n" + sum + "\t1\ty.raucb\n",
+		"empty":         "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "files.tsv")
+			must(t, os.WriteFile(p, []byte(text), 0o644))
+			if _, err := readFileList(p); err == nil {
 				t.Fatal("accepted")
 			}
 		})
@@ -174,7 +251,7 @@ func TestBuildReleaseRefuses(t *testing.T) {
 func catalogFor(t *testing.T, prev *Catalog, version, channel string, issued time.Time) Catalog {
 	t.Helper()
 	dir := release(t, version, "20261120T095512Z-g1a2b3c4", "ironflockos-amd64-efi-base", "ironflockos-amd64-efi-installer", "ironflockos-rpi-arm64-base")
-	rel, err := buildRelease(dir, repoRoot, version, "https://dl.example/ironflockos/"+version, "1.5.8")
+	rel, err := buildRelease(dir, repoRoot, version, "https://dl.example/ironflockos/"+version, "1.5.8", nil)
 	must(t, err)
 	c, err := merge(prev, version, channel, rel, boardDefs(t), issued)
 	must(t, err)

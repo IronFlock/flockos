@@ -60,9 +60,9 @@ runs the build's packages never holds the release identity:
    `/etc/rauc/keyring.pem` and seals each bundle with a throwaway key made for
    that build. The sealing CA travels next to the bundle as
    `<name>.seal-ca.pem`.
-2. **`sign`** is the only job that authenticates as `ironflockos-release`, and only
-   on a release. `build/sign-in-builder.sh` runs `build/sign-bundles.sh` in the
-   build container. The script fetches Google's PKCS#11 library at the version
+2. **`sign`** (one job per image) is the only job that authenticates as
+   `ironflockos-release`, and only on a release. `build/sign-in-builder.sh` runs
+   `build/sign-bundles.sh` in the build container. The script fetches Google's PKCS#11 library at the version
    in `build/release.conf`, checks the tarball's SHA-256 and the library's
    signature (Google's key in `build/keys/`), and writes the library's config
    (mode 0600):

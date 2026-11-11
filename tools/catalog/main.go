@@ -2,8 +2,10 @@
 // release catalog the device-agent and FlockFlasher read (ADR-0009,
 // docs/manifest.schema.json, docs/release.md).
 //
-//	catalog build  -dir OUT -repo . -version V -channel test|production -url BASE
+//	catalog build  -dir OUT [-files files.tsv] -repo . -version V -channel test|production -url BASE
 //	               -min-agent V -boards release/boards.json [-previous manifest.json -pubkey KEY] -o payload.json
+//	               (-files: the sha256 and size of the images, bundles and hardware lists
+//	               from build/publish.sh files; OUT then needs only the small files)
 //	catalog build  -version V -channel production -boards release/boards.json -previous manifest.json -pubkey KEY -o payload.json
 //	               (no -dir: a release of the published catalog moves to the channel, without a rebuild)
 //	catalog sign   -payload payload.json (-kms-key VERSION | -key-file key.pem) -pubkey KEY -o manifest.json
@@ -42,6 +44,7 @@ func run(args []string, stdout io.Writer) error {
 	}
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	dir := fs.String("dir", "", "release artifacts, one directory per image (build)")
+	fileList := fs.String("files", "", "sha256 and size of the release's files, build/publish.sh files (build -dir)")
 	repo := fs.String("repo", ".", "the ironflockos checkout, for targets/*/target.conf (build)")
 	version := fs.String("version", "", "the IronFlockOS version (build)")
 	channel := fs.String("channel", "test", "the channel that gets the release: test or production (build)")
@@ -109,10 +112,20 @@ func run(args []string, stdout io.Writer) error {
 				return fmt.Errorf("the previous catalog: %w", err)
 			}
 		}
+		if *fileList != "" && *dir == "" {
+			return errors.New("-files needs -dir")
+		}
 		var rel Release
 		if *dir != "" {
+			var files FileList
+			if *fileList != "" {
+				var err error
+				if files, err = readFileList(*fileList); err != nil {
+					return err
+				}
+			}
 			var err error
-			if rel, err = buildRelease(*dir, *repo, *version, *url, *minAgent); err != nil {
+			if rel, err = buildRelease(*dir, *repo, *version, *url, *minAgent, files); err != nil {
 				return err
 			}
 		} else {

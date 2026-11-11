@@ -6,10 +6,13 @@
 # is built, signed or published from a laptop.
 #
 # `build` builds every image as a release build (build.yml), `sign` gives
-# the bundles their release signature (WP-1.6). The stage, e2e and promote
-# jobs (WP-2.6) slot in after `sign`, each `needs` the one before, and
-# `sources` (the release's source code) between stage and promote; vm-images
-# (ADR-0010) follows promote, and `tag` needs both.
+# the bundles their release signature (WP-1.6), one job per image, each
+# uploading its image's files as the artifact signed-<mode>-<image>. The
+# stage, e2e and promote jobs (WP-2.6) slot in after `sign`, each `needs` the
+# one before, and `sources` (the release's source code) between stage and
+# promote; vm-images (ADR-0010) follows promote, and `tag` needs both. Each
+# job downloads only what it needs: attest and e2e one image each, stage
+# every image once, promote only the list of hashes and sizes stage made.
 #
 # A no-release merge starts nothing: `paths` holds only VERSION, and when a
 # no-release pull request touches it anyway the jobs are skipped by its merge
@@ -55,6 +58,10 @@ jobs:
       # left to do); dry-run: build, publish nothing.
       mode: ${{ steps.mode.outputs.mode }}
       tag: ${{ steps.mode.outputs.tag }}
+      # The release's images (RELEASE_IMAGES in build/release.conf), for the
+      # matrices of sign and attest.
+      images: ${{ steps.images.outputs.images }}
+      attest: ${{ steps.images.outputs.attest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,6 +90,16 @@ jobs:
         run: |
           mv .harness "$RUNNER_TEMP/harness"
           "$RUNNER_TEMP/harness/scripts/release.sh" mode
+      - name: the release's images
+        id: images
+        run: |
+          . build/lib.sh
+          load_conf build/release.conf
+          # shellcheck disable=SC2086 # a space-separated list of image names
+          images=$(printf '%s\n' $RELEASE_IMAGES)
+          echo "images=$(jq -Rnc '[inputs]' <<<"$images")" >> "$GITHUB_OUTPUT"
+          # The installer has no bundle.
+          echo "attest=$(jq -Rnc '{include: [inputs | {image: ., subjects: (if endswith("-installer") then "*.img.gz" else "*.img.gz\n*.raucb" end)}]}' <<<"$images")" >> "$GITHUB_OUTPUT"
 
   # Every image as a release build (build.yml): the images trust the IronFlockOS
   # root CA, and each bundle is sealed with a throwaway key of its build. No
@@ -99,11 +116,15 @@ jobs:
 
   # The release signature (docs/signing.md). Only a release run gets the
   # workload identity ironflockos-release: the pool grants it to a push of
-  # release.yml on main (a release merge) and to runs on v* tags. This job
-  # re-signs every bundle with the bundle signer in Cloud KMS through PKCS#11
-  # and checks it against the IronFlockOS root CA (build/sign-bundles.sh). A dry
-  # run does the same with a throwaway stand-in for the signer.
+  # release.yml on main (a release merge) and to runs on v* tags. One job per
+  # image: it re-signs the image's bundle with the bundle signer in Cloud KMS
+  # through PKCS#11 and checks it against the IronFlockOS root CA
+  # (build/sign-bundles.sh), and uploads the image's files as
+  # signed-<mode>-<image>, which every later job takes. The installer has no
+  # bundle and passes through as it is. A dry run does the same with a
+  # throwaway stand-in for the signer.
   sign:
+    name: sign (${{ matrix.image }})
     needs: [verify, build]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
     runs-on: ubuntu-latest
@@ -111,34 +132,41 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.verify.outputs.images) }}
     env:
       MODE: ${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
+      IMAGE: ${{ matrix.image }}
+      BUNDLE: ${{ !endsWith(matrix.image, '-installer') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: release-image-*
-          path: dl
-      - name: one directory per image, as the build left it
-        run: |
-          mkdir out
-          for d in dl/release-image-*; do mv "$d" "out/ironflockos-${d#dl/release-image-}"; done
-          ls -l out/*/
+          name: release-image-${{ matrix.image }}
+          path: out/ironflockos-${{ matrix.image }}
       - name: authenticate the bundle signer (release only)
-        if: env.MODE == 'release'
+        if: env.MODE == 'release' && env.BUNDLE == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ironflockos-release@record-1283.iam.gserviceaccount.com
-      - name: sign the bundles (${{ env.MODE }})
+      - name: sign the bundle (${{ env.MODE }})
+        if: env.BUNDLE == 'true'
         run: build/sign-in-builder.sh "$MODE" out
-      - name: upload the signed images and bundles
+      - name: the installer has no bundle
+        if: env.BUNDLE != 'true'
+        run: |
+          if compgen -G "out/ironflockos-$IMAGE/*.raucb" >/dev/null; then echo "::error::$IMAGE has a bundle"; exit 1; fi
+          ls -l "out/ironflockos-$IMAGE"
+      - name: upload the image's files as signed
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out/
+          name: signed-${{ env.MODE }}-${{ matrix.image }}
+          path: out/ironflockos-${{ matrix.image }}/
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -149,18 +177,23 @@ jobs:
   # never hold the identity a verifier pins (docs/signing.md). Before stage,
   # so nothing is published without it. A dry run only checks the files.
   attest:
+    name: attest (${{ matrix.image }})
     needs: [verify, sign]
     if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    # One call per image, each downloading only that image's files
+    # (signed-<mode>-<image>, 1 to 2.5 GB), in parallel. The harness takes the
+    # files themselves; with digests it would need none of them.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.attest) }}
     uses: IronFlock/workflows/.github/workflows/attest-provenance.yml@v1
     permissions:
       contents: read
       id-token: write
       attestations: write
     with:
-      artifact: release-${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}
-      subject-path: |
-        */*.img.gz
-        */*.raucb
+      artifact: signed-${{ needs.verify.outputs.mode == 'release' && 'release' || 'dry-run' }}-${{ matrix.image }}
+      subject-path: ${{ matrix.subjects }}
       dry-run: ${{ needs.verify.outputs.mode != 'release' }}
 
   # The release images as published, in QEMU (test/qemu/run.py, amd64-efi
@@ -186,8 +219,8 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out
+          name: signed-${{ env.MODE }}-amd64-efi-base
+          path: out/ironflockos-amd64-efi-base
       - name: install QEMU, OVMF and mtools
         run: |
           sudo apt-get update -qq
@@ -238,10 +271,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Every image's files as signed, one artifact each, side by side.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out
+          pattern: signed-${{ env.MODE }}-*
+          path: dl
+      - name: one directory per image
+        run: |
+          mkdir out
+          for d in dl/signed-"$MODE"-*; do mv "$d" "out/ironflockos-${d#dl/signed-"$MODE"-}"; done
+          ls -l out/*/
       - name: authenticate the publisher (release only)
         if: env.MODE == 'release'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -255,14 +294,13 @@ jobs:
       # What the GitHub Release carries besides the catalog, kept apart from
       # the images: the assets job then downloads a few hundred kilobytes,
       # not every image and bundle (v0.10.0's assets job timed out on that).
-      # Also the source packages of every image, for the sources job.
-      - name: the release's checksums, SBOMs and source packages
+      # Also the source packages of every image, for the sources job, and
+      # what the catalog reads, for the promote job: each file's sha256 and
+      # size (files.tsv) and each image's small files (catalog/).
+      - name: the release's checksums, SBOMs, source packages and catalog input
         run: |
-          mkdir meta
-          build/publish.sh sums out > meta/SHA256SUMS
-          cp out/*/*.cdx.json meta/
-          cat out/*/*.sources.tsv | LC_ALL=C sort -u > meta/sources.tsv
-          ls -l meta
+          build/publish.sh meta out meta
+          ls -lR meta
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-meta-${{ env.MODE }}
@@ -336,10 +374,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The catalog reads the hashes and sizes stage made, not the files.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-${{ env.MODE }}
-          path: out
+          name: release-meta-${{ env.MODE }}
+          path: meta
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: tools/catalog/go.mod
@@ -380,7 +419,7 @@ jobs:
             previous=(-previous "$PWD/$PREVIOUS" -pubkey "$PWD/pki/ironflockos-catalog.pub")
           fi
           cd tools/catalog
-          go run . build -dir ../../out -repo ../.. -version "$version" -channel test \
+          go run . build -dir ../../meta/catalog -files ../../meta/files.tsv -repo ../.. -version "$version" -channel test \
             -url "$DL_BASE/ironflockos/$version" -min-agent "$CATALOG_MIN_AGENT" \
             -boards ../../release/boards.json "${previous[@]}" -o ../../payload.json
           go run . sign -payload ../../payload.json "${signer[@]}" -pubkey "$pub" -o ../../manifest.json
@@ -445,11 +484,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The image as the build left it (signing re-signs only the bundles),
-      # and the release's SHA256SUMS, which it must match.
+      # The image as the release publishes it, and the release's SHA256SUMS,
+      # which it must match.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-image-${{ matrix.image }}
+          name: signed-${{ env.MODE }}-${{ matrix.image }}
           path: out/ironflockos-${{ matrix.image }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

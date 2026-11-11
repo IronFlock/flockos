@@ -147,6 +147,20 @@ ci_jobs() {
   [ "$jobs" = "$needs" ]
 }
 
+@test "RELEASE_IMAGES are the images build.yml builds and its installer sticks" {
+  # shellcheck source=build/lib.sh
+  . "$repo/build/lib.sh"
+  load_conf "$repo/build/release.conf"
+  built=$(images build.yml image | while read -r t v k; do
+    if [ "$k" = rt ]; then echo "$t-$v-rt"; else echo "$t-$v"; fi
+  done)
+  sticks=$(awk '$0 == "  installer:" { f = 1; next } f && /^  [a-z]/ { exit } f && /- target:/ { print $3 "-installer" }' \
+    "$repo/.github/workflows/build.yml")
+  [ -n "$sticks" ]
+  # shellcheck disable=SC2086 # a space-separated list
+  [ "$(printf '%s\n' $RELEASE_IMAGES | sort)" = "$(printf '%s\n' $built $sticks | sort)" ]
+}
+
 @test "security.yml scans exactly the images build.yml builds" {
   # The "args" of the harness's rootfs-matrix: just rootfs TARGET VARIANT KERNEL.
   scanned=$(grep -o '"args": "[^"]*"' "$repo/.github/workflows/security.yml" | sed 's/^"args": "//; s/"$//' | sort -u)
@@ -193,5 +207,23 @@ print(len(entries))
   [[ "$assets" != *"name: release-release"* ]]
   stage=$(sed -n '/^  stage:/,/^  promote:/p' "$wf")
   [[ "$stage" == *'name: release-meta-${{ env.MODE }}'* ]]
-  [[ "$stage" == *"build/publish.sh sums out > meta/SHA256SUMS"* ]]
+  [[ "$stage" == *"build/publish.sh meta out meta"* ]]
+}
+
+@test "each job of release.yml downloads only what it needs" {
+  wf=$repo/.github/workflows/release.yml
+  # job JOB: the lines of a job.
+  job() { awk -v job="  $1:" '$0 == job { f = 1; print; next } f && /^  [a-z][a-z-]*:$/ { exit } f' "$wf"; }
+  # The whole release in one artifact is gone.
+  ! grep -qE 'name: release-(release|dry-run|\$\{\{ env.MODE \}\})$' "$wf"
+  # sign: its own image as built; attest, e2e, vm-images: one image as signed
+  [[ "$(job sign)" == *'name: release-image-${{ matrix.image }}'* ]]
+  [[ "$(job attest)" == *'-${{ matrix.image }}'* ]]
+  [[ "$(job e2e)" == *'name: signed-${{ env.MODE }}-amd64-efi-base'* ]]
+  [[ "$(job vm-images)" == *'name: signed-${{ env.MODE }}-${{ matrix.image }}'* ]]
+  # stage: every image once; promote: only the hashes, sizes and small files
+  [[ "$(job stage)" == *'pattern: signed-${{ env.MODE }}-*'* ]]
+  [ "$(job promote | grep -c 'download-artifact@')" = 1 ]
+  [[ "$(job promote)" == *'name: release-meta-${{ env.MODE }}'* ]]
+  [[ "$(job promote)" == *'-files ../../meta/files.tsv'* ]]
 }

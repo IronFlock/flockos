@@ -47,6 +47,50 @@ teardown() { rm -rf "$tmp"; }
   [[ "$output" == *"dry run, nothing changed: would have staged 11 files"* ]]
 }
 
+@test "files lists each published file's sha256, size and name, as SHA256SUMS does" {
+  run bash "$publish" files "$tmp/out"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | wc -l | tr -d ' ')" = 11 ]
+  [[ "$output" == *"$(printf 'bundle' | sha256sum | cut -d' ' -f1)"$'\t'6$'\t'ironflockos-amd64-efi-base-1.0.0.raucb* ]]
+  [ "$(echo "$output" | awk -F'\t' '{ print $1 "  " $3 }')" = "$(bash "$publish" sums "$tmp/out")" ]
+}
+
+@test "meta: checksums, file list, SBOMs, source packages and the catalog's small files, no image or bundle" {
+  for id in ironflockos-amd64-efi-base ironflockos-amd64-efi-installer; do
+    printf 'src\t1\n' >"$tmp/out/$id/$id-1.0.0.sources.tsv"
+  done
+  printf 'ironflockos-amd64-efi-base\n' >"$tmp/out/ironflockos-amd64-efi-installer/ironflockos-amd64-efi-installer-1.0.0.payloads"
+  run bash "$publish" meta "$tmp/out" "$tmp/meta"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/meta/SHA256SUMS")" = "$(bash "$publish" sums "$tmp/out")" ]
+  [ "$(cat "$tmp/meta/files.tsv")" = "$(bash "$publish" files "$tmp/out")" ]
+  [ -f "$tmp/meta/ironflockos-amd64-efi-base-1.0.0.cdx.json" ]
+  [ "$(cat "$tmp/meta/sources.tsv")" = "$(printf 'src\t1')" ]
+  [ -f "$tmp/meta/catalog/ironflockos-amd64-efi-base/ironflockos-amd64-efi-base-1.0.0.os-release" ]
+  [ -f "$tmp/meta/catalog/ironflockos-amd64-efi-base/ironflockos-amd64-efi-base-1.0.0.sizes" ]
+  [ -f "$tmp/meta/catalog/ironflockos-amd64-efi-installer/ironflockos-amd64-efi-installer-1.0.0.payloads" ]
+  [ -z "$(find "$tmp/meta" -name '*.img.gz' -o -name '*.raucb')" ]
+}
+
+@test "meta: the catalog built from it is the catalog built from the files" {
+  command -v go >/dev/null || skip "no go"
+  for id in ironflockos-amd64-efi-base ironflockos-amd64-efi-installer; do
+    printf 'src\t1\n' >"$tmp/out/$id/$id-1.0.0.sources.tsv"
+    printf 'NAME="IronFlockOS"\nID=ironflockos\nIMAGE_ID=%s\nIMAGE_VERSION=1.0.0\nBUILD_ID=20261120T095512Z-g1a2b3c4\n' "$id" \
+      >"$tmp/out/$id/$id-1.0.0.os-release"
+  done
+  printf 'ironflockos-amd64-efi-base\n' >"$tmp/out/ironflockos-amd64-efi-installer/ironflockos-amd64-efi-installer-1.0.0.payloads"
+  bash "$publish" meta "$tmp/out" "$tmp/meta"
+  build() {
+    (cd "$repo/tools/catalog" && go run . build "$@" -repo ../.. -version 1.0.0 -channel test -url https://dl.example/ironflockos/1.0.0 \
+      -min-agent 1.6.3 -boards ../../release/boards.json) | jq 'del(.issued_at)'
+  }
+  hashed=$(build -dir "$tmp/out")
+  listed=$(build -dir "$tmp/meta/catalog" -files "$tmp/meta/files.tsv")
+  [ -n "$hashed" ]
+  [ "$hashed" = "$listed" ]
+}
+
 @test "stage refuses a directory without release files" {
   mkdir "$tmp/empty"
   DRY_RUN=1 run bash "$publish" stage "$tmp/empty" 1.0.0

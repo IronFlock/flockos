@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Publishing an IronFlockOS release (docs/release.md; WP-2.6), from release.yml.
 #   publish.sh sums    DIR           the release's SHA256SUMS, to stdout
+#   publish.sh files   DIR           each published file's sha256, size and
+#                                    name (tab-separated), to stdout: what
+#                                    tools/catalog build -files reads
+#   publish.sh meta    DIR META      what the later jobs need of DIR, into META:
+#                                    SHA256SUMS, files.tsv (files, above), the
+#                                    SBOMs, sources.tsv (every image's source
+#                                    packages) and catalog/<image>/ (each
+#                                    image's os-release, sizes and payloads):
+#                                    no image or bundle
 #   publish.sh stage   DIR VERSION   DIR's images, bundles, SBOMs, hardware
 #                                    lists and checksums to the staging tree
 #                                    STAGING/<version>/
@@ -63,6 +72,13 @@ sums() {
   done
 }
 
+# list_files DIR: each published file's sha256, size and name, tab-separated.
+list_files() {
+  files "$1" | while read -r f; do
+    printf '%s\t%s\t%s\n' "$(sha256sum <"$f" | cut -d' ' -f1)" "$(wc -c <"$f" | tr -d ' ')" "$(basename "$f")"
+  done
+}
+
 # hash_ok FILE HASH: FILE has the hash a plan names ("-": none to check).
 hash_ok() {
   local got
@@ -79,6 +95,25 @@ cmd=${1:-}
 case "$cmd" in
   sums)
     sums "${2:?usage: publish.sh sums DIR}"
+    ;;
+  files)
+    list_files "${2:?usage: publish.sh files DIR}"
+    ;;
+  meta)
+    dir=${2:?usage: publish.sh meta DIR META} meta=${3:?usage: publish.sh meta DIR META}
+    [ -n "$(files "$dir")" ] || die "no release files in $dir"
+    mkdir -p "$meta/catalog"
+    list_files "$dir" >"$meta/files.tsv"
+    awk -F'\t' '{ print $1 "  " $3 }' "$meta/files.tsv" >"$meta/SHA256SUMS"
+    cp "$dir"/*/*.cdx.json "$meta/"
+    cat "$dir"/*/*.sources.tsv | LC_ALL=C sort -u >"$meta/sources.tsv"
+    for d in "$dir"/ironflockos-*/; do
+      id=$(basename "$d")
+      mkdir "$meta/catalog/$id"
+      cp "$d"*.os-release "$d"*.sizes "$meta/catalog/$id/"
+      if compgen -G "$d*.payloads" >/dev/null; then cp "$d"*.payloads "$meta/catalog/$id/"; fi
+    done
+    log "$(wc -l <"$meta/files.tsv" | tr -d ' ') files of $(find "$meta/catalog" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ') images listed in $meta"
     ;;
   stage)
     dir=${2:?usage: publish.sh stage DIR VERSION} version=${3:?usage: publish.sh stage DIR VERSION}
@@ -198,5 +233,5 @@ case "$cmd" in
     cmp -s "$tmp/manifest.json" "$file" || die "the catalog the proxy serves is not the one published"
     log "every file of $version, its SOURCES and the catalog answer through $DL_BASE/ironflockos/"
     ;;
-  *) die "usage: publish.sh stage|promote|sources|notes|catalog|check ..." ;;
+  *) die "usage: publish.sh sums|files|meta|stage|promote|sources|notes|catalog|check ..." ;;
 esac
