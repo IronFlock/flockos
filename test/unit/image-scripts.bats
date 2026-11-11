@@ -89,6 +89,17 @@ apps_check() {
   [ ! -e "$tmp/run/apps-not-persistent" ]
 }
 
+@test "apps-check: without /data (flockos-data-missing) it points to that note and does not fail a second time" {
+  mkdir -p "$tmp/apps" "$tmp/run"
+  echo "THE DATA PARTITION COULD NOT BE MOUNTED" >"$tmp/run/data-missing"
+  apps_check
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/data is missing (see $tmp/run/data-missing): Docker and the apps do not run"* ]]
+  [ ! -e "$tmp/run/apps-not-persistent" ]
+  # The note it points to says the same.
+  grep -q 'Docker and the apps do not run' "$lib/data-missing"
+}
+
 @test "apps-check: the slot's own /apps, or no /data/apps, fails loudly and leaves a mark, and changes nothing else" {
   mkdir -p "$tmp/data/apps" "$tmp/apps"
   apps_check

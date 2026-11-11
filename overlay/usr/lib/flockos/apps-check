@@ -17,6 +17,13 @@ mark=$run/apps-not-persistent
 # ident PATH: device and inode, the same for a folder and its bind mount.
 ident() { stat -L -c '%d:%i' "$1" 2>/dev/null || stat -L -f '%d:%i' "$1" 2>/dev/null || echo "none:$1"; }
 
+if [ -e "$run/data-missing" ]; then
+  # No /data at all: flockos-data-missing has said so, and that Docker and
+  # the apps do not run; this adds nothing to it.
+  rm -f "$mark"
+  echo "apps-check: /data is missing (see $run/data-missing): Docker and the apps do not run"
+  exit 0
+fi
 if [ -d "$apps" ] && [ -d "$data/apps" ] && [ "$(ident "$apps")" = "$(ident "$data/apps")" ]; then
   rm -f "$mark"
   echo "apps-check: /apps is /data/apps"
