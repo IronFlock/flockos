@@ -30,6 +30,8 @@
 #
 # DIR has one directory per image (out/ironflockos-<image>/). DRY_RUN=1 prints the
 # storage calls and changes nothing. gcloud runs as the publisher identity.
+# stage, promote and check work on PUBLISH_JOBS files at a time (default 8);
+# every one of them must succeed.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=build/lib.sh
@@ -79,6 +81,52 @@ list_files() {
   done
 }
 
+# each CMD...: CMD LINE for every line of stdin, PUBLISH_JOBS at a time.
+# Waits for all of them; fails when any one failed (each exit code counts).
+each() {
+  local jobs=${PUBLISH_JOBS:-8} line rc=0 pids=()
+  [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "PUBLISH_JOBS must be a number: $jobs"
+  while IFS= read -r line; do
+    "$@" "$line" &
+    pids+=("$!")
+    if [ "${#pids[@]}" -ge "$jobs" ]; then
+      wait "${pids[0]}" || rc=1
+      pids=("${pids[@]:1}")
+    fi
+  done
+  for p in ${pids[@]+"${pids[@]}"}; do
+    wait "$p" || rc=1
+  done
+  return "$rc"
+}
+
+# stage_one VERSION FILE: one file to the staging tree.
+stage_one() { put "$2" "$STAGING/$1/$(basename "$2")"; }
+
+# promote_one VERSION SRC: one staged object to the live tree, unless it is
+# live already, which must then hold the same bytes.
+promote_one() {
+  local src=$2 dest
+  dest=$LIVE/$1/${src##*/}
+  if storage objects describe "$dest" --format='value(name)' >/dev/null 2>&1; then
+    [ "$(storage objects describe "$src" --format='value(md5_hash)')" = "$(storage objects describe "$dest" --format='value(md5_hash)')" ] ||
+      die "$dest is live with different bytes"
+  else
+    storage cp --quiet --cache-control="public, max-age=0" "$src" "$dest"
+  fi
+}
+
+# check_one VERSION LINE: a line of SHA256SUMS answers through the download
+# proxy with the size of its object in the bucket.
+check_one() {
+  local name want got
+  name=${2#*  }
+  want=$(storage objects describe "$LIVE/$1/$name" --format='value(size)')
+  got=$(curl -fsSI --proto '=https' --retry 5 "$DL_BASE/ironflockos/$1/$name" | tr -d '\r' |
+    awk 'tolower($1) == "content-length:" { print $2 }' | tail -n 1)
+  [ -n "$got" ] && [ "$got" = "$want" ] || die "$name answers with ${got:-no} bytes, the bucket holds $want"
+}
+
 # hash_ok FILE HASH: FILE has the hash a plan names ("-": none to check).
 hash_ok() {
   local got
@@ -122,7 +170,8 @@ case "$cmd" in
     sums=$(mktemp)
     trap 'rm -f "$sums"' EXIT
     sums "$dir" >"$sums"
-    files "$dir" | while read -r f; do put "$f" "$STAGING/$version/$(basename "$f")"; done
+    # The files side by side, SHA256SUMS once every one of them is there.
+    files "$dir" | each stage_one "$version"
     put "$sums" "$STAGING/$version/SHA256SUMS"
     done_ "staged $(wc -l <"$sums" | tr -d ' ') files to $STAGING/$version/"
     ;;
@@ -133,16 +182,7 @@ case "$cmd" in
       done_ "promoted $STAGING/$version/ to $LIVE/$version/"
       exit 0
     fi
-    storage ls "$STAGING/$version/" | while read -r src; do
-      name=${src##*/}
-      dest=$LIVE/$version/$name
-      if storage objects describe "$dest" --format='value(name)' >/dev/null 2>&1; then
-        [ "$(storage objects describe "$src" --format='value(md5_hash)')" = "$(storage objects describe "$dest" --format='value(md5_hash)')" ] ||
-          die "$dest is live with different bytes"
-      else
-        storage cp --quiet --cache-control="public, max-age=0" "$src" "$dest"
-      fi
-    done
+    storage ls "$STAGING/$version/" | each promote_one "$version"
     done_ "promoted $STAGING/$version/ to $LIVE/$version/"
     ;;
   sources)
@@ -215,12 +255,7 @@ case "$cmd" in
     curl -fsS --proto '=https' --retry 5 -o "$tmp/SHA256SUMS" "$DL_BASE/ironflockos/$version/SHA256SUMS" ||
       die "$DL_BASE/ironflockos/$version/SHA256SUMS does not answer: does the download proxy serve /dl/ironflockos/?"
     storage cat "$LIVE/$version/SHA256SUMS" | cmp -s - "$tmp/SHA256SUMS" || die "the proxy's SHA256SUMS is not the live one"
-    while read -r _ name; do
-      want=$(storage objects describe "$LIVE/$version/$name" --format='value(size)')
-      got=$(curl -fsSI --proto '=https' --retry 5 "$DL_BASE/ironflockos/$version/$name" | tr -d '\r' |
-        awk 'tolower($1) == "content-length:" { print $2 }' | tail -n 1)
-      [ -n "$got" ] && [ "$got" = "$want" ] || die "$name answers with ${got:-no} bytes, the bucket holds $want"
-    done <"$tmp/SHA256SUMS"
+    each check_one "$version" <"$tmp/SHA256SUMS"
     # The source code: SOURCES byte for byte, and its first file in the pool.
     curl -fsS --proto '=https' --retry 5 -o "$tmp/SOURCES" "$DL_BASE/ironflockos/$version/SOURCES" ||
       die "$DL_BASE/ironflockos/$version/SOURCES does not answer"

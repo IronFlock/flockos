@@ -55,6 +55,133 @@ teardown() { rm -rf "$tmp"; }
   [ "$(echo "$output" | awk -F'\t' '{ print $1 "  " $3 }')" = "$(bash "$publish" sums "$tmp/out")" ]
 }
 
+@test "stage uploads SHA256SUMS only after every file" {
+  DRY_RUN=1 PUBLISH_JOBS=3 run bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -eq 0 ]
+  last=$(echo "$output" | grep '^+ gcloud storage cp' | tail -n 1)
+  [[ "$last" == *"/1.0.0/SHA256SUMS" ]]
+}
+
+# fake_gcloud: gcloud that logs its calls to $tmp/log and fails every call
+# whose arguments contain $FAIL (if set). storage ls lists $tmp/staged;
+# objects describe finds a live object only when $tmp/live/<name> exists,
+# and gives it the md5 "same" when that file says same, else "other"; a
+# staged object's md5 is always "same".
+fake_gcloud() {
+  mkdir -p "$tmp/bin" "$tmp/live"
+  cat >"$tmp/bin/gcloud" <<STANDIN
+#!/bin/bash
+echo "gcloud \$*" >>"$tmp/log"
+if [ -n "\${FAIL:-}" ] && [[ "\$*" == *"\$FAIL"* ]]; then exit 1; fi
+if [ "\$1 \$2" = "storage ls" ]; then cat "$tmp/staged"; exit 0; fi
+if [ "\$1 \$2 \$3" = "storage objects describe" ]; then
+  name=\${4##*/}
+  case "\$4" in
+    gs://ironflock-downloads/ironflockos/*)
+      [ -f "$tmp/live/\$name" ] || exit 1
+      if [ "\$(cat "$tmp/live/\$name")" = same ]; then md5=same; else md5=other; fi ;;
+    *) md5=same ;;
+  esac
+  case "\$5" in
+    *md5_hash*) echo "\$md5" ;;
+    *size*) echo 5 ;;
+    *) echo "\$name" ;;
+  esac
+fi
+exit 0
+STANDIN
+  chmod +x "$tmp/bin/gcloud"
+}
+
+@test "stage: a failed upload fails it, after trying the rest, and SHA256SUMS is not staged" {
+  fake_gcloud
+  FAIL=amd64-efi-base-1.0.0.raucb run env PATH="$tmp/bin:$PATH" bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -ne 0 ]
+  [ "$(grep -c 'storage cp' "$tmp/log")" = 11 ]
+  ! grep -q '1.0.0/SHA256SUMS' "$tmp/log"
+}
+
+@test "stage: every file, then SHA256SUMS, through gcloud" {
+  fake_gcloud
+  run env PATH="$tmp/bin:$PATH" bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'storage cp' "$tmp/log")" = 12 ]
+  tail -n 1 "$tmp/log" | grep -q 'staging/ironflockos/1.0.0/SHA256SUMS$'
+}
+
+# staged N: N objects in the staging tree of 1.0.0.
+staged() {
+  for i in $(seq "$1"); do echo "gs://ironflock-downloads/staging/ironflockos/1.0.0/file$i"; done >"$tmp/staged"
+}
+
+@test "promote copies every staged object that is not live, and keeps a live one with the same bytes" {
+  fake_gcloud
+  staged 12
+  echo same >"$tmp/live/file3"
+  run env PATH="$tmp/bin:$PATH" bash "$publish" promote 1.0.0
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'storage cp' "$tmp/log")" = 11 ]
+  ! grep -q 'storage cp .*/file3 ' "$tmp/log"
+  [[ "$output" == *"promoted gs://ironflock-downloads/staging/ironflockos/1.0.0/ to gs://ironflock-downloads/ironflockos/1.0.0/"* ]]
+}
+
+@test "promote refuses a live object with other bytes, after trying the rest" {
+  fake_gcloud
+  staged 12
+  echo other >"$tmp/live/file7"
+  run env PATH="$tmp/bin:$PATH" bash "$publish" promote 1.0.0
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gs://ironflock-downloads/ironflockos/1.0.0/file7 is live with different bytes"* ]]
+  ! grep -q 'storage cp .*/file7 ' "$tmp/log"
+  [ "$(grep -c 'storage cp' "$tmp/log")" = 11 ]
+  [[ "$output" != *"promoted"* ]]
+}
+
+@test "promote: a failed copy fails it" {
+  fake_gcloud
+  staged 12
+  FAIL=staging/ironflockos/1.0.0/file9 run env PATH="$tmp/bin:$PATH" bash "$publish" promote 1.0.0
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"promoted"* ]]
+}
+
+@test "PUBLISH_JOBS must be a number" {
+  PUBLISH_JOBS=x DRY_RUN=1 run bash "$publish" stage "$tmp/out" 1.0.0
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PUBLISH_JOBS must be a number"* ]]
+}
+
+# fake_curl: curl that answers every HEAD with Content-Length 5, but 4 for
+# a URL that contains $SHORT (if set), and writes $tmp/<last path part> for
+# a download (-o).
+fake_curl() {
+  cat >"$tmp/bin/curl" <<STANDIN
+#!/bin/bash
+out="" url=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) out=\$2; shift ;; http*) url=\$1 ;; esac; shift; done
+if [ -n "\$out" ]; then cp "$tmp/\${url##*/}" "\$out"; exit 0; fi
+if [ -n "\${SHORT:-}" ] && [[ "\$url" == *"\$SHORT"* ]]; then printf 'HTTP/2 200\r\ncontent-length: 4\r\n\r\n'; else printf 'HTTP/2 200\r\ncontent-length: 5\r\n\r\n'; fi
+STANDIN
+  chmod +x "$tmp/bin/curl"
+}
+
+@test "check: every file of SHA256SUMS answers through the proxy with the bucket's size; one that does not fails it" {
+  fake_gcloud
+  fake_curl
+  for i in $(seq 12); do echo "$(printf '%064d' "$i")  file$i"; echo same >"$tmp/live/file$i"; done >"$tmp/SHA256SUMS"
+  printf 'x\t1\t-\t-\t-\nacl\t1\thttps://example.org/acl.dsc\tSHA256:0\t-\n' >"$tmp/SOURCES"
+  printf '{}' >"$tmp/manifest.json"
+  # the bucket's copies of SHA256SUMS and SOURCES are the proxy's
+  sed -i.bak 's|^exit 0$|if [ "$1 $2" = "storage cat" ]; then cat "'"$tmp"'/${3##*/}"; fi\nexit 0|' "$tmp/bin/gcloud"
+  run env PATH="$tmp/bin:$PATH" bash "$publish" check 1.0.0 "$tmp/manifest.json"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'objects describe gs://ironflock-downloads/ironflockos/1.0.0/file' "$tmp/log")" = 12 ]
+  [[ "$output" == *"every file of 1.0.0, its SOURCES and the catalog answer"* ]]
+  SHORT=file11 run env PATH="$tmp/bin:$PATH" bash "$publish" check 1.0.0 "$tmp/manifest.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file11 answers with 4 bytes, the bucket holds 5"* ]]
+}
+
 @test "meta: checksums, file list, SBOMs, source packages and the catalog's small files, no image or bundle" {
   for id in ironflockos-amd64-efi-base ironflockos-amd64-efi-installer; do
     printf 'src\t1\n' >"$tmp/out/$id/$id-1.0.0.sources.tsv"
