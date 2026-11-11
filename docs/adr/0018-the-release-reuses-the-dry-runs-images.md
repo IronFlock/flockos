@@ -107,10 +107,21 @@ check.
 
 - A release run that reuses skips its build: about 15 minutes less.
 - The release signs images built in a `pull_request` run. That run had the
-  same code, but it is not the release run itself. What decides is GitHub's
-  word: its API (pull request, run, trees, artifacts) and its OIDC claims in
-  the attestation's certificate. Whoever could forge those could forge the
-  release run as well.
+  same code, but it is not the release run itself. The binding rests on
+  GitHub's word: its API (pull request, run, trees, artifacts) and its OIDC
+  claims in the attestation's certificate.
+- The bytes come from a larger run than the release run. Besides the release
+  build, the pull request's run holds the gate, the workflow lint, the
+  intent, the dev builds, the QEMU tests and rpi-check. Every job of a run can
+  upload artifacts, and an upload that overwrites can replace one. A job of
+  that run that is compromised (through the harness's tools, a package of a
+  dev build, or the runner) could, in principle, replace a `release-image-*`
+  artifact and its file list before `manifest` and `attest-build` run, and the
+  attestation would then vouch for the replaced bytes. In the release run
+  only the build jobs could do that. The fix, for later: the release dry run
+  as a `pull_request` workflow of its own that runs only the release build,
+  with the reuse check pinning `buildConfigURI` to that workflow instead of
+  `ci.yml`.
 - The images hold the packages of the pull request's run, at most 24 hours
   old, not of the merge. A fix published in between comes with the next
   release.
@@ -119,8 +130,10 @@ check.
   the files and the release fails without signing anything; a re-run of the
   release builds.
 - The SLSA provenance of the release (`attest`) names the release run, also
-  for reused images. The dry run's attestation of the manifest stays in the
-  repository's attestations and names the run that built them.
+  for reused images: release.yml on main, as the builder of bytes a pull
+  request's run built. The dry run's attestation of the manifest stays in the
+  repository's attestations and names the run that built them
+  ([signing.md](../signing.md)).
 - A manual dry run (`workflow_dispatch`) neither attests nor checks reuse: it
   has no pull request.
 

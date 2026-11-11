@@ -97,6 +97,15 @@ runs the build's packages never holds the release identity:
    runs none of this repository's code. `sign` holds a workload identity and
    runs this repository's scripts, but its token names `release.yml`, so a
    check pinned to the harness workflow refuses anything it could attest.
+   When the release reuses its pull request's images, that provenance names
+   `release.yml` on `main` and the release run as the builder of bytes that the
+   pull request's run built; the release run checked them against the
+   manifest, it did not build them. What built them is in the pull request's
+   attestation of the manifest: the harness in that run of `ci.yml`, at the
+   pull request's merge commit. For a reused image the Build Level 3 claim
+   therefore holds for the bundle's signature and the release's own steps,
+   and for the build only through that second attestation
+   ([ADR-0018](adr/0018-the-release-reuses-the-dry-runs-images.md)).
 3. `tag` runs only after `sign`, so a tag always means signed bundles.
 
 The object is addressed by label (the key's name), not by id: OpenSC's libp11
