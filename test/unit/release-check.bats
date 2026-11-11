@@ -28,8 +28,8 @@ results() {
   for j in verify source build manifest attest-build would-reuse sign attest e2e stage sources promote vm-images production tag assets; do res[$j]=skipped; done
   case "$mode" in
     release | dry-run | dry-run-dispatch)
-      for j in verify source sign attest e2e stage sources promote vm-images; do res[$j]=success; done
-      if [ "$reuse" != true ]; then res[build]=success res[manifest]=success; fi
+      for j in verify source sign attest stage sources promote vm-images; do res[$j]=success; done
+      if [ "$reuse" != true ]; then res[build]=success res[manifest]=success res[e2e]=success; fi
       if [ "$mode" = release ]; then res[tag]=success res[assets]=success; fi
       if [ "$mode" = dry-run ] && [ "$reuse" != true ]; then res[attest-build]=success res[would-reuse]=success; fi
       ;;
@@ -84,17 +84,25 @@ run_check() {
   done
 }
 
-@test "a release that reuses: every job after sign must succeed" {
+@test "a release that reuses: no e2e, every other job after sign must succeed" {
   run_check release true
   [ "$status" -eq 0 ]
+  [[ "$output" == *"ok   e2e          skipped"* ]]
   # the blocker: sign succeeded, everything after it skipped
-  run_check release true attest=skipped e2e=skipped stage=skipped sources=skipped promote=skipped vm-images=skipped tag=skipped assets=skipped
+  run_check release true attest=skipped stage=skipped sources=skipped promote=skipped vm-images=skipped tag=skipped assets=skipped
   [ "$status" -ne 0 ]
   [[ "$output" == *"FAIL attest       skipped, expected success"* ]]
   run_check release true tag=skipped
   [ "$status" -ne 0 ]
   # a build in a release that reused
   run_check release true build=success
+  [ "$status" -ne 0 ]
+  # its pull request tested the images: a QEMU test in the release run is a
+  # condition gone wrong, whatever its result
+  run_check release true e2e=success
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL e2e          success, expected skipped"* ]]
+  run_check release true e2e=failure
   [ "$status" -ne 0 ]
 }
 
@@ -115,6 +123,40 @@ run_check() {
   [ "$status" -ne 0 ]
 }
 
+@test "a release that builds tests its images: e2e must succeed, whatever made it build" {
+  run_check release false
+  [[ "$output" == *"ok   e2e          success"* ]]
+  # nobody tested the images it built
+  run_check release false e2e=skipped
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL e2e          skipped, expected success"* ]]
+  run_check release false e2e=failure
+  [ "$status" -ne 0 ]
+  # source failed or was cancelled after it had said reuse: the run built
+  for s in failure cancelled; do
+    run env NEEDS="$(results release false source=$s | jq '.source.outputs.reuse = "true"')" EVENT=push bash "$check"
+    [ "$status" -eq 0 ] || { echo "source=$s: $output"; return 1; }
+    run env NEEDS="$(results release false source=$s e2e=skipped | jq '.source.outputs.reuse = "true"')" EVENT=push bash "$check"
+    [ "$status" -ne 0 ] || { echo "source=$s, e2e skipped: $output"; return 1; }
+  done
+}
+
+@test "e2e runs exactly when the run built its images, and promote takes a skipped e2e only then" {
+  built="(needs.source.result != 'success' || needs.source.outputs.reuse != 'true')"
+  reused="(needs.source.result == 'success' && needs.source.outputs.reuse == 'true'"
+  # e2e: the same condition as build
+  [[ "$(cond e2e)" == *" && $built }}" ]]
+  [[ "$(cond build)" == *" && $built }}" ]]
+  # promote: skipped when reused, succeeded when built, nothing else
+  [[ "$(cond promote)" == *"($reused && needs.e2e.result == 'skipped') || ($built && needs.e2e.result == 'success'))"* ]]
+  [ "$(grep -o "needs.e2e.result == '[a-z]*'" <<<"$(cond promote)" | sort | tr '\n' ' ')" = "needs.e2e.result == 'skipped' needs.e2e.result == 'success' " ]
+  # only promote waits for e2e
+  for job in $(jobs | grep -vx release-ok); do
+    if [ "$job" != promote ] && needs "$job" | grep -qx e2e; then echo "$job needs e2e"; return 1; fi
+  done
+  needs promote | grep -qx e2e
+}
+
 @test "a dry run: the reuse check on a pull request, not on a manual run; no tag" {
   run_check dry-run false
   [ "$status" -eq 0 ]
@@ -128,9 +170,16 @@ run_check() {
   [ "$status" -eq 0 ]
   run_check dry-run-dispatch false attest-build=success
   [ "$status" -ne 0 ]
-  # a dry run that reuses an earlier run's images (the trial)
+  # a dry run that reuses an earlier run's images (the trial): no e2e
   run_check dry-run-dispatch true
   [ "$status" -eq 0 ]
+  run_check dry-run-dispatch true e2e=success
+  [ "$status" -ne 0 ]
+  # a dry run that built: e2e boots its images
+  run_check dry-run false e2e=skipped
+  [ "$status" -ne 0 ]
+  run_check dry-run-dispatch false e2e=skipped
+  [ "$status" -ne 0 ]
 }
 
 @test "the other modes: production promotion, a re-run after the tag, a push that releases nothing" {

@@ -11,9 +11,11 @@
 #   verify skipped     a push that releases nothing: every job skipped
 #   release, dry-run   source: succeeded (it may have failed when the run built)
 #                      build, manifest: skipped when it reused, else succeeded
+#                      e2e: skipped when it reused (its pull request tested
+#                        the images, ADR-0019), else succeeded
 #                      attest-build, would-reuse: succeeded in a dry run of a
 #                        pull request that built, else skipped
-#                      sign, attest, e2e, stage, sources, promote, vm-images:
+#                      sign, attest, stage, sources, promote, vm-images:
 #                        succeeded
 #                      tag, assets: succeeded in a release, skipped in a dry run
 #                      production: skipped
@@ -55,11 +57,13 @@ want() {
         # A source job that ran into its time limit may be reported as
         # cancelled; the run built its images then, like after a failure.
         source) if [ "$reused" = true ]; then echo success; else echo "success failure cancelled"; fi ;;
-        build | manifest) if [ "$reused" = true ]; then echo skipped; else echo success; fi ;;
+        # A run that reused its pull request's images neither builds nor
+        # tests them again; a run that built them tests them (ADR-0019).
+        build | manifest | e2e) if [ "$reused" = true ]; then echo skipped; else echo success; fi ;;
         attest-build | would-reuse)
           if [ "$mode" = dry-run ] && [ "$event" = pull_request ] && [ "$reused" = false ]; then echo success; else echo skipped; fi
           ;;
-        sign | attest | e2e | stage | sources | promote | vm-images) echo success ;;
+        sign | attest | stage | sources | promote | vm-images) echo success ;;
         tag | assets) if [ "$mode" = release ]; then echo success; else echo skipped; fi ;;
         production) echo skipped ;;
         *) echo unknown ;;

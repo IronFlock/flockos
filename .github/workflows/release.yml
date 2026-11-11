@@ -21,6 +21,11 @@
 # job downloads only what it needs: attest and e2e one image each, stage
 # every image once, promote only the list of hashes and sizes stage made.
 #
+# Every test runs before the merge (ADR-0019): a release that reuses its pull
+# request's images only releases them, and skips e2e. A release that builds
+# its images, because it cannot reuse them, runs e2e on them before it
+# publishes, as nobody has tested them.
+#
 # A no-release merge starts nothing: `paths` holds only VERSION, and when a
 # no-release pull request touches it anyway the jobs are skipped by its merge
 # title. ci.yml calls this workflow on release pull requests (workflow_call)
@@ -451,9 +456,12 @@ jobs:
   # signature the image's keyring (the IronFlockOS root CA) must accept, and
   # falls back. A dry run's bundles carry the stand-in's signature, which no
   # release image accepts: it boots and reboots only.
+  # Only for images this run built (ADR-0019): a run that reuses its pull
+  # request's images skips it, as that pull request tested them; a run that
+  # built them, because it could not reuse, tests them here.
   e2e:
-    needs: [verify, sign]
-    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
+    needs: [verify, source, sign]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && (needs.source.result != 'success' || needs.source.outputs.reuse != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -605,9 +613,12 @@ jobs:
   # every file and the catalog must answer through the download proxy, or
   # there is no tag. A dry run signs with a throwaway key and publishes
   # nothing.
+  # After e2e: a run that built its images needs it to have succeeded, a run
+  # that reused them needs it skipped (ADR-0019). Anything else stops the
+  # release before it publishes.
   promote:
-    needs: [verify, stage, e2e, sources]
-    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.stage.result == 'success' && needs.e2e.result == 'success' && needs.sources.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
+    needs: [verify, source, stage, e2e, sources]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.stage.result == 'success' && needs.sources.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && ((needs.source.result == 'success' && needs.source.outputs.reuse == 'true' && needs.e2e.result == 'skipped') || ((needs.source.result != 'success' || needs.source.outputs.reuse != 'true') && needs.e2e.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
