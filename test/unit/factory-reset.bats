@@ -583,10 +583,13 @@ outside() {
     [ ! -e "$tmp/systemctl.log" ] && [ ! -e "$tmp/calls" ] && [ "$(hold_mode)" = none ]
   done
   [ "$(value reason)" = "the request holds a NUL byte" ]
+  # The refused request is identified in the record, as the state would.
+  [[ "$(value request)" =~ ^[0-9]+-4-2026111[01]T[0-9]{6}Z$ ]]
   mkdir "$esp/factory-reset.conf"
   boot
   [ "$status" -eq 0 ]
   [ "$(value reason)" = "the request is not a file" ]
+  [[ "$(value request)" =~ ^unreadable- ]]
 }
 
 @test "check: prints keep-network=yes or no, or the reason without the file's name, and changes nothing" {
@@ -929,6 +932,7 @@ outside() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"without a count there is no attempt at this boot"* ]]
     [ "$(value result)" = failed ] && [[ "$(value reason)" == "cannot count the attempt in "* ]]
+    [ "$(value attempt)" = 1 ] && [ "$(value data)" = old ] && [ "$(value begun)" = no ]
     [ "$(state | grep '^disk/vda4')" = "$data_before" ] && [ "$(hold_mode)" = wait ]
   done
   # Nothing can be written at all, the IRONFLOCKOS partition neither: the same.

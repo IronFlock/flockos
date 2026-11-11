@@ -670,6 +670,20 @@ result_get() {
   sed -n "s/^$1=//p" "$result_file" 2>/dev/null | tail -n 1 || true
 }
 
+# data_mounts: the data partition holds a filesystem that mounts (read only,
+# under the time limit).
+data_mounts() {
+  local check=$scratch/check ok=1
+  [ -n "$data" ] && [ -e "$data" ] || return 1
+  mkdir -p "$check"
+  if lim "$limit_mount" mount -t ext4 -o "ro,noexec,$mount_opts" "$data" "$check" 2>/dev/null; then
+    ok=0
+    lim "$limit_mount" umount "$check" 2>/dev/null || true
+  fi
+  rmdir "$check" 2>/dev/null || true
+  return "$ok"
+}
+
 # done_on_data: the data partition carries the mark that this request is done
 # (a reset completed in the other slot, or one whose state was lost); sets
 # done_mark to its content.
@@ -903,6 +917,9 @@ elif [ ! -e "$request" ]; then
   hold none
   exit 0
 elif ! parse "$request"; then
+  # Its identity for the record, read before the rename; "unreadable-..."
+  # when its content cannot be read.
+  id=$(request_id "$request")
   say "refused $request: $reason; nothing was cleared, the device boots as before"
   rm -rf "$request.refused" 2>/dev/null || true
   mv -f "$request" "$request.refused" 2>/dev/null || say "could not rename $request"
@@ -969,8 +986,14 @@ elif state_set request="$id" attempts="$attempt" erase=no booted-slot= other-slo
 fi
 if [ "$counted" != yes ]; then
   say "cannot write $state_file: without a count there is no attempt at this boot; the device boots as it is"
-  write_record failed "attempt=$((attempt - 1))" "attempts-max=$attempts_max" "reason=cannot count the attempt in $state_file" \
-    "begun=$begun" || true
+  # attempt= is the attempt that was due and not made; /data is as an
+  # earlier attempt left it: old before any erase, else new if it mounts.
+  data_now=old
+  if [ "$erase" = started ]; then
+    if data_mounts; then data_now=new; else data_now=none; fi
+  fi
+  write_record failed "attempt=$attempt" "attempts-max=$attempts_max" "reason=cannot count the attempt in $state_file" \
+    "begun=$begun" "data=$data_now" || true
   if [ "$erase" = started ]; then hold copy; else hold wait; fi
   exit 0
 fi

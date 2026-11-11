@@ -516,8 +516,8 @@ from this section.
   | `time` | when it was written, UTC, by the device's clock (`2026-11-10T18:00:00Z`) |
   | `image`, `version` | `IMAGE_ID` and `IMAGE_VERSION` of the system that ran it |
   | `slot` | the booted slot, `A`, `B` or `unknown` |
-  | `request` | the request's identity (checksum, size, time of change), as in the state |
-  | `attempt`, `attempts-max` | all but `refused`: the attempt this is, of `3` |
+  | `request` | the request's identity (checksum, size, time of change), as in the state; for `refused` too, `unreadable-<time>` when its content cannot be read |
+  | `attempt`, `attempts-max` | all but `refused`: the attempt this is, of `3`, never `0`; with `reason=cannot count the attempt in <file>` the attempt that was due and not made |
   | `keep-network` | `done`, `incomplete`, `gave-up`: `yes` or `no` as the request said; `unknown` when it could not be read back from `factory-reset.keep` |
   | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf`, space-separated |
   | `other-slot` | `done`, `incomplete`: `cleaned`, `none (...)` (no partition or filesystem), or `not cleaned (...)`: on another disk, no IronFlockOS, the booted slot is none of `system.conf`, cannot mount, error |
@@ -525,7 +525,7 @@ from this section.
   | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `keep-file` |
   | `reason` | `failed`, `gave-up` (the last failure), `refused`: why; for `refused` one of the reasons of `check`; for `failed` also `cannot count the attempt in <file>` (no attempt was made) and `the attempt did not end within <n> seconds` |
   | `begun` | `failed`: whether `factory-reset.keep` had its name |
-  | `data` | `failed`, `gave-up`: what `/data` holds now: `old` (not erased), `new` (a new filesystem, with the kept files), `none` (no filesystem mounts: the device runs without `/data`) |
+  | `data` | `failed`, `gave-up`: what `/data` holds now: `old` (not erased), `new` (a new filesystem, with the kept files; when no attempt was made, one that mounts), `none` (no filesystem mounts: the device runs without `/data`) |
   | `left` | `gave-up`: what of the old owner may still be on the device, space-separated, of `data`, `booted-slot`, `other-slot`; empty when nothing is |
 
   It names nothing of the old owner.
