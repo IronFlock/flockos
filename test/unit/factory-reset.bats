@@ -781,14 +781,17 @@ outside() {
   [ "$(value result)" = gave-up ] && [ "$(value attempt)" = 3 ] && [ "$(value data)" = old ]
   [ "$(value left)" = "data booted-slot other-slot" ]
   [[ "$(value reason)" == "the data partition is not the partition named data on the disk of the root slot" ]]
-  [ "$(state_value outcome)" = gave-up ] && [ "$(hold_mode)" = wait ]
-  [ "$(cd "$data" && find . | LC_ALL=C sort)" = "$data_before" ]
-  # It is not tried again: no attempt, no count, the old identity runs on.
+  [ "$(state_value outcome)" = gave-up ]
+  # The device stays the device it was: the request is retired, the .flock and
+  # proxy.conf that came for after the reset are gone, nothing is held.
+  [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
+  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
+  grep -qx 'outcome=gave-up' "$data/flockos/factory-reset.done"
+  [ "$(cd "$data" && find . | LC_ALL=C sort | grep -v factory-reset.done)" = "$data_before" ]
+  # It is not tried again.
   on_disk vda4 vda
   boot
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"given up after 3 attempts"* ]]
-  [ ! -e "$tmp/calls" ] && [ "$(state_value attempts)" = 3 ] && [ "$(hold_mode)" = wait ]
+  [ "$status" -eq 0 ] && [ ! -e "$tmp/calls" ] && [ "$(state_value attempts)" = 3 ]
   # A new request (written again) has its own three attempts.
   request 'keep-network=yes\n' 202611120900
   boot
@@ -879,6 +882,7 @@ outside() {
   [[ "$output" == *"THE DATA PARTITION HOLDS NO FILESYSTEM THAT MOUNTS"* ]]
   [ "$(copy_value result)" = gave-up ]
 
+  [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ] && [ -e "$esp/new-device.flock" ]
   rm "$tmp/hang-mkfs.ext4"
   touch "$tmp/unmountable-vda4"
   request '' 202611110801
@@ -944,7 +948,56 @@ outside() {
   done
   [ "$(copy_value result)" = gave-up ] && [ "$(copy_value data)" = old ]
   [ "$(copy_value reason)" = "cannot write factory-reset.keep to the FLOCKOS partition" ]
-  [ "$(hold_mode)" = wait ] && [ -e "$data/owner-notes.txt" ]
+  [ "$(hold_mode)" = gave-up ] && [ -e "$data/owner-notes.txt" ]
+}
+
+@test "a request that gave up never fires again: in a fresh slot (an update), after a rollback, with FLOCKOS read-only" {
+  not_root
+  request 'keep-network=yes\n'
+  chmod 555 "$esp"
+  for k in 1 2 3; do boot; done
+  [ "$(copy_value result)" = gave-up ] && [ "$(hold_mode)" = gave-up ]
+  [ -e "$esp/factory-reset.conf" ] && [ -e "$esp/new-device.flock" ]
+  grep -qx 'outcome=gave-up' "$data/flockos/factory-reset.done"
+  data_before=$(state | grep '^disk/vda4')
+  # A slot without this state (a rollback, or an update without its carry):
+  # the mark on /data says gave-up. Nothing is tried, nothing is counted.
+  for k in 1 2 3 4; do
+    rm -f "$state_file"
+    boot
+    [ "$status" -eq 0 ] && [[ "$output" == *"given up before"* ]]
+    ! grep -qE 'mkfs|grub-editenv' "$tmp/calls"
+    [ "$(hold_mode)" = gave-up ] && [ "$(state | grep '^disk/vda4')" = "$data_before" ]
+  done
+  # The state alone, without the mark on /data, does the same.
+  rm "$data/flockos/factory-reset.done"
+  boot
+  [ "$status" -eq 0 ] && [[ "$output" == *"given up before"* ]] && ! grep -q mkfs "$tmp/calls"
+  # FLOCKOS writable again: the request is retired and the files go.
+  chmod 755 "$esp"
+  boot
+  [ "$status" -eq 0 ]
+  [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
+  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
+  # An update carries the state into the new slot.
+  grep -q 'reset_state=${FLOCKOS_RESET_STATE:-/var/lib/flockos/factory-reset.state}' "$repo/overlay/usr/lib/flockos/rauc-post-install"
+  grep -q 'cp -p "$reset_state" "$mnt$reset_state"' "$repo/overlay/usr/lib/flockos/rauc-post-install"
+}
+
+@test "after a give-up with the old data, a .flock put on FLOCKOS later enrolls as on any device; while held, it waits" {
+  lib=$repo/overlay/usr/lib/flockos
+  mkdir -p "$tmp/agent" "$tmp/state" "$tmp/run"
+  printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock-init"
+  chmod +x "$tmp/ironflock-init"
+  enroll_env=(FLOCKOS_AGENT_DIR="$tmp/agent" FLOCKOS_STATE="$tmp/state" FLOCKOS_INIT="$tmp/ironflock-init"
+    FLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
+  echo gave-up >"$hold_file"
+  : >"$tmp/state/enrolled"
+  run env "${enroll_env[@]}" bash "$lib/enroll"
+  [ "$status" -eq 0 ] && [ ! -e "$tmp/init-calls" ] && [ -e "$esp/new-device.flock" ]
+  rm "$hold_file"
+  run env "${enroll_env[@]}" bash "$lib/enroll"
+  [ "$(cat "$tmp/init-calls")" = "enroll -c $esp/new-device.flock --shred-source --hostname-from-flock" ]
 }
 
 @test "started while /data is mounted (a unit that needs /data was started): nothing happens, nothing is counted" {
