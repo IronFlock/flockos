@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Publishing an IronFlockOS release (docs/release.md; WP-2.6), from release.yml.
 #   publish.sh sums    DIR           the release's SHA256SUMS, to stdout
-#   publish.sh stage   DIR VERSION   DIR's images, bundles, SBOMs and checksums
-#                                    to the staging tree STAGING/<version>/
+#   publish.sh stage   DIR VERSION   DIR's images, bundles, SBOMs, hardware
+#                                    lists and checksums to the staging tree
+#                                    STAGING/<version>/
 #   publish.sh promote VERSION       the staged release to the live tree
 #                                    LIVE/<version>/; a live file is never
 #                                    replaced by different bytes
@@ -47,10 +48,12 @@ storage() {
 # put LOCAL REMOTE: no caching anywhere, as devices must see a change at once.
 put() { storage cp --quiet --cache-control="public, max-age=0" "$1" "$2"; }
 
-# files DIR: the published files of a release, one per line.
+# files DIR: the published files of a release, one per line: also each
+# image's hardware list (.modules.alias.gz), which the catalog names.
 files() {
   find "$1" -mindepth 2 -maxdepth 2 -type f \
-    \( -name '*.img.gz' -o -name '*.raucb' -o -name '*.cdx.json' -o -name '*.os-release' -o -name '*.packages.tsv' \) | sort
+    \( -name '*.img.gz' -o -name '*.raucb' -o -name '*.cdx.json' -o -name '*.os-release' -o -name '*.packages.tsv' \
+    -o -name '*.modules.alias.gz' \) | sort
 }
 
 # sums DIR: the release's SHA256SUMS, by file name.

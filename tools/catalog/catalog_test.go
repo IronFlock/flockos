@@ -27,6 +27,8 @@ func release(t *testing.T, version, buildID string, ids ...string) string {
 		must(t, os.MkdirAll(d, 0o755))
 		name := id + "-" + version
 		must(t, os.WriteFile(filepath.Join(d, name+".img.gz"), []byte("image of "+name), 0o644))
+		must(t, os.WriteFile(filepath.Join(d, name+".sizes"), []byte("raw_size=4564471808\nmin_disk_size=9934209024\n"), 0o644))
+		must(t, os.WriteFile(filepath.Join(d, name+".modules.alias.gz"), []byte("hardware of "+name), 0o644))
 		if !strings.HasSuffix(id, "-installer") {
 			must(t, os.WriteFile(filepath.Join(d, name+".raucb"), []byte("bundle of "+name), 0o644))
 		} else {
@@ -70,6 +72,26 @@ func TestBuildRelease(t *testing.T) {
 	}
 	if base.Bundle == nil || base.Bundle.Compatible != "flockos-amd64-efi-base" {
 		t.Fatalf("bundle %+v", base.Bundle)
+	}
+	if base.Image.RawSize != 4564471808 || base.Image.MinDiskSize != 9934209024 {
+		t.Fatalf("sizes %+v", base.Image)
+	}
+	data, err := json.Marshal(base.Image)
+	must(t, err)
+	if !bytes.Contains(data, []byte(`"raw_size":4564471808,"min_disk_size":9934209024`)) {
+		t.Fatalf("the image's JSON: %s", data)
+	}
+	if a := base.ModulesAlias; a == nil || a.URL != "https://dl.example/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.modules.alias.gz" ||
+		a.Size != int64(len("hardware of flockos-amd64-efi-base-1.0.0")) || !sha256Re.MatchString(a.SHA256) {
+		t.Fatalf("hardware list %+v", a)
+	}
+	data, err = json.Marshal(base)
+	must(t, err)
+	if !bytes.Contains(data, []byte(`"modules_alias":{"url":"https://dl.example/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.modules.alias.gz"`)) {
+		t.Fatalf("the image entry's JSON: %s", data)
+	}
+	if rel.Images["flockos-amd64-efi-installer"].ModulesAlias == nil {
+		t.Fatal("the installer has a hardware list too")
 	}
 	inst := rel.Images["flockos-amd64-efi-installer"]
 	if inst.Bundle != nil {
@@ -118,6 +140,24 @@ func TestBuildReleaseRefuses(t *testing.T) {
 		"the installer as its own payload": func(dir string) {
 			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.payloads"),
 				[]byte("flockos-amd64-efi-installer\n"), 0o644)
+		},
+		"an image without its sizes": func(dir string) {
+			_ = os.Remove(filepath.Join(dir, "flockos-rpi-arm64-base", "flockos-rpi-arm64-base-1.0.0.sizes"))
+		},
+		"a disk smaller than the image": func(dir string) {
+			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.sizes"),
+				[]byte("raw_size=4564471808\nmin_disk_size=4564471807\n"), 0o644)
+		},
+		"a size that is not in bytes": func(dir string) {
+			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.sizes"),
+				[]byte("raw_size=4G\nmin_disk_size=9934209024\n"), 0o644)
+		},
+		"an image without its hardware list": func(dir string) {
+			_ = os.Remove(filepath.Join(dir, "flockos-amd64-efi-installer", "flockos-amd64-efi-installer-1.0.0.modules.alias.gz"))
+		},
+		"a size missing": func(dir string) {
+			_ = os.WriteFile(filepath.Join(dir, "flockos-amd64-efi-base", "flockos-amd64-efi-base-1.0.0.sizes"),
+				[]byte("raw_size=4564471808\n"), 0o644)
 		},
 	}
 	for name, mutate := range cases {
@@ -427,5 +467,51 @@ func TestAnInstallerWithoutPayloadsStaysValid(t *testing.T) {
 	must(t, err)
 	if bytes.Contains(data, []byte("payloads")) {
 		t.Fatalf("an installer without payloads gains the key: %s", data)
+	}
+}
+
+// A release up to 0.14.0 has no raw_size, min_disk_size and modules_alias;
+// built on, it stays valid and does not gain them. One of the two sizes
+// alone, a disk smaller than the image, or a hardware list of another name,
+// is invalid.
+func TestAReleaseWithoutSizesStaysValid(t *testing.T) {
+	t0 := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	old := catalogFor(t, nil, "1.0.0", "test", t0)
+	for id, img := range old.Releases["1.0.0"].Images {
+		img.Image.RawSize, img.Image.MinDiskSize, img.ModulesAlias = 0, 0, nil
+		old.Releases["1.0.0"].Images[id] = img
+	}
+	must(t, old.Validate())
+	next := catalogFor(t, &old, "1.0.1", "test", t0.Add(time.Hour))
+	data, err := json.Marshal(next.Releases["1.0.0"])
+	must(t, err)
+	if bytes.Contains(data, []byte("raw_size")) || bytes.Contains(data, []byte("min_disk_size")) || bytes.Contains(data, []byte("modules_alias")) {
+		t.Fatalf("an old release gains the sizes or a hardware list: %s", data)
+	}
+	if next.Releases["1.0.1"].Images["flockos-amd64-efi-base"].Image.MinDiskSize == 0 {
+		t.Fatal("the new release has no min_disk_size")
+	}
+
+	for name, sizes := range map[string][2]int64{
+		"raw_size alone":      {4564471808, 0},
+		"min_disk_size alone": {0, 9934209024},
+		"a smaller disk":      {4564471808, 4564471807},
+	} {
+		c := catalogFor(t, nil, "1.0.0", "test", t0)
+		img := c.Releases["1.0.0"].Images["flockos-amd64-efi-base"]
+		img.Image.RawSize, img.Image.MinDiskSize = sizes[0], sizes[1]
+		c.Releases["1.0.0"].Images["flockos-amd64-efi-base"] = img
+		if err := c.Validate(); err == nil {
+			t.Fatalf("%s: valid", name)
+		}
+	}
+	c := catalogFor(t, nil, "1.0.0", "test", t0)
+	img := c.Releases["1.0.0"].Images["flockos-amd64-efi-base"]
+	other := *img.ModulesAlias
+	other.URL = strings.Replace(other.URL, "flockos-amd64-efi-base-1.0.0", "flockos-amd64-efi-nvidia-1.0.0", 1)
+	img.ModulesAlias = &other
+	c.Releases["1.0.0"].Images["flockos-amd64-efi-base"] = img
+	if err := c.Validate(); err == nil {
+		t.Fatal("another image's hardware list: valid")
 	}
 }

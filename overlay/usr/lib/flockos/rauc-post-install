@@ -3,7 +3,8 @@
 # RAUC has just written:
 # - a root slot (class rootfs) gets the device's identity, so the new slot
 #   boots as the same machine: machine-id keeps the journal and the DHCP
-#   client id; hostname is what device-init or the platform set; on Jetson
+#   client id; hostname is what device-init or the platform set; and a
+#   factory reset's state, so a request done or given up stays so; on Jetson
 #   its /boot/extlinux/extlinux.conf gets root= and rauc.slot= of that slot
 #   (WP-6.2), as the bundle's names slot A;
 # - a Raspberry Pi boot partition (class boot, WP-5.2) gets a cmdline.txt
@@ -11,6 +12,7 @@
 set -eu
 
 files="/etc/machine-id /etc/hostname"
+reset_state=${FLOCKOS_RESET_STATE:-/var/lib/flockos/factory-reset.state}
 prefix=${RAUC_MOUNT_PREFIX:-/run/rauc}
 cmdline_tool=${FLOCKOS_RPI_CMDLINE:-/usr/lib/flockos/rpi-cmdline}
 extlinux_tool=${FLOCKOS_TEGRA_EXTLINUX:-/usr/lib/flockos/tegra-extlinux}
@@ -49,6 +51,12 @@ for i in ${RAUC_TARGET_SLOTS:-}; do
           cp -p "$f" "$mnt$f"
         fi
       done
+      # A factory reset's state (ADR-0015): a request that was done or given
+      # up is not tried again by the new system. Never a reason to fail.
+      if [ -s "$reset_state" ]; then
+        { mkdir -p "$mnt$(dirname "$reset_state")" && cp -p "$reset_state" "$mnt$reset_state"; } ||
+          echo "rauc-post-install: could not carry $reset_state to slot $i" >&2
+      fi
       extlinux=""
       if [ -f "$mnt/boot/extlinux/extlinux.conf" ]; then
         eval "bootname=\${RAUC_SLOT_BOOTNAME_$i:-}"

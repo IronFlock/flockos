@@ -84,3 +84,6 @@ disk=$img/output/$NAME.img
 
 pigz --no-name -6 -c "$disk" >"$OUT/$NAME.img.gz"
 log "image: $(du -h --apparent-size "$disk" | cut -f1) raw, $(du -h "$OUT/$NAME.img.gz" | cut -f1) compressed"
+# Its raw size and the smallest disk it becomes a device on, for the release
+# catalog (tools/catalog).
+write_sizes "$disk" "$ROOT/usr/lib/repart.d" "$OUT/$NAME.sizes"

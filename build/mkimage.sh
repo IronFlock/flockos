@@ -99,3 +99,8 @@ disk=$img/output/$NAME.img
 # Keep rootfs.ext4 for the bundle stage; publish the compressed disk.
 pigz --no-name -6 -c "$disk" >"$OUT/$NAME.img.gz"
 log "image: $(du -h --apparent-size "$disk" | cut -f1) raw, $(du -h "$OUT/$NAME.img.gz" | cut -f1) compressed"
+# Its raw size and the smallest disk it becomes a device on, for the release
+# catalog (tools/catalog). The installer makes no partitions.
+repart_dir=$ROOT/usr/lib/repart.d
+[ "${VARIANT:?}" != installer ] || repart_dir=""
+write_sizes "$disk" "$repart_dir" "$OUT/$NAME.sizes"

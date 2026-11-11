@@ -1,0 +1,23 @@
+# The way back for network profiles from the FLOCKOS partition (ADR-0016,
+# section 10): while profiles a boot took are on trial, this looks every
+# minute whether the device-agent has connected to IronFlock. Once it has,
+# the profiles in use stay. While it has not, the device switches between the
+# taken profiles and its earlier ones, after 15 minutes of an enrolled
+# device's uptime and twice as long each time after, up to 4 hours. Nothing
+# waits for it, and nothing depends on it.
+[Unit]
+Description=IronFlockOS: keep or roll back network profiles by the agent's connection
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0016-network-profiles-from-the-flockos-partition.md
+After=flockos-network-profiles.service NetworkManager.service
+RequiresMountsFor=/data /opt/ironflock
+ConditionPathExists=/data/network/trial/state
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/flockos/network-profiles trial-watch
+# A crash of the loop does not end the trial.
+Restart=on-failure
+RestartSec=1min
+
+[Install]
+WantedBy=multi-user.target

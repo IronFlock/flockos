@@ -154,37 +154,55 @@ esac
 # --- mount points of /etc/fstab --------------------------------------------
 mkdir -p "$ROOT/boot/efi" "$ROOT/data" "$ROOT/opt/ironflock" "$ROOT/var/cache/flockos" \
   "$ROOT/var/lib/fwupd" "$ROOT/var/lib/systemd/pstore" "$ROOT/var/log/journal" \
-  "$ROOT/etc/NetworkManager/system-connections"
+  "$ROOT/etc/NetworkManager/system-connections" "$ROOT/apps"
 chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
 
 # --- units -----------------------------------------------------------------
 if [ "$VARIANT" = installer ]; then
   # The installer runs on the console and nothing else: no device services,
-  # no /data, no slots, no SSH.
+  # no /data, no slots, no SSH. flockos-proxy would take the stick's
+  # proxy.conf, which the installer copies to the installed disk.
   systemctl --root="$ROOT" enable flockos-installer.service NetworkManager.service
   systemctl --root="$ROOT" disable flockos-ssh-hostkeys.service \
     flockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
   systemctl --root="$ROOT" mask flockos-enroll.service \
     flockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
-    systemd-repart.service
+    systemd-repart.service flockos-proxy.service flockos-proxy.path flockos-proxy-reload.service
+  # The installer has no /data to put the stick's network profiles on.
+  systemctl --root="$ROOT" mask flockos-network-profiles.service flockos-network-profiles-trial.service
+  # Its own fstab has no /apps on /data either: the check would only fail.
+  systemctl --root="$ROOT" mask flockos-apps-check.service
+  # A factory reset (ADR-0015) is an installed device's: a request on the
+  # stick's FLOCKOS partition must not run on the stick, and the installer
+  # carries none to the disk it writes. Nothing wants these units on a stick
+  # (its fstab has no /data); the mask makes sure.
+  systemctl --root="$ROOT" mask flockos-factory-reset.service flockos-data-missing.service
 else
   # flockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
   # chrony keeps the time; the PTP units run only when ptp.conf names an
-  # interface (docs/build.md, "Time").
+  # interface (docs/build.md, "Time"). flockos-proxy hands the site's proxy
+  # to the agent and Docker (docs/build.md, "Proxy").
   systemctl --root="$ROOT" enable flockos-ssh-hostkeys.service \
     flockos-enroll.service flockos-gce-flock.service ssh.service flockos-fwupd-shim.service docker.service \
-    NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service
+    NetworkManager.service chrony.service flockos-ptp.service flockos-ptp4l.service flockos-phc2sys.service \
+    flockos-proxy.service
+  # NetworkManager profiles from the FLOCKOS partition (docs/build.md,
+  # "Network profiles"), on trial until the agent has connected with them.
+  systemctl --root="$ROOT" enable flockos-network-profiles.service flockos-network-profiles-trial.service
+  # /apps is /data/apps (/etc/fstab); the check says when it is not.
+  systemctl --root="$ROOT" enable flockos-apps-check.service
   # GRUB counts every boot as a try; the Pi's tryboot counts only the first
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then
     systemctl --root="$ROOT" enable flockos-slot-proven.path flockos-slot-keep.timer
   fi
-  # The device's own enroll and PTP settings live on /data, so they outlive
-  # updates.
+  # The device's own enroll, PTP and proxy settings live on /data, so they
+  # outlive updates.
   mkdir -p "$ROOT/etc/flockos"
   ln -sfn /data/flockos/enroll.conf "$ROOT/etc/flockos/enroll.conf"
   ln -sfn /data/flockos/ptp.conf "$ROOT/etc/flockos/ptp.conf"
+  ln -sfn /data/flockos/proxy.conf "$ROOT/etc/flockos/proxy.conf"
 fi
 if [ "$KERNEL" = rt ]; then
   systemctl --root="$ROOT" enable flockos-rt-tuning.service
@@ -209,7 +227,8 @@ ln -sfn /dev/null "$ROOT/etc/systemd/system-generators/systemd-ssh-generator"
 if [ "$VARIANT" = installer ]; then
   systemctl --root="$ROOT" is-enabled flockos-installer.service >/dev/null || die "flockos-installer.service is not enabled"
 else
-  for unit in flockos-ssh-hostkeys.service flockos-enroll.service flockos-gce-flock.service flockos-fwupd-shim.service; do
+  for unit in flockos-ssh-hostkeys.service flockos-enroll.service flockos-gce-flock.service flockos-fwupd-shim.service \
+    flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
     systemctl --root="$ROOT" is-enabled "$unit" >/dev/null || die "$unit is not enabled"
   done
   [ -f "$ROOT/usr/share/dbus-1/system-services/de.pengutronix.rauc.service" ] ||
@@ -255,6 +274,14 @@ dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${Package}\t${Version}\t${Arch
 dpkg-query --admindir="$ROOT/var/lib/dpkg" -W -f '${source:Package}\t${source:Version}\t${Built-Using}\n' |
   bash "$here/sources.sh" image >"$OUT/$NAME.sources.tsv"
 cp "$ROOT/usr/lib/os-release" "$OUT/$NAME.os-release"
+# The hardware the image's kernels have drivers for, published with the image:
+# `ironflock os install` matches the machine's disk controller and network
+# card against it (docs/release.md, "What ironflock os install reads"). Not
+# on Jetson, which has no disk image to install: NVIDIA's tools flash it.
+if [ "$BOOTLOADER" != tegra ]; then
+  read -r -a kernel_versions <<<"$kver"
+  hardware_list "$ROOT" "${kernel_versions[@]}" | gzip -9n >"$OUT/$NAME.modules.alias.gz"
+fi
 rm -rf "$ROOT"/var/lib/apt/lists/* "$ROOT"/var/cache/apt/*.bin "$ROOT"/var/cache/apt/archives/*.deb
 rm -rf "$ROOT"/tmp/* "$ROOT"/var/tmp/* "$ROOT"/var/log/*.log "$ROOT"/var/log/apt/*
 rm -f "$ROOT/etc/resolv.conf"

@@ -1,0 +1,498 @@
+#!/bin/bash
+# Network profiles from the FLOCKOS partition (docs/build.md, "Network
+# profiles"; ADR-0016).
+#
+# NetworkManager keyfiles on the FLOCKOS partition (/boot/efi), as
+# network/<name>.nmconnection, become the device's profiles before
+# NetworkManager starts: on the first boot, where `ironflock os install`
+# puts them, and on every later boot where one lies there. Each goes to
+# /data/network/connections (which /etc/fstab binds to
+# /etc/NetworkManager/system-connections) with mode 0600, replaces the
+# device's profile of the same name and any other with the same uuid, and is
+# then removed from the partition. A profile may hold a Wi-Fi password, so it
+# is overwritten before it is removed, as proxy.conf is.
+#
+# A file is taken when:
+#   - its name is <name>.nmconnection, <name> 1 to 64 of A-Z a-z 0-9 . _ -
+#     and not beginning with . or -;
+#   - it is a regular file of 1 byte to 64 KiB, UTF-8 text without a NUL byte;
+#   - it is a keyfile as NetworkManager reads one: every line blank, a
+#     comment (#), a [group] or a key=value line, the first that is none of
+#     the first two a [group]; a [connection] group with type=, and a uuid=
+#     there, if any, is a UUID.
+# CRLF line ends and a byte order mark are accepted and written as LF and
+# without it. Any other file there is refused: it is renamed to
+# <name>.nmconnection.refused, so it is never taken by surprise later, the
+# reason goes to the journal and the console, the others are taken, and the
+# unit fails.
+#
+# A factory reset (ADR-0015) says in /run/flockos/factory-reset-hold what to
+# do meanwhile, as for enroll and flockos-proxy: "wait" while the old owner's
+# data may still be on /data (the profiles are for the device after it and
+# stay on the partition), "copy" once it is being erased (they are taken and
+# left on the partition for the attempt still to come). After a reset that
+# gave up ("gave-up", or no hold file) they are taken as on any device: the
+# device stays the one it was and the trial guards its way online. Without /data
+# (/run/flockos/data-missing) they are taken into the root slot's own
+# NetworkManager folder and left on the partition, without a trial: what the
+# device keeps now is lost with the next update.
+#
+# A way back (ADR-0016, section 10): the profiles a boot takes are on trial.
+# The device's profiles they replaced or removed are kept in
+# /data/network/trial, and "trial-watch" (flockos-network-profiles-trial)
+# judges them by the device-agent's connection to IronFlock: once the agent
+# has connected, the profiles in use stay. While it has not, the device
+# switches between the taken profiles and its earlier ones, after 15 minutes
+# of an enrolled device's uptime and then after twice as long each time, up
+# to 4 hours, so a device comes back online with either, without a person.
+#
+# "check FILE" says whether FILE would be taken (exit 0, nothing printed) or
+# why not (exit 1, the reason on stderr) and changes nothing. "trial" judges
+# the trial once; "trial-watch" does so every minute until it has ended.
+set -euo pipefail
+# Names and keyfiles are checked byte by byte, alike in every locale.
+export LC_ALL=C
+# Profiles hold passwords: whatever this writes is root's alone. The modes
+# of the device's profiles are set besides (chmod 0600): a file on the FAT
+# partition shows the execute bits, which cp would keep.
+umask 077
+
+# FLOCKOS_ESP, FLOCKOS_CONNECTIONS, FLOCKOS_SLOT_CONNECTIONS, FLOCKOS_RUN,
+# FLOCKOS_AGENT_RUN, FLOCKOS_AGENT_DIR, FLOCKOS_UPTIME, FLOCKOS_BOOT_ID: for
+# the unit tests only.
+esp=${FLOCKOS_ESP:-/boot/efi}
+run=${FLOCKOS_RUN:-/run/flockos}
+dest=${FLOCKOS_CONNECTIONS:-/data/network/connections}
+# What the factory reset says (wait, copy, gave-up or nothing; gave-up is as
+# nothing here, the profiles are on trial anyway); without /data the
+# profiles go to the slot's own folder, which NetworkManager reads then.
+hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
+on_trial=yes
+if [ "$hold" != wait ] && [ -e "$run/data-missing" ]; then
+  hold=copy on_trial=no
+  dest=${FLOCKOS_SLOT_CONNECTIONS:-/etc/NetworkManager/system-connections}
+fi
+agent_run=${FLOCKOS_AGENT_RUN:-/run/ironflock-device-agent}
+agent_dir=${FLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}
+uptime_file=${FLOCKOS_UPTIME:-/proc/uptime}
+boot_id_file=${FLOCKOS_BOOT_ID:-/proc/sys/kernel/random/boot_id}
+src=$esp/network
+max_size=65536
+# The trial: the profiles taken (new/), the device's ones they replaced or
+# removed (old/), and its state; next to the device's profiles on /data.
+trial=$(dirname -- "$dest")/trial
+first_window=900 max_window=14400
+
+say() { echo "network-profiles: $*"; }
+
+# The grammar of GLib's key files, which NetworkManager reads profiles with.
+# Prints "type uuid" of a profile, or the reason it is none, and fails.
+# shellcheck disable=SC2016 # an awk program
+keyfile_awk='
+  function fail(msg) { print msg; bad = 1; exit 1 }
+  {
+    line = $0
+    sub(/^[ \t]+/, "", line)
+    if (line == "" || substr(line, 1, 1) == "#") next
+    if (substr(line, 1, 1) == "[") {
+      sub(/[ \t]+$/, "", line)
+      group = substr(line, 2, length(line) - 2)
+      if (substr(line, length(line), 1) != "]" || group == "" || index(group, "[") || index(group, "]"))
+        fail("line " NR " is not a [group] line")
+      groups++
+      next
+    }
+    eq = index(line, "=")
+    if (eq < 2) fail("line " NR " is not a key=value line")
+    if (!groups) fail("line " NR ": a key=value line before the first [group]")
+    key = substr(line, 1, eq - 1)
+    sub(/[ \t]+$/, "", key)
+    if (key == "" || index(key, "[") || index(key, "]")) fail("line " NR ": not a key name")
+    value = substr(line, eq + 1)
+    sub(/^[ \t]+/, "", value)
+    sub(/[ \t]+$/, "", value)
+    if (group == "connection" && key == "type") type = value
+    if (group == "connection" && key == "uuid") uuid = value
+  }
+  END {
+    if (bad) exit 1
+    if (type == "") { print "it has no type= in a [connection] group"; exit 1 }
+    print type " " tolower(uuid)
+  }'
+
+# normalized FILE: FILE's text without a byte order mark, with LF line ends.
+normalized() {
+  local text
+  text=$(
+    cat -- "$1"
+    echo x
+  )
+  text=${text%x}
+  text=${text#$'\xef\xbb\xbf'}
+  printf '%s' "${text//$'\r\n'/$'\n'}"
+}
+
+# check FILE: sets type and uuid of a profile that is taken, or sets reason
+# and fails. The reason names no file.
+check() {
+  local name out size
+  name=$(basename -- "$1") reason="" type="" uuid=""
+  if [[ ! "$name" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]*\.nmconnection$ ]] || [ "${#name}" -gt $((64 + 13)) ]; then
+    reason="the name is not <name>.nmconnection with 1 to 64 of A-Z a-z 0-9 . _ -"
+    return 1
+  fi
+  if [ -L "$1" ] || [ ! -f "$1" ]; then
+    reason="it is not a file"
+    return 1
+  fi
+  size=$(wc -c <"$1" | tr -d ' ')
+  if [ "$size" -eq 0 ]; then
+    reason="it is empty"
+    return 1
+  fi
+  if [ "$size" -gt "$max_size" ]; then
+    reason="it is larger than 64 KiB"
+    return 1
+  fi
+  if [ "$(tr -d '\000' <"$1" | wc -c | tr -d ' ')" -ne "$size" ]; then
+    reason="it holds a NUL byte"
+    return 1
+  fi
+  if ! iconv -f UTF-8 -t UTF-8 <"$1" >/dev/null 2>&1; then
+    reason="it is not UTF-8 text"
+    return 1
+  fi
+  if ! out=$(normalized "$1" | awk "$keyfile_awk"); then
+    reason=$out
+    return 1
+  fi
+  type=${out%% *} uuid=${out#* }
+  if [[ ! "$type" =~ ^[a-z0-9-]+$ ]]; then
+    reason="type= is not a NetworkManager connection type"
+    return 1
+  fi
+  if [ -n "$uuid" ] && [[ ! "$uuid" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+    reason="uuid= is not a UUID"
+    return 1
+  fi
+}
+
+# The uuids of the device's profiles, "<uuid><TAB><name>" lines, all files
+# in one awk: only the [connection] group's uuid=, in lower case.
+# shellcheck disable=SC2016 # an awk program
+uuids_awk='
+  FNR == 1 { group = "" }
+  {
+    line = $0
+    sub(/\r$/, "", line)
+    sub(/^[ \t]+/, "", line)
+    if (substr(line, 1, 1) == "[") {
+      sub(/[ \t]+$/, "", line)
+      group = substr(line, 2, length(line) - 2)
+      next
+    }
+    eq = index(line, "=")
+    if (group != "connection" || eq < 2) next
+    key = substr(line, 1, eq - 1)
+    sub(/[ \t]+$/, "", key)
+    if (key != "uuid") next
+    value = substr(line, eq + 1)
+    sub(/^[ \t]+/, "", value)
+    sub(/[ \t]+$/, "", value)
+    name = FILENAME
+    sub(/.*\//, "", name)
+    if (value != "") print tolower(value) "\t" name
+  }'
+
+# remove FILE: overwritten first where that is possible, then removed.
+remove() {
+  shred -u "$1" 2>/dev/null || rm -f "$1"
+}
+
+# known_uuid[i], known_name[i]: the device's profiles that have a uuid, read
+# once before the first file (a pair of arrays: bash 3 has no others).
+known_uuid=() known_name=()
+read_known() {
+  local files=() f u n
+  for f in "$dest"/*; do
+    if [ -f "$f" ] && [ ! -L "$f" ]; then files+=("$f"); fi
+  done
+  [ "${#files[@]}" -gt 0 ] || return 0
+  while IFS=$'\t' read -r u n; do
+    known_uuid+=("$u") known_name+=("$n")
+  done < <(awk "$uuids_awk" "${files[@]}" 2>/dev/null || true)
+}
+
+# install_profile SOURCE NAME: SOURCE becomes the device's profile NAME, mode
+# 0600: written under a part name, synced and renamed.
+install_profile() {
+  local part=$dest/.flockos-profile-$2.part
+  if [ -L "$dest/$2" ] || { [ -e "$dest/$2" ] && [ ! -f "$dest/$2" ]; }; then return 1; fi
+  if cp -- "$1" "$part" && chmod 0600 "$part" && sync "$part" && mv -f "$part" "$dest/$2"; then return 0; fi
+  rm -f "${part:?}"
+  return 1
+}
+
+uptime_now() { cut -d. -f1 "$uptime_file" 2>/dev/null || echo 0; }
+boot_id() { cat "$boot_id_file" 2>/dev/null || echo unknown; }
+
+# state KEY: a value of the trial's state.
+state() { sed -n "s/^$1=//p" "$trial/state" 2>/dev/null | head -n 1; }
+
+# write_state PHASE WINDOW ELAPSED: the trial's state, with this boot and its
+# uptime, written under a part name and renamed.
+write_state() {
+  printf 'phase=%s\nwindow=%s\nelapsed=%s\nboot=%s\nuptime=%s\n' "$1" "$2" "$3" "$(boot_id)" "$(uptime_now)" \
+    >"$trial/state.part" && mv -f "$trial/state.part" "$trial/state"
+}
+
+# begin_trial: before the first profile this boot changes. A trial of taken
+# profiles goes on with these as well, against the same earlier profiles; a
+# trial that has gone back to the earlier profiles ends with them.
+begin_trial() {
+  trial_begun=yes
+  if [ "$(state phase)" = old ]; then
+    say "the profiles rolled back before stay out; a new trial begins"
+    rm -rf "${trial:?}"
+  fi
+  mkdir -p "$trial/new" "$trial/old" && write_state new "$first_window" 0
+}
+
+# keep_old NAME: before the device's profile NAME changes or goes, the trial
+# keeps it, unless it is one the trial took itself or keeps already.
+keep_old() {
+  if [ -e "$trial/new/$1" ] || [ -e "$trial/old/$1" ]; then return 0; fi
+  cp -p -- "$dest/$1" "$trial/old/$1"
+}
+
+# take FILE: FILE becomes the device's profile and leaves the partition; or
+# it is refused and renamed; or it stays for the next boot. Fails in the
+# last two cases, and never stops the run: one file's trouble keeps none of
+# the others back. Runs without errexit (it is called in a condition), so
+# every step is checked.
+take() {
+  local f=$1 name target part i old victims
+  name=$(basename -- "$f")
+  if ! check "$f"; then
+    say "refused $name: $reason; renamed to $name.refused" >&2
+    rm -rf "$f.refused" 2>/dev/null
+    if [ -e "$f.refused" ] || [ -L "$f.refused" ] || ! mv -f "$f" "$f.refused" 2>/dev/null; then
+      say "could not rename $name: it is refused again at the next boot" >&2
+    fi
+    return 1
+  fi
+  target=$dest/$name
+  # rename(2) puts a file into a folder of that name, and replaces a link:
+  # only a profile, or nothing, may be there.
+  if [ -L "$target" ] || { [ -e "$target" ] && [ ! -f "$target" ]; }; then
+    say "$name: $target is no profile file; $name stays on the FLOCKOS partition" >&2
+    return 1
+  fi
+  part=$dest/.flockos-profile-$name.part
+  if ! normalized "$f" >"$part" || ! chmod 0600 "$part" || ! sync "$part"; then
+    rm -f "${part:?}"
+    say "$name: could not write it to $dest; it stays on the FLOCKOS partition" >&2
+    return 1
+  fi
+  if [ -f "$target" ] && cmp -s "$part" "$target"; then
+    # Taken before (a partition that did not let it go): nothing changes,
+    # and a trial goes on as it was.
+    rm -f "${part:?}"
+    say "$name is the device's profile already"
+  else
+    # On trial (section 10): the device's profile it replaces, and those of
+    # its uuid, are kept before they change.
+    victims=()
+    for ((i = 0; i < ${#known_uuid[@]}; i++)); do
+      if [ -n "$uuid" ] && [ "${known_uuid[i]}" = "$uuid" ] && [ "${known_name[i]}" != "$name" ] &&
+        [ -f "$dest/${known_name[i]}" ] && [ ! -L "$dest/${known_name[i]}" ]; then
+        victims+=("${known_name[i]}")
+      fi
+    done
+    if [ "$on_trial" = yes ] && [ -z "$trial_begun" ] && ! begin_trial; then
+      rm -f "${part:?}"
+      say "$name: could not begin a trial in $trial; it stays on the FLOCKOS partition" >&2
+      return 1
+    fi
+    for old in "$name" ${victims[@]+"${victims[@]}"}; do
+      if [ "$on_trial" = yes ] && [ -f "$dest/$old" ] && ! keep_old "$old"; then
+        rm -f "${part:?}"
+        say "$name: could not keep the device's $old for the trial; it stays on the FLOCKOS partition" >&2
+        return 1
+      fi
+    done
+    if [ "$on_trial" = yes ] && ! cp -- "$part" "$trial/new/$name"; then
+      rm -f "${part:?}"
+      say "$name: could not keep it for the trial; it stays on the FLOCKOS partition" >&2
+      return 1
+    fi
+    if [ -e "$target" ]; then
+      say "$name replaces the device's profile of that name"
+    fi
+    if ! mv -f "$part" "$target" || [ -L "$target" ] || [ ! -f "$target" ] || [ -e "$part" ] || ! sync "$dest"; then
+      rm -f "${part:?}" "$trial/new/$name"
+      say "$name: could not put it into $dest; it stays on the FLOCKOS partition" >&2
+      return 1
+    fi
+    # NetworkManager keeps one profile per uuid: the one that came last wins.
+    for old in ${victims[@]+"${victims[@]}"}; do
+      if rm -f "${dest:?}/$old"; then
+        rm -f "$trial/new/$old"
+        say "$name replaces $old, which has the same uuid"
+      fi
+    done
+  fi
+  # The replaced files' uuids go with them.
+  for ((i = 0; i < ${#known_uuid[@]}; i++)); do
+    if [ "${known_name[i]}" = "$name" ]; then known_uuid[i]=""; fi
+    if [ -n "$uuid" ] && [ "${known_uuid[i]}" = "$uuid" ]; then known_uuid[i]=""; fi
+  done
+  if [ -n "$uuid" ]; then known_uuid+=("$uuid") known_name+=("$name"); fi
+  if [ "$hold" = copy ]; then
+    # A factory reset's attempt to come, or the next update, loses what the
+    # device keeps now: the file stays for then.
+    say "took $name ($type) from the FLOCKOS partition and left it there, as what the device keeps now does not last"
+    return 0
+  fi
+  say "took $name ($type) from the FLOCKOS partition"
+  # On /data, synced: now it may leave the partition. A power loss before
+  # that takes it again at the next boot, with the same result.
+  if ! remove "$f"; then
+    say "could not remove $name from the FLOCKOS partition: the next boot takes it again" >&2
+    return 1
+  fi
+}
+
+# apply PHASE: the device's profiles become those of PHASE, new (the ones
+# taken) or old (the earlier ones), and NetworkManager starts over with them.
+# Profiles the trial does not know stay as they are.
+apply() {
+  local f n other=old bad=0
+  [ "$1" = new ] || other=new
+  for f in "$trial/$other"/*; do
+    [ -f "$f" ] || continue
+    n=$(basename -- "$f")
+    if [ ! -e "$trial/$1/$n" ]; then rm -f "${dest:?}/$n" || bad=1; fi
+  done
+  for f in "$trial/$1"/*; do
+    [ -f "$f" ] || continue
+    install_profile "$f" "$(basename -- "$f")" || bad=1
+  done
+  sync "$dest" || true
+  systemctl try-restart NetworkManager.service || bad=1
+  return "$bad"
+}
+
+# names PHASE: the profiles of PHASE, for the log.
+names() {
+  local f out=""
+  for f in "$trial/$1"/*; do
+    if [ -f "$f" ]; then out+=${out:+ }$(basename -- "$f"); fi
+  done
+  echo "${out:-none}"
+}
+
+# judge: one look at the trial. It ends once the agent has connected, with
+# the profiles in use. Until then an enrolled device's uptime counts, and at
+# the end of the window the other profiles take over. Fails when it could not
+# switch every profile; the next look tries again.
+judge() {
+  local phase window elapsed up was delta next=old
+  [ -f "$trial/state" ] || return 0
+  phase=$(state phase) window=$(state window) elapsed=$(state elapsed) was=$(state uptime)
+  [[ "$phase" =~ ^(new|old)$ ]] || phase=new
+  [[ "$window" =~ ^[0-9]+$ ]] || window=$first_window
+  [[ "$elapsed" =~ ^[0-9]+$ ]] || elapsed=0
+  [[ "$was" =~ ^[0-9]+$ ]] || was=0
+  if [ -e "$agent_run/connected" ]; then
+    if [ "$phase" = new ]; then
+      say "the device-agent has connected: the profiles from the FLOCKOS partition stay ($(names new))"
+    else
+      say "the device-agent has connected with the earlier profiles: they stay, the ones from the FLOCKOS partition go ($(names new))"
+    fi
+    rm -rf "${trial:?}"
+    return 0
+  fi
+  up=$(uptime_now)
+  [[ "$up" =~ ^[0-9]+$ ]] || up=0
+  delta=$up
+  if [ "$(state boot)" = "$(boot_id)" ]; then delta=$((up - was)); fi
+  [ "$delta" -ge 0 ] || delta=0
+  # An unenrolled device has no agent to judge by: its clock stands still.
+  if [ -e "$agent_dir/enrolled" ]; then elapsed=$((elapsed + delta)); fi
+  if [ "$elapsed" -lt "$window" ]; then
+    write_state "$phase" "$window" "$elapsed"
+    return 0
+  fi
+  [ "$phase" = new ] || next=new
+  window=$((window * 2))
+  [ "$window" -le "$max_window" ] || window=$max_window
+  if [ "$next" = old ]; then
+    say "the device-agent has not connected with the profiles from the FLOCKOS partition ($(names new)): back to the earlier ones ($(names old)) for $((window / 60)) minutes" >&2
+  else
+    say "the device-agent has not connected with the earlier profiles either: the ones from the FLOCKOS partition again for $((window / 60)) minutes" >&2
+  fi
+  write_state "$next" "$window" 0
+  if ! apply "$next"; then
+    say "could not switch every profile; the next look tries again" >&2
+    write_state "$phase" "$window" "$elapsed"
+    return 1
+  fi
+}
+
+case "${1:-}" in
+  trial)
+    if [ "$#" -ne 1 ]; then
+      echo "usage: network-profiles trial" >&2
+      exit 2
+    fi
+    judge
+    exit $?
+    ;;
+  trial-watch)
+    while [ -f "$trial/state" ]; do
+      judge || true
+      sleep 60
+    done
+    exit 0
+    ;;
+esac
+
+if [ "${1:-}" = check ]; then
+  if [ "$#" -ne 2 ]; then
+    echo "usage: network-profiles check FILE" >&2
+    exit 2
+  fi
+  if check "$2"; then exit 0; fi
+  echo "network-profiles: $reason" >&2
+  exit 1
+fi
+if [ "$#" -ne 0 ]; then
+  echo "usage: network-profiles [check FILE | trial | trial-watch]" >&2
+  exit 2
+fi
+
+if [ "$hold" = wait ]; then
+  if compgen -G "$src/*.nmconnection" >/dev/null; then
+    say "a factory reset waits: the profiles on the FLOCKOS partition wait for it"
+  fi
+  exit 0
+fi
+if ! compgen -G "$src/*.nmconnection" >/dev/null; then
+  say "no profile on the FLOCKOS partition"
+  exit 0
+fi
+
+mkdir -p "$dest"
+# What a power loss or the unit's time limit left of an earlier run;
+# NetworkManager ignores names that begin with a dot.
+rm -f "$dest"/.flockos-profile-*.part
+read_known
+
+rc=0 trial_begun=""
+for f in "$src"/*.nmconnection; do
+  take "$f" || rc=1
+done
+if [ "$hold" != copy ]; then rmdir "$src" 2>/dev/null || true; fi
+sync
+exit "$rc"

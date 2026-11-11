@@ -98,13 +98,20 @@ check "RAUC: compatible, the custom backend, APP and APP_b" \
 check "no repart.d (NVIDIA's flash writes the layout)" test ! -e "$root/usr/lib/repart.d"
 check "fstab: /boot/efi is NVIDIA's ESP, /data the layout's data partition" \
   bash -c "grep -q '^PARTLABEL=esp  *[/]boot[/]efi  *vfat ' '$root/etc/fstab' && grep -q '^PARTLABEL=data  *[/]data ' '$root/etc/fstab' && ! grep -q '^PARTLABEL=FLOCKOS' '$root/etc/fstab'"
+check "the apps' data is /data/apps, the mount point in the tree" \
+  bash -c "grep -q '^/data/apps  *[/]apps  *none  *bind,.*nofail' '$root/etc/fstab' && test -d '$root/apps'"
 for unit in flockos-ssh-hostkeys.service flockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service flockos-ptp.service flockos-ptp.path \
-  flockos-ptp4l.service flockos-phc2sys.service; do
+  flockos-ptp4l.service flockos-phc2sys.service flockos-proxy.service flockos-proxy.path \
+  flockos-apps-check.service flockos-network-profiles.service flockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$root/usr/lib/systemd/system/systemd-timesyncd.service"
-check "ptp.conf is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/flockos/ptp.conf')\" = /data/flockos/ptp.conf ]"
+check "a factory reset runs before /data is mounted, and no mount stops the boot (ADR-0015)" \
+  bash -c "test -x '$root/usr/lib/flockos/factory-reset' && test -e '$root/usr/lib/systemd/system/data.mount.wants/flockos-factory-reset.service' && test -e '$root/usr/lib/systemd/system/data.mount.wants/flockos-data-missing.service' && ! grep -v '^#' '$root/etc/fstab' | grep . | grep -v nofail"
+for setting in ptp.conf proxy.conf; do
+  check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/flockos/$setting')\" = /data/flockos/$setting ]"
+done
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
   test ! -e "$root/usr/lib/systemd/system/flockos-mark-good.service"
 for unit in rauc-mark-good.service nv-l4t-bootloader-config.service nv-rootfs-validation-config.service; do

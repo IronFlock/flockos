@@ -29,8 +29,17 @@ with a reason and an expiry date.
 parsing that never runs code, templates without holes, sizes, the matrix axes),
 the os-release contract, the target templates (GRUB A/B contract, RAUC
 `system.conf`, slot sizes) and the image's own scripts in
-`overlay/usr/lib/flockos` run against a temporary directory. They need bash and
-bats only:
+`overlay/usr/lib/flockos` run against a temporary directory. The factory reset
+(`factory-reset.bats`) runs against folders that stand for the data partition
+and the root slots, with fakes for `mount`, `mkfs.ext4`, `lsblk`, `blkid`,
+`findmnt`, `grub-editenv`, `sync` and `timeout`: a power loss at each call of
+them, a command that does not end, failed steps through folders that take no
+new files, and, where `mawk` is installed, Debian's awk. Each failure path
+shows that the boot goes on, that the attempt is counted (three, then the
+reset gives up), and what the record says.
+The network profiles (`network-profiles.bats`) run against folders that stand
+for the FLOCKOS partition and `/data/network/connections`, with every rule a
+profile has to meet. They need bash and bats only:
 
 ```sh
 just test
@@ -64,7 +73,9 @@ Sequence:
    (not on `-rt` kernels, which turn EFI runtime services off); with it on, the
    kernel is locked down in integrity mode;
    `systemd-repart` created `rootfs-b` (same size as `rootfs-a`) and `data` (grown
-   to the disk); `/data` and its bind mounts are in place; machine-id
+   to the disk); `/data` and its bind mounts are in place, `/apps` the bind mount
+   of `/data/apps` with Docker and the agent ordered after it and
+   `flockos-apps-check` content, and an app's file is written there; machine-id
    initialised; SSH host keys on `/data` and none in `/etc/ssh`; `sshd` refuses
    root and passwords; no account has a password; RAUC reports slot A booted with
    the right compatible, tried and not marked good by anything at boot (the
@@ -87,19 +98,66 @@ Sequence:
    source away; removing the file stops them. QEMU's interface has no hardware
    time stamps, so this checks the wiring; PTP itself is on the hardware
    checklist.
-2. **Reboot.** machine-id, SSH host key and the persistent journal survive. On
+   Then the proxy: a `proxy.conf` reaches Docker (`docker info` names the proxy,
+   and `NO_PROXY` holds `localhost` and the file's `no_proxy`), the agent's
+   environment while it runs, and chrony (`ntp=`); `proxy.env` is readable by
+   root only. Nothing listens on the proxy address: a real proxy is on the
+   hardware checklist.
+   Then a network profile ([ADR-0016](adr/0016-network-profiles-from-the-flockos-partition.md)):
+   a profile for a static address, the address, gateway and DNS server the VM
+   has from DHCP on its card matched by MAC address, as `ironflock os install`
+   writes one, goes to the FLOCKOS partition's `network/` folder, and
+   `network-profiles check` accepts it.
+2. **Reboot.** machine-id, SSH host key, the persistent journal and the app's
+   file in `/apps` survive. On
    an `-rt` image (`--kernel rt`) the kernel reports `PREEMPT_RT` first, a new
    `rt.conf` reaches grubenv through `flockos-rt-tuning`, and after the reboot
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
+   The `proxy.conf` put on the FLOCKOS partition before the reboot has replaced
+   the device's (mode 0600) and left the partition, and Docker uses it; the test
+   then removes the proxy. The network profile has left the partition for
+   `/data/network/connections` (mode 0600, root's), and NetworkManager runs the
+   card on it: the address without DHCP's `dynamic` flag, the default route
+   through the gateway, and the host still answers. The profile is on trial
+   (`flockos-network-profiles-trial` runs); the test writes the agent's mark of
+   a connection, which its own agent never earns, and the trial ends with the
+   profile kept. It stays for the rest of the test (QEMU's DHCP would hand out
+   the same address).
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
-   machine-id, host key and `/data`, and is enrolled again from the agent's copy
+   machine-id, host key, `/data` and the app's file of slot A in `/apps`, and is
+   enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
    the agent's place.
-4. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
+4. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-flockos-partition.md)).
+   On slot B, with slot A holding the system it was updated from: a container
+   runs with a restart policy (its image is made in the VM from `sleep` and the
+   libraries it links, as the harness has no registry), an app's file is in
+   `/apps`, and the site has a network profile and a `proxy.conf`. The test
+   writes `factory-reset.conf` with `keep-network=yes` and a new `.flock` (another
+   owner and name) to the FLOCKOS partition, each under a temporary name and
+   renamed, as `ironflock os reset -c` does, and `factory-reset check` accepts
+   the request. The boot after the restart resets the device and restarts it by
+   itself. It comes up on slot B (the reset's restart counted as no failed try),
+   with `factory-reset.log` saying `result=done`, the request and the temporary
+   files gone, a new machine-id and host key, neither the container nor its
+   image nor `hello-world`, no app file or old journal, the old SSH user gone
+   and the device enrolled as the new one, the agent's copy of the `.flock` the
+   new one; the network profile, `proxy.conf` and RAUC's
+   record of slot B are kept; slot A, read with `debugfs`, has the image's
+   hostname, `uninitialized` as machine-id and no `enrolled` mark; slot B,
+   proven before, is marked good again by `flockos-slot-keep`. Then the same
+   request is put back as it was (content and time, as when the FLOCKOS
+   partition could not remove it) and the device restarts once: the reset is
+   not done again, the journal says so, and the device keeps its machine-id
+   and new identity. With `--no-flock` the device stays unenrolled, with the
+   hostname `flockos`. A failure of the step prints the units the reset touches
+   (`systemctl status`, their journal), the reset's record and state, the
+   FLOCKOS partition and the reset's lines from the serial console.
+5. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
    and nobody marks it good (as when the agent cannot reach the platform after
    an update); the next boot falls back to B.
-5. **Crash without a connection.** With a proven system in slot B and a good one
+6. **Crash without a connection.** With a proven system in slot B and a good one
    in slot A, slot B stays up until it has marked itself good, and the kernel
    is crashed on purpose (`/proc/sysrq-trigger`). The device restarts by itself
    on slot B and the kernel's record of the crash is under `/data/pstore`,
@@ -188,4 +246,21 @@ WP-4b.2, WP-5.4, WP-6.6):
    shows the device's own `clockIdentity` as `grandmasterIdentity`, and a client
    (a camera, or a second device with `ptp.conf` as a client) reports an offset
    to it of well under a microsecond.
-9. Target-specific items in `docs/targets/<target>.md`.
+9. Behind a proxy (`docs/build.md`, "Proxy"), on a network that blocks direct
+   internet access: flash with a `proxy.conf` next to the `.flock`; the device
+   enrolls and the agent reaches the platform; an app's image pulls; an OS
+   update downloads and installs; remote access works; `chronyc sources` uses
+   the `ntp=` servers.
+10. Factory reset (`docs/build.md`, "Factory reset"), on a device on WiFi
+    with apps running: `factory-reset.conf` with `keep-network=yes` and a new
+    `.flock` on the FLOCKOS partition, restart. The screen shows the reset's
+    steps, the device restarts by itself, comes back on the same slot and WiFi,
+    enrolls as the new device and runs no app of the old one;
+    `factory-reset.log` says `result=done`. Then with an empty
+    `factory-reset.conf` and no `.flock`: the device comes up unenrolled.
+11. Network profiles (`docs/build.md`, "Network profiles"), where the board has
+    WiFi: flash with a `.flock` without WiFi and a WPA-PSK profile in `network/`
+    on the FLOCKOS partition, with the wired network unplugged. The device
+    joins that WiFi on its first boot and enrolls; the profile has left the
+    partition.
+12. Target-specific items in `docs/targets/<target>.md`.

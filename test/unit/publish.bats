@@ -14,7 +14,9 @@ setup() {
     printf 'osr' >"$tmp/out/$id/$id-1.0.0.os-release"
     printf 'pkgs' >"$tmp/out/$id/$id-1.0.0.packages.tsv"
     printf '{}' >"$tmp/out/$id/$id-1.0.0.cdx.json"
+    printf 'aliases' >"$tmp/out/$id/$id-1.0.0.modules.alias.gz"
     printf 'not published' >"$tmp/out/$id/$id-1.0.0.ironflock.json"
+    printf 'raw_size=1\nmin_disk_size=1\n' >"$tmp/out/$id/$id-1.0.0.sizes"
   done
   printf 'bundle' >"$tmp/out/flockos-amd64-efi-base/flockos-amd64-efi-base-1.0.0.raucb"
 }
@@ -24,22 +26,25 @@ teardown() { rm -rf "$tmp"; }
 @test "sums lists every published file of every image, by name" {
   run bash "$publish" sums "$tmp/out"
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | wc -l | tr -d ' ')" = 9 ]
+  [ "$(echo "$output" | wc -l | tr -d ' ')" = 11 ]
   [[ "$output" == *"  flockos-amd64-efi-base-1.0.0.raucb"* ]]
   [[ "$output" == *"  flockos-amd64-efi-installer-1.0.0.cdx.json"* ]]
+  # The hardware list, which the catalog names; the sizes are in the catalog.
+  [[ "$output" == *"  flockos-amd64-efi-base-1.0.0.modules.alias.gz"* ]]
   [[ "$output" != *"ironflock.json"* ]]
+  [[ "$output" != *".sizes"* ]]
   [[ "$output" != *"/"* ]]
 }
 
 @test "stage uploads each file and SHA256SUMS to staging/flockos/<version>/, uncached" {
   DRY_RUN=1 run bash "$publish" stage "$tmp/out" 1.0.0
   [ "$status" -eq 0 ]
-  [ "$(echo "$output" | grep -c '^+ gcloud storage cp')" = 10 ]
+  [ "$(echo "$output" | grep -c '^+ gcloud storage cp')" = 12 ]
   [[ "$output" == *"gs://ironflock-downloads/staging/flockos/1.0.0/flockos-amd64-efi-base-1.0.0.raucb"* ]]
   [[ "$output" == *"gs://ironflock-downloads/staging/flockos/1.0.0/SHA256SUMS"* ]]
   [[ "$output" == *"--cache-control=public, max-age=0"* ]]
   [[ "$output" != *"gs://ironflock-downloads/flockos/"* ]]
-  [[ "$output" == *"dry run, nothing changed: would have staged 9 files"* ]]
+  [[ "$output" == *"dry run, nothing changed: would have staged 11 files"* ]]
 }
 
 @test "stage refuses a directory without release files" {

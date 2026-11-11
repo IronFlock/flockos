@@ -107,3 +107,33 @@ example="$repo/docs/manifest.example.json"
   run jq -e '[.releases[].images[] | select(.variant == "installer") | .payloads | length] | min >= 2' "$example"
   [ "$status" -eq 0 ]
 }
+
+@test "an image names its raw size and the smallest disk, both or neither, the disk at least the image" {
+  run jq -r '.releases | to_entries[] | .key as $v | .value.images | to_entries[] |
+    .key as $id | .value.image as $i |
+    select((($i.raw_size == null) != ($i.min_disk_size == null))
+      or ($i.raw_size != null and (($i.raw_size | type) != "number" or $i.raw_size < 1 or $i.min_disk_size < $i.raw_size))) |
+    "\($v) \($id)"' "$example"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # The example shows them, as every release after 0.14.0 has them.
+  run jq -e '[.releases[].images[].image | has("raw_size") and has("min_disk_size")] | all' "$example"
+  [ "$status" -eq 0 ]
+  for f in raw_size min_disk_size; do
+    jq -e --arg f "$f" '."$defs".diskImage.allOf[1].properties[$f].type == "integer"' "$schema" >/dev/null
+  done
+  jq -e '."$defs".image.properties.image."$ref" == "#/$defs/diskImage"' "$schema" >/dev/null
+}
+
+@test "an image's hardware list is <image-id>-<version>.modules.alias.gz next to the image, with its hash and size" {
+  run jq -r '.releases | to_entries[] | .key as $v | .value.images | to_entries[] |
+    .key as $id | .value as $i | select($i.modules_alias != null) | $i.modules_alias as $m |
+    select(($m.url != ($i.image.url | sub("\\.img\\.gz$"; ".modules.alias.gz")))
+      or ($m.url | endswith("/" + $id + "-" + $v + ".modules.alias.gz") | not)
+      or ($m.sha256 | test("^[0-9a-f]{64}$") | not) or $m.size < 1) | "\($v) \($id)"' "$example"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run jq -e '[.releases[].images[] | has("modules_alias")] | all' "$example"
+  [ "$status" -eq 0 ]
+  jq -e '."$defs".image.properties.modules_alias."$ref" == "#/$defs/artifact"' "$schema" >/dev/null
+}
