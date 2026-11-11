@@ -26,6 +26,12 @@ or published from a laptop.
 | `tag` | The tag `v<version>` and the GitHub Release (harness `release-tag.yml`) | the release App |
 | `assets` | `SHA256SUMS`, the SBOMs and the catalog on the GitHub Release; the images and bundles stay on the download server | the release App |
 | `production` | Only in a manual run on a release tag: moves the production channel to that release (below) | `ironflockos-release`, `ironflockos-publisher` |
+| `release-ok` | Last, always: every job the run's mode needs succeeded and every other was skipped (`build/release-check.sh`). A job skipped by mistake fails the run, and so a release pull request's dry run | none |
+
+Every job after the first names the result of each job it needs and runs only
+when they succeeded (or, for `build`, when `source` did not decide to reuse).
+GitHub would otherwise skip a job silently once any job before it was
+skipped, as `build` is when a release reuses its images.
 
 The workload identity pool gives the two IronFlockOS identities only to a push of
 `release.yml` on `main` and to runs on `v*` tags. `ironflockos-publisher` can write

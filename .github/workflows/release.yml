@@ -118,7 +118,7 @@ jobs:
   # any error, and the release builds as before. A dry run always builds.
   source:
     needs: [verify]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -213,7 +213,7 @@ jobs:
   # reuses its pull request's images.
   build:
     needs: [verify, source]
-    if: (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.outputs.reuse != 'true'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && needs.source.outputs.reuse != 'true' }}
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
@@ -225,7 +225,7 @@ jobs:
   # image as built, by sha256 and size, from the build's lists.
   manifest:
     needs: [verify, source, build]
-    if: (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.outputs.reuse != 'true'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && needs.source.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -255,7 +255,7 @@ jobs:
   # the release run checks before it reuses these images.
   attest-build:
     needs: [verify, manifest]
-    if: needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.manifest.result == 'success' && needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request' }}
     uses: IronFlock/workflows/.github/workflows/attest-provenance.yml@v1
     permissions:
       contents: read
@@ -271,7 +271,7 @@ jobs:
   # the dry run when this run's images would not verify.
   would-reuse:
     needs: [verify, attest-build]
-    if: needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.attest-build.result == 'success' && needs.verify.outputs.mode == 'dry-run' && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -328,7 +328,7 @@ jobs:
     needs: [verify, source, manifest]
     # After the manifest of this run's build, or without it when the
     # release reuses its pull request's images (no build, no manifest job).
-    if: ${{ !cancelled() && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && (needs.manifest.result == 'success' || (needs.manifest.result == 'skipped' && needs.source.outputs.reuse == 'true')) }}
+    if: ${{ !cancelled() && needs.verify.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') && needs.source.result == 'success' && (needs.manifest.result == 'success' || (needs.source.outputs.reuse == 'true' && needs.manifest.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -393,7 +393,7 @@ jobs:
   attest:
     name: attest (${{ matrix.image }})
     needs: [verify, sign]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     # One call per image, each downloading only that image's files
     # (signed-<mode>-<image>, 1 to 2.5 GB), in parallel. The harness takes the
     # files themselves; with digests it would need none of them.
@@ -419,7 +419,7 @@ jobs:
   # release image accepts: it boots and reboots only.
   e2e:
     needs: [verify, sign]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -472,7 +472,7 @@ jobs:
   # (ironflockos-publisher: the IronFlockOS trees of the download bucket only).
   stage:
     needs: [verify, sign, attest]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.sign.result == 'success' && needs.attest.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -532,7 +532,7 @@ jobs:
   # uploads nothing.
   sources:
     needs: [verify, stage]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.stage.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -575,7 +575,7 @@ jobs:
   # nothing.
   promote:
     needs: [verify, stage, e2e, sources]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.stage.result == 'success' && needs.e2e.result == 'success' && needs.sources.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -680,7 +680,7 @@ jobs:
   vm-images:
     name: vm image (${{ matrix.image }})
     needs: [verify, promote]
-    if: needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.promote.result == 'success' && (needs.verify.outputs.mode == 'release' || needs.verify.outputs.mode == 'dry-run') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -732,7 +732,7 @@ jobs:
   # The workload identity pool gives both identities to runs on v* tags.
   production:
     needs: [verify]
-    if: needs.verify.outputs.mode == 'tag' && inputs.promote-production
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.verify.outputs.mode == 'tag' && inputs.promote-production }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -781,7 +781,7 @@ jobs:
 
   tag:
     needs: [verify, promote, vm-images]
-    if: needs.verify.outputs.mode == 'release'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.promote.result == 'success' && needs.vm-images.result == 'success' && needs.verify.outputs.mode == 'release' }}
     uses: IronFlock/workflows/.github/workflows/release-tag.yml@v1
     permissions:
       contents: read
@@ -798,7 +798,7 @@ jobs:
   # like the tag: this workflow's token stays read-only.
   assets:
     needs: [verify, tag]
-    if: needs.verify.outputs.mode == 'release'
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.tag.result == 'success' && needs.verify.outputs.mode == 'release' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
@@ -831,3 +831,25 @@ jobs:
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           gh release upload "v$version" --repo "$REPO" --clobber meta/SHA256SUMS catalog/manifest.json meta/*.cdx.json
+
+  # The last word on the run: every job this run's mode needs succeeded and
+  # every other was skipped (build/release-check.sh, its table). A job
+  # skipped by mistake fails the run, and so the dry run of a release pull
+  # request (ci.yml's release-build).
+  release-ok:
+    if: always()
+    needs: [verify, source, build, manifest, attest-build, would-reuse, sign, attest, e2e, stage, sources, promote, vm-images, production, tag, assets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: every job ran or was skipped as this run's mode needs
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          PROMOTE: ${{ inputs.promote-production }}
+        run: build/release-check.sh

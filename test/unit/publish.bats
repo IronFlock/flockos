@@ -318,7 +318,7 @@ needs() {
     "$repo/.github/workflows/release.yml"
   [ -n "$output" ]
   ! echo "$output" | grep -v "if: env.MODE == 'release'"
-  grep -q "if: needs.verify.outputs.mode == 'tag' && inputs.promote-production" "$repo/.github/workflows/release.yml"
+  grep -q "if: .*needs.verify.outputs.mode == 'tag' && inputs.promote-production" "$repo/.github/workflows/release.yml"
 }
 
 @test "release.yml: a run on a tag builds nothing" {
