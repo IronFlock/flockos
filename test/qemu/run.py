@@ -1468,17 +1468,62 @@ class Runner:
             self.keys(ch)
         self.keys("ret")
 
+    # The first terminal's state, for the switches' diagnostics: which
+    # terminal is in front, tty1's display mode (KDGETMODE: 0 text,
+    # 1 graphics), keyboard mode (KDGKBMODE: 0 raw, 1 xlate, 2 mediumraw,
+    # 3 unicode, 4 off) and switching mode (VT_GETMODE: 0 auto, 1 process,
+    # with the signal asked for), and whether a plymouthd runs.
+    VT_STATE = ("echo front=$(cat /sys/class/tty/tty0/active) plymouthd=$(pidof plymouthd || echo none); "
+                "perl -e 'open(my $t, \"<\", \"/dev/tty1\") or die $!; "
+                "my $kd = pack(\"L\", 0); ioctl($t, 0x4B3B, $kd) or die \"KDGETMODE $!\"; "
+                "my $kb = pack(\"L\", 0); ioctl($t, 0x4B44, $kb) or die \"KDGKBMODE $!\"; "
+                "my $vm = \"\\0\" x 8; ioctl($t, 0x5601, $vm) or die \"VT_GETMODE $!\"; "
+                "my ($mode, $waitv, $rel) = unpack(\"CCs\", $vm); "
+                "printf \"tty1: display=%d keyboard=%d switching=%d relsig=%d\\n\", unpack(\"L\", $kd), unpack(\"L\", $kb), $mode, $rel'")
+
+    def switch_to_tty2(self, when):
+        """Ctrl+Alt+F2 switches to tty2. On failure, what the first terminal
+        was like and whether a switch asked for from the shell (VT_ACTIVATE,
+        what chvt does) gets through: that tells a key that does not reach
+        the kernel's keyboard from a switch the kernel refuses."""
+        before = self.vm.run(self.VT_STATE, check=False).strip()
+        log(f"before Ctrl+Alt+F2 ({when}): {before}")
+        self.keys("ctrl", "alt", "f2")
+        try:
+            self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty2 ]", 30, f"Ctrl+Alt+F2 to switch to tty2 ({when})")
+        except TestFailure as e:
+            after = self.vm.run(self.VT_STATE, check=False).strip()
+            chvt = self.vm.run("perl -e 'open(my $t, \"<\", \"/dev/tty0\") or die $!; my $n = 2; "
+                               "ioctl($t, 0x5606, $n) or die \"VT_ACTIVATE $!\"'; sleep 2; "
+                               "echo front after VT_ACTIVATE 2: $(cat /sys/class/tty/tty0/active)", check=False).strip()
+            raise TestFailure(f"{e}\nbefore: {before}\nafter: {after}\n{chvt}") from None
+
     def usual_keys(self):
-        """WP-8.2 on the system booted with its own splash: Esc while Plymouth
-        shows the splash shows the messages and Esc again the splash;
-        Ctrl+Alt+F2 gives a login prompt, Ctrl+Alt+F1 leads back to tty1.
-        With an enrolled device, the console password (D8): a hash in
-        /data/ironflockos/console-password becomes the enrolled user's password
-        and no one else's, the user logs in with it on tty2, SSH still refuses
-        passwords, and without the file the password is locked again."""
+        """WP-8.2 on the system booted with its own splash. After the boot
+        as it is: Ctrl+Alt+F2 gives a login prompt, Ctrl+Alt+F1 leads back
+        to tty1; with an enrolled device, the console password (D8): a hash
+        in /data/ironflockos/console-password becomes the enrolled user's
+        password and no one else's, the user logs in with it on tty2, SSH
+        still refuses passwords, and without the file the password is
+        locked again. Then with a Plymouth started by hand: Esc shows the
+        messages and Esc again the splash, a message goes below the picture
+        and stays when Plymouth quits, and Ctrl+Alt+F2 again switches."""
         qmp = self.vm.screen_qmp()
         shot = os.path.join(self.vm.workdir, "screendump.ppm")
         expect = Splash(test_picture(), (0x20, 0x40, 0x60))
+        # The other terminals have a login prompt, after the boot as a person
+        # at the device finds it.
+        self.switch_to_tty2("after the boot")
+        self.wait_for("systemctl -q is-active autovt@tty2.service || systemctl -q is-active getty@tty2.service", 60,
+                      "a login prompt on tty2")
+        frame = qmp.screen(shot)
+        save_screen(frame, os.path.join(self.vm.workdir, "screen-keys-tty2.png"))
+        if expect.match(frame)[0]:
+            raise TestFailure("tty2 shows the splash, not its login prompt")
+        if self.flock:
+            self.console_password()
+        self.keys("ctrl", "alt", "f1")
+        self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty1 ]", 30, "Ctrl+Alt+F1 to lead back to tty1")
         # Plymouth as at boot, on the running system: Esc toggles the messages.
         self.vm.run("plymouthd --mode=boot --attach-to-session --pid-file=/run/plymouth/pid && plymouth show-splash")
         try:
@@ -1509,7 +1554,9 @@ class Runner:
                 raise TestFailure(f"the message is not on the splash: {why}")
         finally:
             # As at the end of the boot (plymouth-quit.service).
-            self.vm.run("/usr/lib/ironflockos/keep-splash", check=False)
+            kept = self.vm.run("/usr/lib/ironflockos/keep-splash", check=False)
+        if "could not be" in kept:
+            raise TestFailure(f"keep-splash did not do all of its steps:\n{kept}")
         self.vm.run("! pidof plymouthd")
         time.sleep(2)
         ok, why = expect.match_message(qmp.screen(shot))
@@ -1517,17 +1564,9 @@ class Runner:
             raise TestFailure(f"the message did not stay when Plymouth quit: {why}")
         # Without Plymouth (boot=text) a message changes nothing and fails nothing.
         self.vm.run("/usr/lib/ironflockos/screen-message 'not shown'")
-        # The other terminals have a login prompt.
-        self.keys("ctrl", "alt", "f2")
-        self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty2 ]", 30, "Ctrl+Alt+F2 to switch to tty2")
-        self.wait_for("systemctl -q is-active autovt@tty2.service || systemctl -q is-active getty@tty2.service", 60,
-                      "a login prompt on tty2")
-        frame = qmp.screen(shot)
-        save_screen(frame, os.path.join(self.vm.workdir, "screen-keys-tty2.png"))
-        if expect.match(frame)[0]:
-            raise TestFailure("tty2 shows the splash, not its login prompt")
-        if self.flock:
-            self.console_password()
+        self.vm.run("! journalctl -b --no-pager -o cat | grep -q 'keep-splash: .* could not be'")
+        # And after this Plymouth too the switch works.
+        self.switch_to_tty2("after a Plymouth started by hand")
         self.keys("ctrl", "alt", "f1")
         self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty1 ]", 30, "Ctrl+Alt+F1 to lead back to tty1")
 
