@@ -218,7 +218,10 @@ each slot, and the Pi tryboot backend's slot states; the A/B update needs it) an
 `ironflockos/ptp.conf` (ADR-0013). Cleared among the rest: the agent with its `.flock` copy,
 Docker's data-root, device-init's `installed.json`, `home/`, `ironflockos/enroll.conf`,
 `ironflockos/rt.conf` (with `IRONFLOCKOS_RT_CMDLINE` in `grubenv`), the host keys, the logs, the
-downloaded bundles, fwupd's state, the crash records.
+downloaded bundles, fwupd's state, the crash records; `ironflockos/display.conf` and
+`ironflockos/screen/` (added with the splash, docs/build.md "The screen": with
+`IRONFLOCKOS_BOOT` in `grubenv` and `splash.cpio` next to it, so the restart shows
+IronFlock's logo).
 
 In each root slot, in this order: `/apps` removed; `/var/lib/containerd`,
 `/var/lib/NetworkManager`, `/var/lib/sudo/lectured`, `/var/tmp` and `/root` emptied

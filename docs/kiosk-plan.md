@@ -126,6 +126,17 @@ The app guarantees:
   screen and the serial console are as in 0.16.0; a device installed with 0.16.0 and
   updated boots as before, on text, as its `grub.cfg` is the old one (Known limits); the
   slot stays below the fill warning.
+- As built (branch `splash`, `docs/build.md` "The screen"): the setting is `boot=` in
+  `/etc/ironflockos/display.conf`, written into `grubenv` as `IRONFLOCKOS_BOOT=text` by
+  `ironflockos-display`; `ironflockos.boot=text` in `IRONFLOCKOS_CMDLINE` is the tests'
+  way. One parameter more than this plan named: `plymouth.force-frame-buffer-on-boot`.
+  Plymouth draws into the kernel's framebuffer device instead of taking the graphics
+  device: the kernel removes a framebuffer when the program that made it ends, so a
+  splash drawn through the graphics device would turn black when Plymouth quits, and
+  the framebuffer device keeps it. The packages are the EFI targets' (`plymouth`,
+  `plymouth-label`, `fontconfig`), not `profiles/base`'s, which the Raspberry Pi and
+  Jetson share (P5). The sizes of the initramfs and the slot are in the CI log of the
+  first build (`initramfs:` in the build log, `sizes:` in the QEMU test's).
 
 ### WP-8.2 The usual keys (2 days, after O1)
 
@@ -163,6 +174,15 @@ The app guarantees:
   refused and the earlier splash stays; an archive of random bytes on the partition
   does not stop the boot, which then shows IronFlock's logo; after a factory reset the
   logo is IronFlock's.
+- As built (branch `splash`): `ironflockos-splash.path` watches `splash.png` and
+  `splash.conf`; while one is missing systemd watches the folder instead, and a run
+  that another name started reads the two names and changes nothing. A refusal makes
+  the unit fail, as a refused network profile does. The archive holds the picture and
+  the theme's script with the settings in its first lines; the shutdown splash gets
+  the same files through a copy of the theme in `/run`, mounted over the theme's
+  folder. The QEMU test reads the picture on the screen at the boot after it was
+  given; after the update it checks the archive, not the screen (one boot with the
+  splash fewer).
 
 ### WP-8.7 No black between the firmware's picture and the splash (3 days, and the machine)
 
@@ -203,16 +223,19 @@ The app guarantees:
 
 | WP | Title | Repo | Days | Depends on | Status |
 |----|-------|------|------|------------|--------|
-| 8.1 | The splash by default on the EFI targets | ironflockos | 3 | | open |
+| 8.1 | The splash by default on the EFI targets | ironflockos | 3 | | built on `splash`, proof in CI |
 | 8.2 | The usual keys | ironflockos | 2 | 8.1, O1 | blocked (O1) |
 | 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | open |
-| 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | open |
+| 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | built on `splash`, proof in CI |
 | 8.5 | The kiosk app | its own | own plan | the contract | open |
 | 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | open |
 | 8.6 | Acceptance on the first machine | ironflockos, hardware | 1 | 8.1 to 8.5, 8.7 | open |
 
 WP-8.5 needs only the contract, so it starts at once and is tested against the image as
 WP-8.1 and WP-8.4 arrive.
+
+Marko decided on 2026-11-12 that WP-8.1, WP-8.2, WP-8.3, WP-8.4 and WP-8.7 go into the
+next IronFlockOS release.
 
 ## What changes for every device
 

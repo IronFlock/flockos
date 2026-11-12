@@ -154,6 +154,37 @@ Sequence:
    a connection, which its own agent never earns, and the trial ends with the
    profile kept. It stays for the rest of the test (QEMU's DHCP would hand out
    the same address).
+   **The screen** ([build.md](build.md#the-screen)). Every boot so far was on
+   text (`ironflockos.boot=text` in `IRONFLOCKOS_CMDLINE`, as the checks read the
+   serial console): no Plymouth, a login prompt on tty1. The VM has a screen
+   (`VGA` on amd64, `virtio-gpu-pci` on arm64), a virtio keyboard and tablet,
+   and a QMP socket; the test reads the screen with `screendump` about once a
+   second while it restarts and compares each frame with the splash it should
+   show: the picture centred on its background colour, faded in by some
+   amount, and nothing else. *Splash:* the initramfs carries Plymouth, the
+   theme and IronFlock's logo; with random bytes as `splash.cpio` the device
+   boots with the splash, the kernel says `Initramfs unpacking failed`, and
+   from before the root filesystem's system answered to the end of the boot
+   the screen shows IronFlock's logo on black, faded in and never back;
+   Plymouth started in the initramfs (before systemd) and is gone at the end;
+   `ironflockos-splash` removes the damaged archive; tty1 is in front, in
+   graphics mode, without a login prompt; an error written to the kernel's log
+   reaches the serial console and leaves the screen as it is, and so do 30
+   seconds; every input device has `ID_INPUT=1`, one is a keyboard. *Own
+   splash:* a temporary file in `/data/ironflockos/screen` changes nothing; a
+   picture and `splash.conf` (`#204060`, `animation=none`), written as an app
+   writes them, become `splash.cpio`; a file that is no PNG, one larger than 4
+   MiB, one with a `tEXt` chunk and a `splash.conf` with an unknown key are
+   refused, the journal says why, and the archive stays; the running system's
+   theme has the picture for the shutdown; the next boot shows the picture on
+   `#204060` from before the root filesystem on, and Plymouth's shutdown splash
+   ran at the restart. The update keeps the archive; the factory reset removes
+   it. Not tested in QEMU: whether the picture survives the moment a real
+   graphics driver (Intel's) takes the screen from the firmware, the frames
+   before the root filesystem's system (the initramfs's are not read one by
+   one: the check there is that Plymouth started in it), and the shutdown
+   splash's frames (the journal says it started). Frames that are not the
+   splash are saved as `screen-*.png` with the logs.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
    machine-id, host key, `/data` and the app's file of slot A in `/apps`, and is

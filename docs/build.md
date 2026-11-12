@@ -183,7 +183,9 @@ tried, GRUB starts over with the first good one.
 
 `IRONFLOCKOS_CMDLINE` in `grubenv` appends kernel parameters on both slots, for
 diagnosis in the field (`grub-editenv /boot/efi/EFI/BOOT/grubenv set
-IRONFLOCKOS_CMDLINE=...`) and for the QEMU tests.
+IRONFLOCKOS_CMDLINE=...`) and for the QEMU tests. `IRONFLOCKOS_BOOT=text`
+boots without the splash, and `splash.cpio` next to `grubenv` is the device's
+own splash picture ([The screen](#the-screen)).
 
 Known limit of 1.x: slots are found by GPT partition name (`rootfs-a`,
 `rootfs-b`, `data`) and every image of a target has the same partition UUIDs.
@@ -415,7 +417,9 @@ the reset removes `/apps`, containerd's and NetworkManager's state, root's
 files, the sudo rule and the agent's unit, `/var/lib/ironflockos/enrolled` and the
 accounts the enrollment made, and sets the hostname back to `ironflockos` and the
 machine-id to `uninitialized`; `slot-proven`, `ORDER` and the `_OK` flags of
-`grubenv` stay. ADR-0015 lists every path. The boot after the reset is a first
+`grubenv` stay. On the EFI targets it also takes `IRONFLOCKOS_RT_CMDLINE` and
+`IRONFLOCKOS_BOOT` out of `grubenv` and removes the device's own splash,
+`splash.cpio` next to it ([The screen](#the-screen)). ADR-0015 lists every path. The boot after the reset is a first
 boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf` and a
 `.flock` on the IRONFLOCKOS partition taken in.
 
@@ -555,7 +559,7 @@ from this section.
   | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf`, space-separated |
   | `other-slot` | `done`, `incomplete`: `cleaned`, `none (...)` (no partition or filesystem), or `not cleaned (...)`: on another disk, no IronFlockOS, the booted slot is none of `system.conf`, cannot mount, error |
   | `note` | `done`, `incomplete`, when something could not be kept: why |
-  | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `keep-file` |
+  | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `splash`, `keep-file` |
   | `reason` | `failed`, `gave-up` (the last failure), `refused`: why; for `refused` one of the reasons of `check`; for `failed` also `cannot count the attempt in <file>` (no attempt was made) and `the attempt did not end within <n> seconds` |
   | `begun` | `failed`: whether `factory-reset.keep` had its name |
   | `data` | `failed`, `gave-up`: what `/data` holds now: `old` (not erased), `new` (a new filesystem, with the kept files; when no attempt was made, one that mounts), `none` (no filesystem mounts: the device runs without `/data`) |
@@ -587,6 +591,114 @@ which processes are confined; a denial is in the journal
 (`journalctl -k -g apparmor`). On the Raspberry Pi the kernel is Raspberry Pi's
 and decides whether AppArmor is on; with it off the package does nothing. The
 Jetson image (Ubuntu, NVIDIA's kernel) does not carry the package yet.
+
+## The screen
+
+A device with a screen shows a splash while it starts and keeps it on the
+screen until an app draws ([kiosk-plan.md](kiosk-plan.md) has the plan and
+the contract with a screen app). The EFI targets have it (`amd64-efi`,
+`arm64-efi`); the Raspberry Pi and Jetson boot on text as before.
+
+**Plymouth.** `plymouth`, its label plugin and fontconfig with DejaVu are
+packages of the EFI targets. Its theme `ironflockos`
+(`overlay/usr/share/plymouth/themes/ironflockos`, named in
+`/etc/plymouth/plymouthd.conf`) draws one picture centred at its own size in
+pixels on a background colour, never larger, made smaller only to fit a
+smaller screen, with no spinner and no progress; below it, one line for a
+message. The default picture is `docs/assets/ironflock-splash.png`,
+`docs/assets/ironflock-white.svg` rendered at 320x320 pixels, transparent
+around the logo (`rsvg-convert -w 320 -h 320` of Debian 13's librsvg 2.60, with
+its `bKGD` chunk dropped, so that it is a PNG the image itself would take); in
+the image it is the theme's `ironflock.png`. Animations are part of the theme:
+`fade` (the default) fades the picture in over a second while the system
+starts, `none` shows it at once; at shutdown it is shown at once. Plymouth's
+initramfs hook puts Plymouth, the theme, the fonts and the kernel's graphics
+drivers into the initramfs: `build/mkrootfs.sh` puts the theme into the tree
+before it makes the initramfs again, and the build log names the initramfs's
+size.
+
+**The kernel command line.** `grub.cfg` boots with the splash unless
+`IRONFLOCKOS_BOOT=text` is in `grubenv`, or `ironflockos.boot=text` in
+`IRONFLOCKOS_CMDLINE`:
+
+| | splash (default) | text |
+|---|---|---|
+| kernel parameters | `quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0` | `plymouth.enable=0` |
+| GRUB's menu | hidden; Esc during its two seconds shows it | shown, as before |
+| `/initrd.img` | and `splash.cpio`, when there is one | alone |
+| tty1 | the splash, then a screen app; no login prompt | the boot messages and a login prompt |
+
+`quiet` holds for the serial console too: the kernel has one log level for
+all consoles. Errors still go there, and the journal keeps every line.
+Plymouth draws nothing while a serial console is named unless told to ignore
+it. It draws into the kernel's framebuffer device rather than taking the
+graphics device itself (`plymouth.force-frame-buffer-on-boot`): when Plymouth
+quits at the end of the boot (`plymouth quit --retain-splash`, a drop-in for
+`plymouth-quit.service`), the framebuffer keeps the picture, and the first
+virtual terminal stays in graphics mode, so nothing the kernel writes is drawn
+over it. Through the graphics device the picture would go with Plymouth: the
+kernel removes a framebuffer when the program that made it ends. Nothing of
+the image holds the graphics device after the boot; a screen app that opens
+it takes the screen, and when it closes it, the picture is back. With the
+splash `getty@tty1` does not start (a drop-in with
+`ConditionKernelCommandLine=!splash`); logind starts a login prompt on the
+terminals 2 to 6 when one is switched to.
+
+**The display setting.** `/etc/ironflockos/display.conf`, which links to
+`/data/ironflockos/display.conf`:
+
+```ini
+boot=text   # splash (default) or text
+```
+
+`ironflockos-display` (`/usr/lib/ironflockos/display`) writes it into `grubenv`
+as `IRONFLOCKOS_BOOT=text`, or takes `IRONFLOCKOS_BOOT` out for `splash`, at
+every boot and whenever the file changes (`ironflockos-display.path`). GRUB
+reads it on both slots, so it holds across updates; a change applies at the
+next boot. A file with another key or value is refused: `grubenv` stays as it
+is, the journal says why, the unit fails. The installer stick's `grubenv` has
+`IRONFLOCKOS_BOOT=text`; the QEMU tests set `ironflockos.boot=text` in
+`IRONFLOCKOS_CMDLINE`, except for the boots that test the splash.
+
+**The device's own picture.** A screen app, such as IronFlock's kiosk app,
+hands the device its splash in `/data/ironflockos/screen`, which
+`ironflockos-data-layout` makes at every boot, before Docker, owned by root:
+
+- `splash.png`: a PNG of at most 4 MiB and 3840x2160 pixels, with the chunks
+  `IHDR`, `PLTE`, `tRNS`, `IDAT` and `IEND` and no others;
+- `splash.conf`: `background=#RRGGBB` (default `#000000`) and
+  `animation=none|fade` (default `fade`); `#` starts a comment at the start of
+  a line or after a space.
+
+The app writes each under another name in that folder, syncs it and renames
+it. `ironflockos-splash` (`/usr/lib/ironflockos/splash`) takes them at every
+boot and whenever one of the two names changes (`ironflockos-splash.path`; a
+run that another name started reads the two names and changes nothing). It
+checks them, refuses what the list above does not allow (the journal says
+why, the unit fails, and the splash stays as it was), and packs the picture
+and the theme's settings into a cpio archive, written under another name and
+renamed to `splash.cpio` next to `grubenv`. GRUB loads it after the slot's
+`initrd.img`, so the kernel unpacks it over the initramfs's theme and Plymouth
+has the picture from the start: no initramfs is made on a device, and the
+archive outlives updates. The archive holds the picture as the theme's
+`splash.png` and the theme's script with the settings in its first lines;
+an update that brings a new theme script gets a new archive at its first boot,
+which applies from the boot after. A damaged archive stops no boot: the kernel
+unpacks what it can and says `Initramfs unpacking failed` in its log, and the
+theme shows IronFlock's logo when `splash.png` is missing or does not load.
+Without either file the archive goes, and IronFlock's logo is back from the
+next boot on. Plymouth at shutdown draws from the running system's theme:
+`ironflockos-splash` mounts a copy of it with the archive's files from
+`/run/ironflockos/splash-theme` over the theme's folder. A factory reset
+removes the archive and `IRONFLOCKOS_BOOT` with the old owner's data
+([Factory reset](#factory-reset)). `/usr/lib/ironflockos/splash check-png FILE`
+and `check-conf FILE` tell whether a file would be taken.
+
+The splash comes with a new installation only: `grub.cfg` is on the
+IRONFLOCKOS partition, which an update does not write. A device installed
+with 0.16.0 or earlier keeps booting on text after an update to a release
+with the splash; it gets `ironflockos-splash`, which writes an archive its
+`grub.cfg` never loads.
 
 ## The nvidia variant
 
