@@ -421,11 +421,27 @@ SH
   [[ "$output" == *"keep-splash: $tmp/dev/fb0 could not be put on the screen"* ]]
   # Nor is a missing tty1 handed back; the quit comes all the same.
   [[ "$output" == *"keep-splash: $tmp/dev/tty1 could not be handed back for Ctrl+Alt+F2"* ]]
+  # A tty1 that is no terminal refuses the first ioctl, and perl gets that
+  # far: no constant as an ioctl's argument, which perl writes back (CI run
+  # 43270566321: "Modification of a read-only value attempted").
+  echo 'no terminal' >"$tmp/dev/tty1"
+  : >"$tmp/calls"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_DEV=$tmp/dev run sh "$lib/keep-splash"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$tmp/dev/tty1: KDSETMODE: "* ]]
+  [[ "$output" != *"read-only"* ]]
+  rm "$tmp/dev/tty1"
+  : >"$tmp/calls"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_DEV=$tmp/dev run sh "$lib/keep-splash"
   [ "$(tr '\n' '|' <"$tmp/calls")" = "plymouth --ping|plymouth deactivate|plymouth quit --retain-splash|" ]
   # The first terminal is handed back as Plymouth leaves it without
   # deactivate: graphics mode, VT_PROCESS of a process that ends.
-  grep -q 'ioctl($tty, 0x4B3A, 1)' "$lib/keep-splash"
-  grep -q 'ioctl($tty, 0x5602, pack("CCsss", 1, 0, 10, 12, 0))' "$lib/keep-splash"
+  grep -q 'ioctl($tty, 0x4B3A, $graphics)' "$lib/keep-splash"
+  grep -q 'ioctl($tty, 0x4B45, $unicode)' "$lib/keep-splash"
+  grep -q 'my $mode = pack("CCsss", 1, 0, 10, 12, 0);' "$lib/keep-splash"
+  grep -q 'ioctl($tty, 0x5602, $mode)' "$lib/keep-splash"
+  # perl writes an ioctl's third argument back: in every script a variable.
+  ! grep -nE 'ioctl\([^,]+, *[0-9a-fx]+, *[^$ ]' "$lib"/*
   # Without Plymouth nothing happens.
   rm "$tmp/calls"
   printf '#!/bin/sh\necho "plymouth $*" >>"%s"\nexit 1\n' "$tmp/calls" >"$tmp/bin/plymouth"

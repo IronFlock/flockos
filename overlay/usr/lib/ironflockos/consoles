@@ -24,6 +24,7 @@ perl -e '
   my ($path, $fbnum) = @ARGV;
   open(my $fb, "+<", $path) or die "$path: $!\n";
   for my $console (1 .. 6) {
-    ioctl($fb, 0x4610, pack("LL", $console, $fbnum)) or die "console $console: $!\n";
+    my $map = pack("LL", $console, $fbnum);
+    ioctl($fb, 0x4610, $map) or die "console $console: $!\n";
   }
 ' "$fb" "$n" || echo "consoles: the virtual terminals have no console on $fb" >&2

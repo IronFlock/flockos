@@ -52,11 +52,18 @@ for fb in "$dev"/fb[0-9]*; do
 done
 # VT_SETMODE 0x5602 with struct vt_mode { mode, waitv, relsig, acqsig,
 # frsig }: VT_PROCESS 1, SIGUSR1 10, SIGUSR2 12. KDSETMODE 0x4B3A,
-# KD_GRAPHICS 1.
+# KD_GRAPHICS 1. KDSKBMODE 0x4B45, K_UNICODE 3: the kernel handles
+# Ctrl+Alt+F2 only for a terminal whose keyboard is not off, and Plymouth
+# turns it off while it reads the keyboard itself. perl's ioctl writes its
+# third argument back, so each is a variable, never a constant.
 # shellcheck disable=SC2016 # a perl program
 perl -e '
   open(my $tty, "+<", $ARGV[0]) or die "$ARGV[0]: $!\n";
-  ioctl($tty, 0x4B3A, 1) or die "$ARGV[0]: KDSETMODE: $!\n";
-  ioctl($tty, 0x5602, pack("CCsss", 1, 0, 10, 12, 0)) or die "$ARGV[0]: VT_SETMODE: $!\n";
+  my $graphics = 1;
+  ioctl($tty, 0x4B3A, $graphics) or die "$ARGV[0]: KDSETMODE: $!\n";
+  my $unicode = 3;
+  ioctl($tty, 0x4B45, $unicode) or die "$ARGV[0]: KDSKBMODE: $!\n";
+  my $mode = pack("CCsss", 1, 0, 10, 12, 0);
+  ioctl($tty, 0x5602, $mode) or die "$ARGV[0]: VT_SETMODE: $!\n";
 ' "$dev/tty1" || echo "keep-splash: $dev/tty1 could not be handed back for Ctrl+Alt+F2" >&2
 plymouth quit --retain-splash 2>/dev/null || true
