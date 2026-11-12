@@ -84,6 +84,10 @@ mount_opts=nodev,nosuid,nosymfollow
 
 say() { echo "factory-reset: $*"; }
 
+# on_screen TEXT: TEXT for a person at the device, on the splash
+# (IRONFLOCKOS_SCREEN_MESSAGE: for the unit tests only).
+on_screen() { "${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}" "$1" 2>/dev/null || true; }
+
 # lim SECONDS COMMAND...: COMMAND, stopped when it runs longer.
 lim() {
   local secs=$1
@@ -834,6 +838,7 @@ give_up() {
   fi
   remove_files || say "could not remove factory-reset.keep or a part file"
   say "GAVE UP after $attempts_max attempts ($reason); the device boots with /data as it is ($data_left)${left:+; left of the old owner: $left}"
+  on_screen "The factory reset gave up: see factory-reset.log on the IRONFLOCKOS partition."
   write_record gave-up "attempt=$attempt" "attempts-max=$attempts_max" "reason=$reason" "keep-network=$keep_network" \
     "data=$data_left" "left=$left" || true
   # The old owner's data is still on /data: the device stays the device it
@@ -869,6 +874,7 @@ completed() {
   hold none
   lim "$limit_short" sync || true
   say "${failed:+incomplete ($failed), }done; restarting into a first boot"
+  on_screen "Factory reset done: the device restarts."
   if ! systemctl --no-block reboot; then
     # This boot goes on: it needs a valid machine-id, a new one.
     tr -d '-' </proc/sys/kernel/random/uuid >"$root/etc/machine-id" 2>/dev/null || true
@@ -1012,6 +1018,7 @@ if [ "$begun" = yes ]; then
 else
   say "attempt $attempt of $attempts_max: resetting the device (keep network: $keep_network)"
 fi
+on_screen "Factory reset: this takes a few minutes. Do not turn the device off."
 
 rootdev=$(root_device)
 rm -f "$result_file"
@@ -1044,6 +1051,7 @@ if [ "$erase" = started ]; then
   if fresh_data; then data_now=new; else data_now=none; fi
 fi
 say "attempt $attempt of $attempts_max failed ($reason); the next boot tries again, this one goes on (/data: $data_now)"
+on_screen "The factory reset failed this time: the next start tries again."
 write_record failed "attempt=$attempt" "attempts-max=$attempts_max" "reason=$reason" "begun=$begun" "data=$data_now" || true
 if [ "$erase" = started ]; then hold copy; else hold wait; fi
 exit 0

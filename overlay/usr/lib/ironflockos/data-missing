@@ -16,3 +16,7 @@ mkdir -p "$run"
 printf '%s\n' "$msg" >"$run/data-missing"
 mkdir -p "$d/etc/ssh" "$d/ironflockos" "$d/rauc" 2>/dev/null || true
 echo "data-missing: $msg"
+# For a person at the device, on the splash (IRONFLOCKOS_SCREEN_MESSAGE: for
+# the unit tests only).
+"${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}" \
+  "The data partition could not be mounted: the apps do not run." 2>/dev/null || true

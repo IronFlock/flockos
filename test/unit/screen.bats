@@ -517,3 +517,67 @@ $yescrypt" '!locked' "$yescrypt:0:0"; do
   echo "$cfg" | grep -qx 'if fwsetup --is-supported; then'
   echo "$cfg" | grep -qx '        fwsetup'
 }
+
+# --- messages on the splash (WP-8.3) -----------------------------------------
+
+# fake_plymouth RUNNING: a plymouth that answers --ping when RUNNING is yes
+# and writes what it is asked to show into $tmp/shown.
+fake_plymouth() {
+  cat >"$tmp/bin/plymouth" <<SH
+#!/bin/sh
+case "\$1" in
+  --ping) [ "$1" = yes ] ;;
+  display-message) echo "\${2#--text=}" >>"$tmp/shown" ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$tmp/bin/plymouth"
+}
+
+@test "screen-message: the text goes to Plymouth while it runs; without it nothing happens and nothing fails" {
+  fake_plymouth yes
+  PATH="$tmp/bin:$PATH" run sh "$lib/screen-message" "Not enrolled: put it there."
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/shown")" = "Not enrolled: put it there." ]
+  fake_plymouth no
+  PATH="$tmp/bin:$PATH" run sh "$lib/screen-message" "Another"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/shown")" = "Not enrolled: put it there." ]
+  rm "$tmp/bin/plymouth"
+  PATH="$tmp/bin:/usr/bin:/bin" run sh "$lib/screen-message" "Another"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "what the image says to a person at the device also goes to the splash" {
+  fake_plymouth yes
+  # enroll without any .flock: unenrolled, and the splash says what to do.
+  mkdir -p "$tmp/esp" "$tmp/agent" "$tmp/state" "$tmp/run2"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_SCREEN_MESSAGE=$lib/screen-message IRONFLOCKOS_ESP=$tmp/esp \
+    IRONFLOCKOS_AGENT_DIR=$tmp/agent IRONFLOCKOS_STATE=$tmp/state IRONFLOCKOS_RUN=$tmp/run2 \
+    IRONFLOCKOS_IRONFLOCK=/bin/false run bash "$lib/enroll"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"the device stays unenrolled"* ]]
+  [ "$(tail -n 1 "$tmp/shown")" = "Not enrolled: put this device's .flock file on its IRONFLOCKOS partition." ]
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_SCREEN_MESSAGE=$lib/screen-message IRONFLOCKOS_RUN=$tmp/run2 \
+    IRONFLOCKOS_DATA=$tmp/data2 run sh "$lib/data-missing"
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$tmp/shown")" = "The data partition could not be mounted: the apps do not run." ]
+  rm "$tmp/run2/data-missing"
+  mkdir -p "$tmp/apps" "$tmp/data2/apps"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_SCREEN_MESSAGE=$lib/screen-message IRONFLOCKOS_APPS=$tmp/apps \
+    IRONFLOCKOS_DATA=$tmp/data2 IRONFLOCKOS_RUN=$tmp/run2 run sh "$lib/apps-check"
+  [ "$status" -eq 1 ]
+  [ "$(tail -n 1 "$tmp/shown")" = "The apps' data is not on the data partition: it is lost at the next update." ]
+  # The others name their messages in the same way.
+  grep -q 'The network profile $name was refused: it is not taken.' "$lib/network-profiles"
+  for m in "Factory reset: this takes a few minutes. Do not turn the device off." "Factory reset done: the device restarts." \
+    "The factory reset failed this time: the next start tries again." \
+    "The factory reset gave up: see factory-reset.log on the IRONFLOCKOS partition."; do
+    grep -qF "on_screen \"$m\"" "$lib/factory-reset"
+  done
+  grep -q '^ExecStartPost=-/usr/lib/ironflockos/screen-message "Secure Boot is on: the NVIDIA GPU cannot be used.' \
+    "$repo/profiles/nvidia/overlay/usr/lib/systemd/system/ironflockos-nvidia-secure-boot.service"
+  # Plymouth quits after enroll: its message is the one that stays.
+  grep -qx 'After=ironflockos-enroll.service' "$units/plymouth-quit.service.d/ironflockos.conf"
+}

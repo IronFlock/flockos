@@ -33,4 +33,8 @@ msg="apps-check: /apps is not /data/apps: the apps run, but their data is lost a
 echo "$msg" >&2
 mkdir -p "$run"
 echo "$msg" >"$mark"
+# For a person at the device, on the splash (IRONFLOCKOS_SCREEN_MESSAGE: for
+# the unit tests only).
+"${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}" \
+  "The apps' data is not on the data partition: it is lost at the next update." 2>/dev/null || true
 exit 1
