@@ -419,7 +419,13 @@ SH
   [ "$status" -eq 0 ]
   # A file that is no framebuffer refuses the ioctl: said, and passed over.
   [[ "$output" == *"keep-splash: $tmp/dev/fb0 could not be put on the screen"* ]]
+  # Nor is a missing tty1 handed back; the quit comes all the same.
+  [[ "$output" == *"keep-splash: $tmp/dev/tty1 could not be handed back for Ctrl+Alt+F2"* ]]
   [ "$(tr '\n' '|' <"$tmp/calls")" = "plymouth --ping|plymouth deactivate|plymouth quit --retain-splash|" ]
+  # The first terminal is handed back as Plymouth leaves it without
+  # deactivate: graphics mode, VT_PROCESS of a process that ends.
+  grep -q 'ioctl($tty, 0x4B3A, 1)' "$lib/keep-splash"
+  grep -q 'ioctl($tty, 0x5602, pack("CCsss", 1, 0, 10, 12, 0))' "$lib/keep-splash"
   # Without Plymouth nothing happens.
   rm "$tmp/calls"
   printf '#!/bin/sh\necho "plymouth $*" >>"%s"\nexit 1\n' "$tmp/calls" >"$tmp/bin/plymouth"

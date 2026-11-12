@@ -4,20 +4,35 @@
 #
 # Plymouth draws through the graphics device (DRM) once its driver is there,
 # and into the kernel's framebuffer device as well
-# (plymouth.force-frame-buffer-on-boot, DeviceTimeout in plymouthd.conf). What it shows
-# through the graphics device would go when it quits: the kernel removes a
-# framebuffer with the program that made it, turns the screen off and shows
-# the framebuffer device instead, which takes a moment of black, longer on a
-# panel. So first Plymouth lets go of the screen (deactivate), then the
-# framebuffer device, which holds the same picture, is put on the screen (a
-# forced FBIOPUT_VSCREENINFO in the same mode: no mode change, only another
-# picture to show, the same), and only then Plymouth quits, keeping its
-# splash. The first virtual terminal stays in graphics mode, so the kernel's
-# console draws nothing over it. Each step that fails is passed over: the
-# boot goes on, at worst with a black screen.
-# IRONFLOCKOS_DEV: for the unit tests only.
+# (plymouth.force-frame-buffer-on-boot, DeviceTimeout in plymouthd.conf).
+# What it shows through the graphics device would go when it quits: the
+# kernel removes a framebuffer with the program that made it, turns the
+# screen off and shows the framebuffer device instead, which takes a moment
+# of black, longer on a panel. So:
+#  1. Plymouth lets go of the screen (plymouth deactivate). That also hands
+#     the first virtual terminal back as if nobody watched it (VT_AUTO) and
+#     leaves it in graphics mode, where the kernel ignores Ctrl+Alt+F2.
+#  2. The framebuffer device, which holds the same picture, goes on the
+#     screen: a forced FBIOPUT_VSCREENINFO in the same mode, so no mode
+#     change, only another picture to show, the same.
+#  3. The first terminal is put back into the state Plymouth leaves when it
+#     quits without letting go first: graphics mode, so the kernel's console
+#     draws nothing over the splash, and switched by a process (VT_PROCESS)
+#     that is gone when this ends. A switch to another terminal then finds
+#     nobody to ask, resets the first one to text mode, and happens.
+#  4. Plymouth quits, keeping its splash.
+# Each step that fails is passed over: the boot goes on, at worst with a
+# black screen. The journal gets when Plymouth started, which tells whether
+# it ran from the initramfs.
+# IRONFLOCKOS_DEV, IRONFLOCKOS_RUN: for the unit tests only.
 dev=${IRONFLOCKOS_DEV:-/dev}
+run=${IRONFLOCKOS_RUN:-/run}
 plymouth --ping 2>/dev/null || exit 0
+pid=$(cat "$run/plymouth/pid" 2>/dev/null || true)
+if [ -n "$pid" ] && [ -r "/proc/$pid/stat" ]; then
+  awk -v pid="$pid" -v hz="$(getconf CLK_TCK)" \
+    '{ printf "keep-splash: Plymouth (pid %s) started %.2f s after the kernel\n", pid, $22 / hz }' "/proc/$pid/stat"
+fi
 plymouth deactivate 2>/dev/null || true
 for fb in "$dev"/fb[0-9]*; do
   [ -e "$fb" ] || continue
@@ -35,4 +50,13 @@ for fb in "$dev"/fb[0-9]*; do
     ioctl($fb, 0x4601, $var) or die "$ARGV[0]: FBIOPUT_VSCREENINFO: $!\n";
   ' "$fb" || echo "keep-splash: $fb could not be put on the screen" >&2
 done
+# VT_SETMODE 0x5602 with struct vt_mode { mode, waitv, relsig, acqsig,
+# frsig }: VT_PROCESS 1, SIGUSR1 10, SIGUSR2 12. KDSETMODE 0x4B3A,
+# KD_GRAPHICS 1.
+# shellcheck disable=SC2016 # a perl program
+perl -e '
+  open(my $tty, "+<", $ARGV[0]) or die "$ARGV[0]: $!\n";
+  ioctl($tty, 0x4B3A, 1) or die "$ARGV[0]: KDSETMODE: $!\n";
+  ioctl($tty, 0x5602, pack("CCsss", 1, 0, 10, 12, 0)) or die "$ARGV[0]: VT_SETMODE: $!\n";
+' "$dev/tty1" || echo "keep-splash: $dev/tty1 could not be handed back for Ctrl+Alt+F2" >&2
 plymouth quit --retain-splash 2>/dev/null || true

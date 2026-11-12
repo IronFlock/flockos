@@ -650,15 +650,17 @@ if [ ! -e "$booted" ]; then
   if [ -f "$archive" ]; then cksum <"$archive" >"$booted"; else echo none >"$booted"; fi
 fi
 rm -f "$part"
-unbind
 rc=0
-# The app may write again while this runs: once more, until the files stay
-# as they were, a few times at most. The path unit starts it again after that.
+# The app may write again while this runs, and systemd does not start a run
+# for what changes during one: once more, until the files stay as they were
+# through a whole run, the theme for the shutdown included; a few times at
+# most. The theme is the image's while a run reads its script.
 for _ in 1 2 3 4 5; do
   before=$(signature)
   rc=0
+  unbind
   take_once || rc=$?
+  bind_theme
   [ "$(signature)" != "$before" ] || break
 done
-bind_theme
 exit "$rc"
