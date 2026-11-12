@@ -3,8 +3,9 @@
 # and its folders with nofail, so the device still comes up, on the root
 # slot's own folders, and its agent can start and reach IronFlock from a
 # .flock on the IRONFLOCKOS partition. This says so on the console and in
-# /run/ironflockos/data-missing, which enroll and ironflockos-proxy read. /data's mount
-# wants it (data.mount.wants/); no [Install], so no preset touches it.
+# /run/ironflockos/data-missing, which enroll, ironflockos-proxy and
+# ironflockos-ca read. /data's mount wants it (data.mount.wants/); no
+# [Install], so no preset touches it.
 [Unit]
 Description=IronFlockOS: say that /data could not be mounted
 Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0015-factory-reset-requested-on-the-ironflockos-partition.md
