@@ -223,7 +223,10 @@ Sequence:
    colour fails, and so does anything else; the one frame QEMU's standard VGA
    shows while the kernel's `bochs` driver sets its mode, the screen before
    read with 24 bits a pixel, counts as an empty one only when its bytes are
-   exactly that screen's. GRUB draws no picture (a later work package). The
+   exactly that screen's; and QEMU's own "Display output is not active." on
+   arm64, which it draws while virtio-gpu has no mode, is no picture of the
+   guest's, allowed only before the root filesystem's system answers and
+   never taken for the firmware's. GRUB draws no picture (a later work package). The
    kernel command line keeps the console off the screen
    (`fbcon=map:9`), and after the boot the framebuffer console is bound
    again. Not tested in QEMU: whether the colour survives the moment a real
