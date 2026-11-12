@@ -135,7 +135,8 @@ The app guarantees:
   --retain-splash`: the kernel removes a framebuffer when the program that made it
   ends, and a splash Plymouth drew through the graphics device turns black then (the
   first CI run showed it on amd64). Plymouth also draws into the kernel's framebuffer
-  device (`plymouth.force-frame-buffer-on-boot`, `DeviceTimeout=0`), and
+  device (`plymouth.force-frame-buffer-on-boot`, `DeviceTimeout=0.1`; 0 makes plymouthd
+  abort, CI's second run), and
   `/usr/lib/ironflockos/keep-splash` puts that device on the screen in Plymouth's place before
   Plymouth quits. The packages are the EFI targets' (`plymouth`, `plymouth-label`,
   `fontconfig`), not `profiles/base`'s, which the Raspberry Pi and Jetson share (P5).

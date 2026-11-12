@@ -634,8 +634,10 @@ size.
 all consoles. Errors still go there, and the journal keeps every line.
 Plymouth draws nothing while a serial console is named unless told to ignore
 it. Plymouth draws through the graphics device (DRM) once its driver is
-there, and with `plymouth.force-frame-buffer-on-boot` and `DeviceTimeout=0`
-in `plymouthd.conf` also into the kernel's framebuffer device, from its start.
+there, and with `plymouth.force-frame-buffer-on-boot` also into the kernel's
+framebuffer device, which it takes once `DeviceTimeout` in `plymouthd.conf`
+has passed: a tenth of a second here, not Debian's eight (plymouthd asserts
+a timeout above 0 and aborts on 0).
 What it shows through the graphics device would go with it: the kernel
 removes a framebuffer when the program that made it ends, turns the screen
 off and shows the framebuffer device instead, black unless Plymouth drew into
@@ -647,7 +649,10 @@ change, only the other picture), and then Plymouth quits keeping its splash
 (`plymouth quit --retain-splash`). The first virtual terminal stays in
 graphics mode, so nothing the kernel writes is drawn over it. Nothing of the
 image holds the graphics device after the boot; a screen app that opens it
-takes the screen, and when it closes it, the picture is back. With the
+takes the screen, and when it closes it, the picture is back. A Plymouth
+that crashes leaves the device as it would be without a splash: a drop-in
+for `plymouth-start.service` counts its crash signals as an ending, so the
+system does not turn "degraded"; the journal keeps how it ended. With the
 splash `getty@tty1` does not start (a drop-in with
 `ConditionKernelCommandLine=!splash`); logind starts a login prompt on the
 terminals 2 to 6 when one is switched to.
