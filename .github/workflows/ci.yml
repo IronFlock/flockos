@@ -112,8 +112,9 @@ jobs:
 
   # Each image under QEMU (qemu-test.yml, test/qemu/run.py), KVM on amd64,
   # emulated (TCG) on the arm64 runners, which have no KVM: first boot,
-  # reboot, update into slot B with the bundle of the same build, factory
-  # reset, fallback of an untested slot, crash. Secure Boot is on, with
+  # reboot, update into slot B with the bundle of the same build, `ironflock
+  # os rollback` back and forth (KVM only), factory reset, fallback of an
+  # untested slot, crash. Secure Boot is on, with
   # Microsoft's keys as PCs ship (ADR-0011), except for the rt images, which
   # keep the path with Secure Boot off tested.
   test-amd64-efi-base:

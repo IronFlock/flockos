@@ -99,7 +99,19 @@ Sequence:
    is; none of them changes anything. Enrolled, the same file as the newest
    `.flock` on the IRONFLOCKOS partition is kept as `.rejected` and the
    enrolment takes the agent's copy; `agent configure -c` refuses while a
-   factory reset is requested and with a proxy flag. Then the device changes
+   factory reset is requested and with a proxy flag.
+   Then `ironflock os` on the device as it was written (WP-5.2 and WP-5.3 of
+   the CLI's plan; slot A runs and is good, slot B holds nothing):
+   `ironflock os rollback --yes` refuses with exit code 3 and says that slot B
+   holds no system yet, and with `--json` the error object on stdout is of
+   the kind `precondition`; grubenv and RAUC's slots are as they were, and
+   GRUB would start slot A. `ironflock os update --yes --download-base
+   <the test host>` reads the test catalog (below, "What `os update`
+   needs") and refuses it with exit code 1, the catalog refused for its
+   signature (with `--json` an error of the kind `failed`); the host was
+   asked for the catalog once per run and for nothing else,
+   `/var/cache/ironflockos` keeps no bundle and no copy of the catalog, and
+   the slots are as they were. Then the device changes
    hands: its owner, logged in over SSH, runs `sudo ironflock agent configure -c`
    with the `.flock` of another owner; the command outlives the owner's session,
    which it ends, and the device is the other device (the agent's copy, the
@@ -148,7 +160,48 @@ Sequence:
    enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
    the agent's place.
-4. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-ironflockos-partition.md)).
+   `rauc install` runs in the background. As soon as RAUC reports on D-Bus
+   that it installs (its property `Operation` is `installing`), `rauc status`,
+   `ironflock os rollback --yes` and `ironflock os update --yes` (each also
+   with `--json`) run back to back, and RAUC is asked again. When it was
+   installing before and after them, both `ironflock` commands must refuse
+   with exit code 3 and say that RAUC is installing an update right now
+   (with `--json` an error of the kind `precondition`). An installation that
+   ended during them leaves them kept but not judged, which the log says.
+   Once installed, before the restart, `ironflock os rollback` refuses the
+   update that waits for its restart (exit code 3, "chosen to start with the
+   next restart", text and `--json`), changes nothing, and GRUB would start
+   slot B.
+4. **Rollback** (`ironflock os rollback`, WP-5.3 of the CLI's plan), under
+   KVM only: under emulation, on the arm64 runners, its two restarts would
+   take many minutes, and only the refusals run there. On slot B, good, with
+   slot A holding the system the image was written with (nothing installed
+   into it, so the command takes it even when it was tried since it was
+   last marked good, as it usually is here), `ironflock os rollback --yes`
+   restarts the device into slot A. Its output and exit code go to files on `/data`,
+   synced before the restart, and are read once the device runs again (the
+   test's shell answers early in the boot, before `/data` is mounted): exit
+   code 0 (from the file, else as the shell printed it before the restart;
+   when neither got out, the log says so and the result decides) and
+   "Rolled back to IronFlockOS <version> in slot A". The device is up on slot
+   A and answers the test host; machine-id, host key, `/data`, the app's file
+   in `/apps` and the enrolment are those of before; RAUC's record of the
+   update in slot B is unchanged; grubenv has A first in `ORDER` and B still
+   good behind it; `ironflock status --json` reports slot A and the image's
+   version. The test marks A good in the agent's place
+   (`ironflockos-slot-keep` may have been first), and A's `slot-proven`
+   mark is there exactly when it was before the rollback (read with
+   `debugfs` from slot B). Then `ironflock os rollback --yes --json` takes the
+   device forward to slot B the same way: its result is `action`
+   `rolled_back`, `slot` B, `from_slot` A and the build's version as
+   `version` and `from_version`; the same checks hold with the slots
+   swapped, and after B is marked good, `ironflock status --json` reports B
+   as booted and primary slot. Both slots hold this build, so the versions
+   are the same: the slot tells the systems apart. Whether the agent reaches
+   IronFlock again after a rollback (the plan's acceptance) cannot be seen
+   in QEMU, where no platform answers: that is left to the hardware test
+   (WP-5.7 of the CLI's plan).
+5. **Factory reset** ([ADR-0015](adr/0015-factory-reset-requested-on-the-ironflockos-partition.md)).
    On slot B, with slot A holding the system it was updated from: a container
    runs with a restart policy (its image is made in the VM from `sleep` and the
    libraries it links, as the harness has no registry), an app's file is in
@@ -173,10 +226,13 @@ Sequence:
    hostname `ironflockos`. A failure of the step prints the units the reset touches
    (`systemctl status`, their journal), the reset's record and state, the
    IRONFLOCKOS partition and the reset's lines from the serial console.
-5. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
+6. **Fallback.** A second update makes A primary; A boots once with `A_TRY=1`
    and nobody marks it good (as when the agent cannot reach the platform after
-   an update); the next boot falls back to B.
-6. **Crash without a connection.** With a proven system in slot B and a good one
+   an update); the next boot falls back to B. `ironflock os rollback` then
+   refuses slot A, which was tried and not marked good (exit code 3, "which
+   did not start successfully", text and `--json`), changes nothing, and GRUB
+   would start slot B.
+7. **Crash without a connection.** With a proven system in slot B and a good one
    in slot A, slot B stays up until it has marked itself good, and the kernel
    is crashed on purpose (`/proc/sysrq-trigger`). The device restarts by itself
    on slot B and the kernel's record of the crash is under `/data/pstore`,
@@ -200,13 +256,71 @@ just qemu-test amd64-efi base --keep
 ```
 
 It needs `qemu-system-x86_64` and OVMF (or `qemu-system-aarch64` and AAVMF for
-`arm64-efi`) and `mtools`. The VM runs under KVM where the host has it and the
+`arm64-efi`), `mtools` and OpenSSL 3 (the test catalog's Ed25519 key and
+signature). The VM runs under KVM where the host has it and the
 architectures match, under Hypervisor.framework for `arm64-efi` on an Apple
 silicon Mac, and emulated otherwise (much slower; CI's arm64 runners have no
 KVM). `--only boot` stops after the
 reboot, `--only update` after the update. On failure the work directory with
-`console.log` and `shell.log` is kept; in CI both are uploaded as the
-`qemu-logs-*` artifact.
+`console.log`, `shell.log` and `captured/` is kept; in CI they are uploaded as
+the `qemu-logs-*` artifact.
+
+**What `ironflock` reads and prints.** The `ironflock os` steps keep the real
+output of what the CLI parses and prints in `captured/` of the work
+directory, so that the CLI's fixtures (`cli/ironflockos/testdata/` and the
+tests of `os update` and `os rollback` in IronFlock/ironflock-cli), made up
+from RAUC's sources so far, can be replaced by it. One file per command:
+`<NN>-<state>--<name>.json`, numbered in the order they ran, with `command`
+(the command line as the CLI's `commands.json` keys it, its words joined by
+spaces), `exit` (`null` when a command restarted the device before the shell
+could write it), `stdout` and `stderr`; and the files the CLI reads as they
+are (`--grubenv`, `--system.conf`, `--os-release`). The states:
+
+| State | The device |
+| --- | --- |
+| `fresh` | as written: slot A runs and is good, slot B holds nothing |
+| `busy` | RAUC installs into slot B: `rauc status`, `os rollback` and `os update` asked meanwhile |
+| `install` | the output of `rauc install` that ended well |
+| `pending` | the update is installed in slot B and waits for the restart |
+| `updated` | slot B runs the update and is good; slot A holds the image's system |
+| `rolled-back` | after `os rollback`, slot A runs again, before the test marks it good |
+| `rolled-forward` | after the second `os rollback`, slot B runs again and is good |
+| `fell-back` | slot A was tried and not marked good; slot B runs |
+
+`rauc status --detailed --output-format=json`, `grubenv` and `ironflock
+status --json` are kept in every state; `debugfs -c -R cat /usr/lib/os-release
+/dev/disk/by-partlabel/rootfs-a` (the version of the image in slot A, as the
+CLI reads it) when slot B runs. They hold no secret: the test `.flock` is a
+throwaway, and the test catalog's key stays in the work directory, which is
+not uploaded. The `rolled-back` and `rolled-forward` states are missing under
+emulation.
+
+**What `os update` needs.** WP-5.2 of the CLI's plan asks for an update with
+`ironflock os update --reboot --yes` that boots the new slot. That needs a
+catalog the image's `ironflock` accepts and a bundle the image's keyring
+accepts. A pull request's images trust a throwaway CA of their own build
+(`build/signing.sh`), so only their own bundle installs; the `ironflock` they
+carry is a release (`profiles/base/versions`, checked against the bootstrap
+key by `build/bake.sh`), and a release trusts IronFlock's catalog key alone,
+compiled in, with no flag or variable to add another. So the test serves a
+catalog of its own (`put_test_catalog` in `run.py`): made after
+`docs/manifest.schema.json`, naming the next patch release above `VERSION`
+in both channels, with this build's image and bundle (their sizes and
+SHA-256) for the image under test, signed with an Ed25519 key made for the
+run, and the bundle below it at `ironflockos/<release>/`, as a download base
+serves them. Today the image's `ironflock` refuses that catalog (step 1). The
+update itself, its restart into slot B and what `ironflock` reports after it
+wait for an `ironflock` that also trusts a key the test gives it, which
+releases never do (the open point of WP-0.5 in the CLI's plan); with one, the
+test would put it on `/data` and run it there against the same catalog.
+Until then the update into slot B is RAUC's own, as before.
+
+**When an update or a rollback fails.** A device must still boot and come
+online (the lifeline rule). The test checks what it can see of that:
+every refused `ironflock os` command leaves grubenv and RAUC's slots as they
+were, and GRUB's next slot (by `grub.cfg`'s rule) is the one that runs, or the
+installed update that waits; a refused update has downloaded and kept
+nothing; after each rollback the device is up and answers the test host.
 
 **The release images.** The tests above run on development builds, which
 trust a throwaway CA of their own build. A release pull request also runs
