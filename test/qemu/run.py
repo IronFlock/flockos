@@ -1285,6 +1285,12 @@ class Runner:
             gaps = watch.check(t0, t_kernel, t_shell)
         log(f"frames without the whole picture before the root filesystem's system answered, after the picture "
             f"showed: {gaps} (a graphics driver taking the screen over; QEMU's start with an empty one)")
+        # A crashed plymouthd leaves the system "running" (the drop-in for
+        # plymouth-start.service); the journal says how it ended.
+        crashed = self.vm.run("journalctl -b --no-pager -o cat -u plymouth-start.service | "
+                              "grep -E 'code=(killed|dumped)'", check=False).strip()
+        if crashed:
+            raise TestFailure(f"plymouthd crashed in the root filesystem: {crashed}")
         got = dict(word.split("=", 1) for word in early.split() if "=" in word)
         try:
             started = int(got["plymouthd"]) / int(got["hz"])
