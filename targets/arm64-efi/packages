@@ -7,3 +7,10 @@ shim-signed
 shim-helpers-arm64-signed
 grub-efi-arm64-signed
 fwupd-arm64-signed
+# The splash (docs/build.md, "The screen"): Plymouth with its script plugin,
+# which draws IronFlockOS's theme; the label plugin and fontconfig with
+# DejaVu, for the message line below the picture; all of it also in the
+# initramfs, with the kernel's graphics drivers (Plymouth's initramfs hook).
+plymouth
+plymouth-label
+fontconfig

@@ -1,0 +1,11 @@
+# Writes a changed display.conf into grubenv as soon as it is written; it
+# applies at the next boot.
+[Unit]
+Description=IronFlockOS: watch /data/ironflockos/display.conf
+
+[Path]
+PathChanged=/data/ironflockos/display.conf
+Unit=ironflockos-display.service
+
+[Install]
+WantedBy=multi-user.target

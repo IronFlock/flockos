@@ -90,6 +90,11 @@ case "$BOOTLOADER" in
     ln -sfn "boot/vmlinuz-$kver" "$ROOT/vmlinuz"
     ln -sfn "boot/initrd.img-$kver" "$ROOT/initrd.img"
     rm -f "$ROOT/vmlinuz.old" "$ROOT/initrd.img.old"
+    # The splash's theme went in before the initramfs was made
+    # (build/mkrootfs.sh); its size is in the log, as Plymouth and the
+    # kernel's graphics drivers make it larger (docs/build.md, "The screen").
+    [ -s "$ROOT/usr/share/plymouth/themes/ironflockos/ironflock.png" ] || die "the splash's theme is not in the tree"
+    log "initramfs: $(du -h --apparent-size "$ROOT/boot/initrd.img-$kver" | cut -f1)"
     ;;
   rpi)
     # --- the Pi firmware's boot files (build/mkimage-rpi.sh makes boot-a) --
@@ -177,6 +182,10 @@ if [ "$VARIANT" = installer ]; then
   # carries none to the disk it writes. Nothing wants these units on a stick
   # (its fstab has no /data); the mask makes sure.
   systemctl --root="$ROOT" mask ironflockos-factory-reset.service ironflockos-data-missing.service
+  # The stick boots on text (its grubenv); a device's screen settings live on
+  # its /data, which the stick has not.
+  systemctl --root="$ROOT" mask ironflockos-splash.service ironflockos-splash.path \
+    ironflockos-display.service ironflockos-display.path
 else
   # ironflockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
@@ -196,6 +205,12 @@ else
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then
     systemctl --root="$ROOT" enable ironflockos-slot-proven.path ironflockos-slot-keep.timer
+    # The screen (docs/build.md): the device's own splash picture and its
+    # display setting, both for GRUB next to grubenv. The EFI targets only
+    # (docs/kiosk-plan.md, P5).
+    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service
+    mkdir -p "$ROOT/etc/ironflockos"
+    ln -sfn /data/ironflockos/display.conf "$ROOT/etc/ironflockos/display.conf"
   fi
   # The device's own enroll, PTP and proxy settings live on /data, so they
   # outlive updates.

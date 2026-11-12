@@ -1,0 +1,491 @@
+#!/bin/bash
+# The device's own splash picture (docs/build.md, "The screen"; the contract
+# with a screen app is in docs/kiosk-plan.md).
+#
+# A screen app puts splash.png, splash.conf or both into
+# /data/ironflockos/screen, each written under another name in that folder,
+# synced and renamed:
+#   splash.png    a PNG of at most 4 MiB and 3840x2160 pixels, with the
+#                 chunks IHDR, PLTE, tRNS, IDAT and IEND and no others
+#   splash.conf   KEY=value lines; # starts a comment, at the start of a
+#                 line or after a space:
+#                   background=#RRGGBB    the background colour (#000000)
+#                   animation=none|fade   fade: the picture fades in (fade)
+# Without an argument (ironflockos-splash.service, at every boot and through
+# ironflockos-splash.path whenever one of the two changes) this takes them:
+# it checks them, packs the picture and the theme's settings into a cpio
+# archive and renames it into place as splash.cpio next to grubenv on the
+# IRONFLOCKOS partition. GRUB loads the archive after the slot's initramfs, so
+# Plymouth finds the picture in its theme from the start; no initramfs is made
+# on the device, and an update keeps the archive. Without either file the
+# archive goes and IronFlock's logo comes back. A file it refuses changes
+# nothing: the splash stays as it was, the journal says why, and the unit
+# fails. Only the two names are read; the app's temporary files are not
+# looked at. A damaged archive stops no boot: the kernel unpacks what it can,
+# and the theme falls back to IronFlock's logo when splash.png does not load.
+#
+# The running system's theme, which Plymouth draws at shutdown, gets the
+# archive's files too: a copy of the theme in /run with them, mounted over the
+# theme's folder.
+#
+#   splash check-png FILE    whether FILE would be taken as splash.png
+#   splash check-conf FILE   whether FILE would be taken as splash.conf
+# exit 0, or 1 with the reason on stderr; nothing changes.
+set -euo pipefail
+export LC_ALL=C
+
+# IRONFLOCKOS_SCREEN, IRONFLOCKOS_EFI_BOOT, IRONFLOCKOS_THEME, IRONFLOCKOS_RUN,
+# IRONFLOCKOS_SPLASH_BIND: for the unit tests only.
+screen=${IRONFLOCKOS_SCREEN:-/data/ironflockos/screen}
+boot_dir=${IRONFLOCKOS_EFI_BOOT:-/boot/efi/EFI/BOOT}
+theme=${IRONFLOCKOS_THEME:-/usr/share/plymouth/themes/ironflockos}
+run=${IRONFLOCKOS_RUN:-/run/ironflockos}
+bind=${IRONFLOCKOS_SPLASH_BIND:-yes}
+
+archive=$boot_dir/splash.cpio
+part=$boot_dir/.splash.cpio.part
+live=$run/splash-theme
+# Where the archive puts its files: the theme's folder in the initramfs.
+theme_path=usr/share/plymouth/themes/ironflockos
+max_png=$((4 * 1024 * 1024))
+max_width=3840
+max_height=2160
+max_conf=4096
+# A PNG of up to 4 MiB in chunks of 8 KiB, as most encoders write it, has 512.
+max_chunks=4096
+end_of_settings='// --- end of settings ---'
+
+say() { echo "splash: $*"; }
+
+# hex FILE OFFSET COUNT: COUNT bytes of FILE from OFFSET, as hex digits.
+hex() {
+  od -An -v -tx1 -j "$2" -N "$3" "$1" | tr -d ' \n'
+}
+
+# size FILE: its size in bytes.
+size() {
+  wc -c <"$1" | tr -d ' '
+}
+
+# chunk_name HEX: a chunk type for a message; the hex digits when it is not
+# four letters.
+chunk_name() {
+  if [[ "$1" =~ ^((4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a])){4}$ ]]; then
+    # Four letters, checked above: the escapes are of nothing else.
+    printf '%b' "\\x${1:0:2}\\x${1:2:2}\\x${1:4:2}\\x${1:6:2}"
+  else
+    printf '0x%s' "$1"
+  fi
+}
+
+# check_png FILE: whether FILE is a PNG the splash takes; sets reason when not.
+check_png() {
+  local f=$1 total off=8 n=0 h len type name idat=no idat_done=no plte=no trns=no iend=no
+  local width height depth ctype rest
+  reason=""
+  if [ -L "$f" ] || [ ! -f "$f" ]; then
+    reason="splash.png is not a file"
+    return 1
+  fi
+  total=$(size "$f")
+  if [ "$total" -gt "$max_png" ]; then
+    reason="splash.png is larger than 4 MiB"
+    return 1
+  fi
+  if [ "$(hex "$f" 0 8)" != 89504e470d0a1a0a ]; then
+    reason="splash.png is not a PNG"
+    return 1
+  fi
+  while [ "$off" -lt "$total" ]; do
+    n=$((n + 1))
+    if [ "$n" -gt "$max_chunks" ]; then
+      reason="splash.png has more than $max_chunks chunks"
+      return 1
+    fi
+    if [ "$iend" = yes ]; then
+      reason="splash.png has data after IEND"
+      return 1
+    fi
+    if [ $((off + 12)) -gt "$total" ]; then
+      reason="splash.png ends inside a chunk"
+      return 1
+    fi
+    h=$(hex "$f" "$off" 8)
+    len=$((16#${h:0:8})) type=${h:8:8}
+    if [ $((off + 12 + len)) -gt "$total" ]; then
+      reason="splash.png ends inside a chunk"
+      return 1
+    fi
+    name=$(chunk_name "$type")
+    if [ "$n" -eq 1 ] && [ "$type" != 49484452 ]; then
+      reason="splash.png does not start with IHDR"
+      return 1
+    fi
+    case "$type" in
+      49484452) # IHDR
+        if [ "$n" -ne 1 ]; then
+          reason="splash.png has IHDR twice"
+          return 1
+        fi
+        if [ "$len" -ne 13 ]; then
+          reason="splash.png has an IHDR of $len bytes, not 13"
+          return 1
+        fi
+        h=$(hex "$f" $((off + 8)) 13)
+        width=$((16#${h:0:8})) height=$((16#${h:8:8})) depth=$((16#${h:16:2})) ctype=$((16#${h:18:2}))
+        rest=${h:20:6}
+        if [ "$width" -eq 0 ] || [ "$height" -eq 0 ]; then
+          reason="splash.png has no pixels"
+          return 1
+        fi
+        if [ "$width" -gt "$max_width" ] || [ "$height" -gt "$max_height" ]; then
+          reason="splash.png is ${width}x${height} pixels, more than ${max_width}x${max_height}"
+          return 1
+        fi
+        case "$ctype:$depth" in
+          0:1 | 0:2 | 0:4 | 0:8 | 0:16 | 2:8 | 2:16 | 3:1 | 3:2 | 3:4 | 3:8 | 4:8 | 4:16 | 6:8 | 6:16) ;;
+          *)
+            reason="splash.png has colour type $ctype with $depth bits, which PNG does not know"
+            return 1
+            ;;
+        esac
+        if [ "$rest" != 000000 ] && [ "$rest" != 000001 ]; then
+          reason="splash.png has a compression, filter or interlace method PNG does not know"
+          return 1
+        fi
+        ;;
+      504c5445 | 74524e53) # PLTE, tRNS
+        if [ "$idat" = yes ]; then
+          reason="splash.png has $name after its image data"
+          return 1
+        fi
+        if [ "$type" = 504c5445 ]; then
+          [ "$plte" = no ] || {
+            reason="splash.png has PLTE twice"
+            return 1
+          }
+          plte=yes
+        else
+          [ "$trns" = no ] || {
+            reason="splash.png has tRNS twice"
+            return 1
+          }
+          trns=yes
+        fi
+        ;;
+      49444154) # IDAT
+        if [ "$idat_done" = yes ]; then
+          reason="splash.png has its image data in parts apart"
+          return 1
+        fi
+        idat=yes
+        ;;
+      49454e44) # IEND
+        iend=yes
+        ;;
+      *)
+        reason="splash.png has the chunk $name: only IHDR, PLTE, tRNS, IDAT and IEND are taken"
+        return 1
+        ;;
+    esac
+    if [ "$idat" = yes ] && [ "$type" != 49444154 ]; then idat_done=yes; fi
+    off=$((off + 12 + len))
+  done
+  if [ "$iend" = no ]; then
+    reason="splash.png has no IEND"
+    return 1
+  fi
+  if [ "$idat" = no ]; then
+    reason="splash.png has no image data"
+    return 1
+  fi
+  if [ "$ctype" -eq 3 ] && [ "$plte" = no ]; then
+    reason="splash.png has a palette colour type and no PLTE"
+    return 1
+  fi
+}
+
+# parse_conf FILE: sets background_red, _green, _blue and animation, or
+# reason.
+parse_conf() {
+  local f=$1 n=0 line key value seen=" "
+  background_red=0 background_green=0 background_blue=0 animation=fade reason=""
+  if [ -L "$f" ] || [ ! -f "$f" ]; then
+    reason="splash.conf is not a file"
+    return 1
+  fi
+  if [ "$(size "$f")" -gt "$max_conf" ]; then
+    reason="splash.conf is larger than 4 KiB"
+    return 1
+  fi
+  if [ "$(tr -d '\000' <"$f" | wc -c | tr -d ' ')" -ne "$(size "$f")" ]; then
+    reason="splash.conf holds a NUL byte"
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line=${line%$'\r'}
+    [ "$n" -gt 1 ] || line=${line#$'\xef\xbb\xbf'}
+    [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
+    if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*=[[:space:]]*([^[:space:]]*)([[:space:]]+#.*)?[[:space:]]*$ ]]; then
+      reason="splash.conf: line $n is not a key=value line"
+      return 1
+    fi
+    key=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    value=${BASH_REMATCH[2]}
+    case "$seen" in *" $key "*)
+      reason="splash.conf: line $n: $key is given twice"
+      return 1
+      ;;
+    esac
+    seen+="$key "
+    case "$key" in
+      background)
+        if [[ ! "$value" =~ ^#[0-9A-Fa-f]{6}$ ]]; then
+          reason="splash.conf: line $n: background must be a colour #RRGGBB"
+          return 1
+        fi
+        background_red=$((16#${value:1:2})) background_green=$((16#${value:3:2})) background_blue=$((16#${value:5:2}))
+        ;;
+      animation)
+        value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+        if [[ ! "$value" =~ ^(none|fade)$ ]]; then
+          reason="splash.conf: line $n: animation must be none or fade"
+          return 1
+        fi
+        animation=$value
+        ;;
+      *)
+        reason="splash.conf: line $n: unknown key $key"
+        return 1
+        ;;
+    esac
+  done <"$f"
+}
+
+# write_script OUT: the theme's script with the settings parse_conf set (or
+# its defaults): the image's own script after its settings block.
+write_script() {
+  grep -qxF "$end_of_settings" "$theme/ironflockos.script" || {
+    say "the theme's script $theme/ironflockos.script has no settings block"
+    return 1
+  }
+  {
+    echo '// --- settings ---'
+    echo "// The device's own splash, from $screen (ironflockos-splash)."
+    echo "background_red = $background_red;"
+    echo "background_green = $background_green;"
+    echo "background_blue = $background_blue;"
+    echo "animation = \"$animation\";"
+    sed -n "\\|^$end_of_settings\$|,\$p" "$theme/ironflockos.script"
+  } >"$1"
+}
+
+# zeros N: N NUL bytes.
+zeros() {
+  [ "$1" -eq 0 ] || head -c "$1" /dev/zero
+}
+
+# cpio_entry NUMBER NAME [FILE]: one entry of a cpio archive in the newc
+# format the kernel unpacks, owned by root, mode 0644, with no time: the same
+# files make the same archive. Without FILE, the trailer.
+cpio_entry() {
+  local ino=$1 name=$2 file=${3:-} filesize=0 mode=0 namesize
+  if [ -n "$file" ]; then
+    filesize=$(size "$file")
+    mode=$((8#100644))
+  fi
+  namesize=$((${#name} + 1))
+  printf '070701%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X' \
+    "$ino" "$mode" 0 0 1 0 "$filesize" 0 0 0 0 "$namesize" 0
+  printf '%s\0' "$name"
+  zeros $(((4 - (110 + namesize) % 4) % 4))
+  if [ -n "$file" ]; then
+    cat "$file"
+    zeros $(((4 - filesize % 4) % 4))
+  fi
+}
+
+# make_archive DIR OUT: the archive of DIR's splash.png (if there) and
+# ironflockos.script, the picture first: an archive cut short then still
+# leaves the theme's own script, which falls back to IronFlock's logo.
+make_archive() {
+  local dir=$1 ino=1
+  {
+    if [ -f "$dir/splash.png" ]; then
+      cpio_entry "$ino" "$theme_path/splash.png" "$dir/splash.png"
+      ino=$((ino + 1))
+    fi
+    cpio_entry "$ino" "$theme_path/ironflockos.script" "$dir/ironflockos.script"
+    cpio_entry 0 'TRAILER!!!'
+  } >"$2"
+}
+
+# extract_archive ARCHIVE DIR: the files of an archive make_archive wrote,
+# into DIR; fails on anything else.
+extract_archive() {
+  local a=$1 dir=$2 total off=0 h namesize filesize name data entries=0
+  total=$(size "$a")
+  while [ "$entries" -lt 3 ]; do
+    entries=$((entries + 1))
+    [ $((off + 110)) -le "$total" ] || return 1
+    h=$(tail -c +$((off + 1)) "$a" | head -c 110)
+    [[ "$h" =~ ^070701[0-9A-Fa-f]{104}$ ]] || return 1
+    filesize=$((16#${h:54:8})) namesize=$((16#${h:94:8}))
+    [ "$namesize" -ge 2 ] && [ "$namesize" -le 256 ] || return 1
+    name=$(tail -c +$((off + 111)) "$a" | head -c $((namesize - 1)))
+    data=$((off + 110 + namesize))
+    data=$((data + (4 - data % 4) % 4))
+    [ $((data + filesize)) -le "$total" ] || return 1
+    case "$name" in
+      'TRAILER!!!') return 0 ;;
+      "$theme_path/splash.png" | "$theme_path/ironflockos.script")
+        tail -c +$((data + 1)) "$a" | head -c "$filesize" >"$dir/${name##*/}"
+        ;;
+      *) return 1 ;;
+    esac
+    off=$((data + filesize))
+    off=$((off + (4 - off % 4) % 4))
+  done
+  return 1
+}
+
+# signature: what the two files hold now, to see whether they changed while
+# they were taken.
+signature() {
+  local f
+  for f in splash.png splash.conf; do
+    if [ -e "$screen/$f" ]; then cksum <"$screen/$f" 2>/dev/null || echo unreadable; else echo none; fi
+  done
+}
+
+# take_copy NAME MAX DIR: the screen folder's NAME, copied into DIR when it is
+# a file, at most MAX + 1 bytes (enough to tell it is too large). The checks
+# look at the copy, which nothing changes behind them. Fails when NAME is
+# there but no file.
+take_copy() {
+  if [ -L "$screen/$1" ] || { [ -e "$screen/$1" ] && [ ! -f "$screen/$1" ]; }; then
+    reason="$1 is not a file"
+    return 1
+  fi
+  if [ -f "$screen/$1" ]; then
+    head -c $(($2 + 1)) "$screen/$1" >"$3/$1"
+  fi
+}
+
+# take_once: one look at the folder. Exit status 0: the archive is as the
+# files say; 1: refused or not written, the archive is as it was.
+take_once() {
+  local stage rc=0
+  stage=$(mktemp -d "$run/splash.XXXXXX")
+  take_into "$stage" || rc=$?
+  rm -rf "$stage"
+  return "$rc"
+}
+
+# take_into DIR: take_once with DIR to work in.
+take_into() {
+  local stage=$1
+  if ! take_copy splash.png "$max_png" "$stage" || ! take_copy splash.conf "$max_conf" "$stage"; then
+    say "refused: $reason; the splash stays as it was"
+    return 1
+  fi
+  if [ ! -e "$stage/splash.png" ] && [ ! -e "$stage/splash.conf" ]; then
+    if [ -e "$archive" ]; then
+      rm -f "$archive"
+      sync
+      say "no splash.png and no splash.conf in $screen: IronFlock's logo from the next boot on"
+    fi
+    return 0
+  fi
+  if [ -e "$stage/splash.png" ] && ! check_png "$stage/splash.png"; then
+    say "refused: $reason; the splash stays as it was"
+    return 1
+  fi
+  background_red=0 background_green=0 background_blue=0 animation=fade
+  if [ -e "$stage/splash.conf" ] && ! parse_conf "$stage/splash.conf"; then
+    say "refused: $reason; the splash stays as it was"
+    return 1
+  fi
+  write_script "$stage/ironflockos.script" || return 1
+  make_archive "$stage" "$stage/splash.cpio"
+  if cmp -s "$stage/splash.cpio" "$archive"; then
+    return 0
+  fi
+  if ! cp "$stage/splash.cpio" "$part" || ! sync || ! mv -f "$part" "$archive"; then
+    rm -f "$part"
+    say "could not write $archive; the splash stays as it was"
+    return 1
+  fi
+  sync
+  local what="IronFlock's logo"
+  if [ -e "$stage/splash.png" ]; then what="the device's picture"; fi
+  say "the splash from the next boot on: $what, background" \
+    "#$(printf '%02x%02x%02x' "$background_red" "$background_green" "$background_blue"), animation $animation"
+}
+
+# unbind: the running system's theme as the image has it.
+unbind() {
+  if [ "$bind" = yes ] && mountpoint -q "$theme"; then
+    umount "$theme" || say "could not unmount $theme"
+  fi
+}
+
+# bind_theme: the running system's theme with the archive's files, for the
+# splash at shutdown. Nothing on a damaged archive: the theme stays the
+# image's.
+bind_theme() {
+  rm -rf "$live"
+  [ -f "$archive" ] || return 0
+  mkdir -p "$live"
+  cp -a "$theme/." "$live/"
+  if ! extract_archive "$archive" "$live"; then
+    say "$archive is damaged: the next boot shows IronFlock's logo"
+    rm -rf "$live"
+    return 0
+  fi
+  if [ "$bind" = yes ]; then
+    mount --bind "$live" "$theme" || say "could not mount the splash over $theme for the shutdown"
+  fi
+}
+
+case "${1:-}" in
+  check-png | check-conf)
+    if [ "$#" -ne 2 ]; then
+      echo "usage: splash check-png|check-conf FILE" >&2
+      exit 2
+    fi
+    if [ "$1" = check-png ]; then check_png "$2" || {
+      echo "splash: $reason" >&2
+      exit 1
+    }; else parse_conf "$2" || {
+      echo "splash: $reason" >&2
+      exit 1
+    }; fi
+    exit 0
+    ;;
+  "") ;;
+  *)
+    echo "usage: splash [check-png|check-conf FILE]" >&2
+    exit 2
+    ;;
+esac
+
+if [ ! -d "$boot_dir" ]; then
+  say "$boot_dir is not there (the IRONFLOCKOS partition is not mounted): nothing changes"
+  exit 1
+fi
+mkdir -p "$run"
+rm -f "$part"
+unbind
+rc=0
+# The app may write again while this runs: once more, until the files stay
+# as they were, a few times at most. The path unit starts it again after that.
+for _ in 1 2 3 4 5; do
+  before=$(signature)
+  rc=0
+  take_once || rc=$?
+  [ "$(signature)" != "$before" ] || break
+done
+bind_theme
+exit "$rc"

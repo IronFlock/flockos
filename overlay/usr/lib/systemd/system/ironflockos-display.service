@@ -1,0 +1,14 @@
+[Unit]
+Description=IronFlockOS: the display setting from /etc/ironflockos/display.conf
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+After=local-fs.target ironflockos-data-layout.service boot-efi.mount data.mount
+ConditionPathIsDirectory=/boot/efi/EFI/BOOT
+
+[Service]
+# Not RemainAfterExit: ironflockos-display.path starts it again after the boot.
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/display
+
+[Install]
+WantedBy=multi-user.target
+Also=ironflockos-display.path

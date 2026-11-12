@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=IronFlockOS
+Description=One picture, centred on a background colour (docs/build.md, "The screen")
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/ironflockos
+ScriptFile=/usr/share/plymouth/themes/ironflockos/ironflockos.script

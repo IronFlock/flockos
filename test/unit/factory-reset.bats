@@ -288,8 +288,9 @@ device() {
   echo crash >"$d/pstore/dmesg.txt"
   echo 'left by the owner' >"$d/owner-notes.txt"
   mkdir -p "$tmp/esp/EFI/BOOT" "$tmp/run"
-  printf 'ORDER=A B\nA_OK=1\nA_TRY=1\nB_OK=1\nB_TRY=0\nIRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1\nIRONFLOCKOS_RT_CMDLINE=isolcpus=2-3\n' \
+  printf 'ORDER=A B\nA_OK=1\nA_TRY=1\nB_OK=1\nB_TRY=0\nIRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1\nIRONFLOCKOS_RT_CMDLINE=isolcpus=2-3\nIRONFLOCKOS_BOOT=text\n' \
     >"$tmp/esp/EFI/BOOT/grubenv"
+  echo "the owner's splash" >"$tmp/esp/EFI/BOOT/splash.cpio"
   echo shim >"$tmp/esp/EFI/BOOT/BOOTX64.EFI"
   echo '{"name": "new-device", "secret": "new"}' >"$tmp/esp/new-device.flock"
   printf 'http_proxy=http://new-proxy:3128\n' >"$tmp/esp/proxy.conf"
@@ -364,7 +365,7 @@ state() {
 # request and the record, grubenv, and in the root slots the paths of
 # clean_slot and the reset's own state.
 outside() {
-  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/grubenv|^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/ironflockos/(enrolled |factory-reset\.)'
+  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/(grubenv|splash\.cpio) |^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/ironflockos/(enrolled |factory-reset\.)'
 }
 
 # --- a reset that completes --------------------------------------------------
@@ -508,7 +509,7 @@ outside() {
   [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
 }
 
-@test "GRUB: the booted slot's try flag is cleared just before the reset begins; the real-time tuning goes; the rest of grubenv stays" {
+@test "GRUB: the booted slot's try flag is cleared just before the reset begins; the real-time tuning, the display setting and the device's splash go; the rest of grubenv stays" {
   request ''
   boot
   [ "$status" -eq 0 ]
@@ -517,6 +518,8 @@ outside() {
   # flag is cleared.
   [ "$(head -n 5 "$tmp/calls" | tr '\n' '|')" = "mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|grub-editenv set A_TRY=0|" ]
   grep -qx 'grub-editenv unset IRONFLOCKOS_RT_CMDLINE' "$tmp/calls"
+  grep -qx 'grub-editenv unset IRONFLOCKOS_BOOT' "$tmp/calls"
+  [ ! -e "$esp/EFI/BOOT/splash.cpio" ] && [ -e "$esp/EFI/BOOT/BOOTX64.EFI" ]
 }
 
 @test "GRUB: a booted slot that is not good, or a command line without a slot, leaves the try flags alone" {

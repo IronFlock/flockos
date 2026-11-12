@@ -1,0 +1,106 @@
+// --- settings ---
+// IronFlockOS's splash (docs/build.md, "The screen"; docs/kiosk-plan.md has
+// the contract with a screen app). ironflockos-splash writes this block anew
+// for a device's own splash.conf, into the archive GRUB adds to the initramfs.
+background_red = 0;
+background_green = 0;
+background_blue = 0;
+animation = "fade";
+// --- end of settings ---
+
+// One picture, centred at its own size in pixels on the background colour,
+// never made larger, made smaller to fit a screen it does not fit; no
+// spinner, no progress. A screen app that draws the same picture by the same
+// rule takes over without a visible step. The device's own picture is
+// splash.png (from the archive); without it, or when it does not load,
+// IronFlock's logo.
+
+// Plymouth turns a colour into 8 bits by cutting off the fraction: a quarter
+// on top keeps it from landing one below.
+Window.SetBackgroundTopColor((background_red + 0.25) / 255, (background_green + 0.25) / 255, (background_blue + 0.25) / 255);
+Window.SetBackgroundBottomColor((background_red + 0.25) / 255, (background_green + 0.25) / 255, (background_blue + 0.25) / 255);
+
+picture = Image("splash.png");
+if (!picture)
+  picture = Image("ironflock.png");
+
+// The message line below the picture: dark on a light background, light on
+// a dark one.
+if (background_red * 0.299 + background_green * 0.587 + background_blue * 0.114 > 150)
+  text_level = 0;
+else
+  text_level = 1;
+message_text = "";
+message_gap = 32;
+
+sprite = Sprite();
+sprite.SetZ(1);
+message_sprite = Sprite();
+message_sprite.SetZ(2);
+picture_bottom = 0;
+
+fun place_message () {
+  if (global.message_text == "") {
+    global.message_sprite.SetOpacity(0);
+    return;
+  }
+  text = Image.Text(global.message_text, global.text_level, global.text_level, global.text_level, 1, "Sans 16");
+  global.message_sprite.SetImage(text);
+  y = global.picture_bottom + global.message_gap;
+  if (y + text.GetHeight() > Window.GetY() + Window.GetHeight())
+    y = Window.GetY() + Window.GetHeight() - text.GetHeight() - global.message_gap;
+  global.message_sprite.SetX(Window.GetX() + Math.Int((Window.GetWidth() - text.GetWidth()) / 2));
+  global.message_sprite.SetY(y);
+  global.message_sprite.SetOpacity(1);
+}
+
+// Again whenever a screen comes or goes: the kernel's graphics driver takes
+// the screen over from the firmware's while the splash is on, perhaps at
+// another size.
+fun layout () {
+  // No screen yet: the first one to come calls this again.
+  if (!(Window.GetWidth() > 0))
+    return;
+  shown = global.picture;
+  if (shown.GetWidth() > Window.GetWidth() || shown.GetHeight() > Window.GetHeight()) {
+    scale = Math.Min(Window.GetWidth() / shown.GetWidth(), Window.GetHeight() / shown.GetHeight());
+    shown = shown.Scale(Math.Int(shown.GetWidth() * scale), Math.Int(shown.GetHeight() * scale));
+  }
+  y = Window.GetY() + Math.Int((Window.GetHeight() - shown.GetHeight()) / 2);
+  global.sprite.SetImage(shown);
+  global.sprite.SetX(Window.GetX() + Math.Int((Window.GetWidth() - shown.GetWidth()) / 2));
+  global.sprite.SetY(y);
+  global.picture_bottom = y + shown.GetHeight();
+  place_message();
+}
+layout();
+Plymouth.SetDisplayHotplugFunction(layout);
+
+// fade: the picture fades in over a second and stays. Only while the system
+// starts: at shutdown the picture is already there, or a screen app was.
+fade_frames = 50;
+opacity = 1;
+if (animation == "fade" && Plymouth.GetMode() == "boot")
+  opacity = 0;
+sprite.SetOpacity(opacity);
+
+fun refresh () {
+  if (global.opacity < 1) {
+    global.opacity = Math.Min(1, global.opacity + 1 / global.fade_frames);
+    global.sprite.SetOpacity(global.opacity);
+  }
+}
+Plymouth.SetRefreshFunction(refresh);
+
+fun display_message (text) {
+  global.message_text = text;
+  place_message();
+}
+fun hide_message (text) {
+  if (global.message_text == text) {
+    global.message_text = "";
+    place_message();
+  }
+}
+Plymouth.SetDisplayMessageFunction(display_message);
+Plymouth.SetHideMessageFunction(hide_message);

@@ -637,14 +637,22 @@ attempt() {
   say "kept: ${kept:-nothing}"
 
   if [ -n "$grubenv" ]; then
-    # The platform's real-time tuning goes with rt.conf: the next boot runs
-    # the image's defaults, as a flashed device does.
+    # The platform's real-time tuning goes with rt.conf, the display setting
+    # with display.conf: the next boot runs the image's defaults, as a
+    # flashed device does.
     if env=$(lim "$limit_short" grub-editenv "$grubenv" list); then
-      if grep -q '^IRONFLOCKOS_RT_CMDLINE=' <<<"$env"; then
-        lim "$limit_short" grub-editenv "$grubenv" unset IRONFLOCKOS_RT_CMDLINE || step_failed grubenv
-      fi
+      for var in IRONFLOCKOS_RT_CMDLINE IRONFLOCKOS_BOOT; do
+        if grep -q "^$var=" <<<"$env"; then
+          lim "$limit_short" grub-editenv "$grubenv" unset "$var" || step_failed grubenv
+        fi
+      done
     else
       step_failed grubenv
+    fi
+    # The device's own splash goes with /data/ironflockos/screen: the
+    # restart shows IronFlock's logo (docs/build.md, "The screen").
+    if ! rm -f "${grubenv%/*}/splash.cpio" "${grubenv%/*}/.splash.cpio.part"; then
+      step_failed splash
     fi
   fi
   # The mark that this request is done, with what the record says of it: for

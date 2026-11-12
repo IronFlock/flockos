@@ -1,0 +1,64 @@
+#!/bin/bash
+# The device's display setting (docs/build.md, "The screen").
+#
+# /etc/ironflockos/display.conf (-> /data/ironflockos/display.conf), KEY=value
+# lines; # starts a comment:
+#   boot=splash|text   splash (default): the splash on the screen while the
+#                      device starts and after, the kernel quiet, the boot
+#                      menu hidden; text: the boot messages, the menu and a
+#                      login prompt on the first virtual terminal, as before
+#                      the splash
+#
+# GRUB reads the setting as IRONFLOCKOS_BOOT in grubenv, on the IRONFLOCKOS
+# partition, so it holds on both slots and across updates; a change applies
+# at the next boot. Runs at every boot and whenever the file changes
+# (ironflockos-display.path). A file it does not understand is refused:
+# grubenv stays as it is, the journal says why, and the unit fails.
+set -euo pipefail
+export LC_ALL=C
+
+# IRONFLOCKOS_DISPLAY_CONF, IRONFLOCKOS_GRUBENV: for the unit tests only.
+conf=${IRONFLOCKOS_DISPLAY_CONF:-/etc/ironflockos/display.conf}
+grubenv=${IRONFLOCKOS_GRUBENV:-/boot/efi/EFI/BOOT/grubenv}
+
+refuse() {
+  echo "display: refused $conf: $*; the boot stays as it was" >&2
+  exit 1
+}
+
+boot=splash
+if [ -e "$conf" ]; then
+  [ -f "$conf" ] || refuse "not a file"
+  [ "$(wc -c <"$conf" | tr -d ' ')" -le 4096 ] || refuse "larger than 4 KiB"
+  n=0 seen=no
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line=${line%$'\r'}
+    [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
+    if [[ ! "$line" =~ ^[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*=[[:space:]]*([^[:space:]#]*)[[:space:]]*(#.*)?$ ]]; then
+      refuse "line $n is not a key=value line"
+    fi
+    key=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
+    case "$key" in
+      boot)
+        [[ "$value" =~ ^(splash|text)$ ]] || refuse "line $n: boot must be splash or text"
+        [ "$seen" = no ] || refuse "line $n: boot is given twice"
+        boot=$value seen=yes
+        ;;
+      *) refuse "line $n: unknown key $key" ;;
+    esac
+  done <"$conf"
+fi
+
+have=$({ grub-editenv "$grubenv" list 2>/dev/null || true; } | sed -n 's/^IRONFLOCKOS_BOOT=//p')
+# The splash is GRUB's default: grubenv names only text.
+if [ "$boot" = text ]; then
+  if [ "$have" != text ]; then
+    grub-editenv "$grubenv" set IRONFLOCKOS_BOOT=text
+    echo "display: the boot messages instead of the splash, from the next boot on"
+  fi
+elif [ -n "$have" ]; then
+  grub-editenv "$grubenv" unset IRONFLOCKOS_BOOT
+  echo "display: the splash from the next boot on"
+fi
+echo "display: boot=$boot"

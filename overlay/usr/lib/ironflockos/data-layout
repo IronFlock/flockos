@@ -12,6 +12,11 @@ mkdir -p "$d/ironflock" "$d/home" "$d/cache" "$d/fwupd" "$d/pstore" "$d/ironfloc
 mkdir -p "$d/apps"
 mkdir -p "$d/network/connections"
 chmod 0700 "$d/network/connections"
+# Where a screen app hands the image its splash picture (docs/kiosk-plan.md,
+# the contract): there before Docker starts, owned by root.
+mkdir -p "$d/ironflockos/screen"
+chown 0:0 "$d/ironflockos/screen" 2>/dev/null || true
+chmod 0755 "$d/ironflockos/screen"
 # journald writes here once the journal is flushed; same ownership and mode
 # as a fresh /var/log/journal.
 if [ ! -d "$d/log/journal" ]; then

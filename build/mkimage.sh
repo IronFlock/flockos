@@ -51,6 +51,12 @@ CFG
 render "$target_dir/grub/grub.cfg" >"$esp_dir/EFI/BOOT/grub.cfg"
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" create
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" set "ORDER=A B" A_OK=1 A_TRY=0 B_OK=0 B_TRY=0 IRONFLOCKOS_CMDLINE=
+# The installer talks to the person at the screen: it boots on text, as
+# before the splash (docs/build.md, "The screen"). A device boots with the
+# splash unless its display.conf says otherwise.
+if [ "${VARIANT:?}" = installer ]; then
+  grub-editenv "$esp_dir/EFI/BOOT/grubenv" set IRONFLOCKOS_BOOT=text
+fi
 cat >"$esp_dir/README.txt" <<'TXT'
 IronFlockOS
 ===========

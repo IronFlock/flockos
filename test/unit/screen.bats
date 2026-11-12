@@ -1,0 +1,390 @@
+#!/usr/bin/env bats
+# The screen (docs/build.md, "The screen"; docs/kiosk-plan.md): the splash in
+# the EFI images, the display setting and the device's own splash picture,
+# run against a temporary directory instead of a device.
+
+repo="$BATS_TEST_DIRNAME/../.."
+lib="$repo/overlay/usr/lib/ironflockos"
+units="$repo/overlay/usr/lib/systemd/system"
+theme_src="$repo/overlay/usr/share/plymouth/themes/ironflockos"
+
+setup() {
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/screen" "$tmp/esp/EFI/BOOT" "$tmp/run" "$tmp/theme" "$tmp/bin"
+  cp "$theme_src/ironflockos.plymouth" "$theme_src/ironflockos.script" "$tmp/theme/"
+  cp "$repo/docs/assets/ironflock-splash.png" "$tmp/theme/ironflock.png"
+  # grub-editenv FILE list | set KEY=VALUE | unset KEY, on a plain file.
+  cat >"$tmp/bin/grub-editenv" <<'SH'
+#!/bin/bash
+f=$1
+touch "$f"
+case "$2" in
+  list) cat "$f" ;;
+  set) grep -v "^${3%%=*}=" "$f" >"$f.new" || true; echo "$3" >>"$f.new"; mv "$f.new" "$f" ;;
+  unset) grep -v "^$3=" "$f" >"$f.new" || true; mv "$f.new" "$f" ;;
+esac
+SH
+  chmod +x "$tmp/bin/grub-editenv"
+}
+teardown() { rm -rf "$tmp"; }
+
+# splash [ARGS...]: the splash script on the temporary device.
+splash() {
+  IRONFLOCKOS_SCREEN=$tmp/screen IRONFLOCKOS_EFI_BOOT=$tmp/esp/EFI/BOOT IRONFLOCKOS_THEME=$tmp/theme \
+    IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_SPLASH_BIND=no run bash "$lib/splash" "$@"
+}
+
+# be32 N: N as four bytes, big-endian, as printf %b escapes.
+be32() {
+  printf '\\x%02x\\x%02x\\x%02x\\x%02x' $(($1 >> 24 & 255)) $(($1 >> 16 & 255)) $(($1 >> 8 & 255)) $(($1 & 255))
+}
+
+# chunk TYPE DATA: a PNG chunk with DATA (printf %b escapes); the CRC is
+# left zero, which the check does not read.
+chunk() {
+  local len
+  len=$(printf '%b' "$2" | wc -c | tr -d ' ')
+  printf '%b' "$(be32 "$len")$1$2\\x00\\x00\\x00\\x00"
+}
+
+# png FILE WIDTH HEIGHT [CHUNK...]: the chunks of an 8-bit RGB PNG: IHDR, the
+# CHUNKs named, IDAT, IEND.
+png() {
+  local f=$1 w=$2 h=$3 c
+  shift 3
+  {
+    printf '\x89PNG\r\n\x1a\n'
+    chunk IHDR "$(be32 "$w")$(be32 "$h")\\x08\\x02\\x00\\x00\\x00"
+    for c in "$@"; do chunk "$c" 'abcd'; done
+    chunk IDAT 'pixels'
+    chunk IEND ''
+  } >"$f"
+}
+
+# listing: the names in the archive, by an independent cpio.
+listing() {
+  (cd "$tmp" && cpio -it --quiet <"$tmp/esp/EFI/BOOT/splash.cpio" 2>/dev/null)
+}
+
+# unpack DIR: the archive unpacked by an independent cpio into DIR.
+unpack() {
+  mkdir -p "$1"
+  (cd "$1" && cpio -id --quiet <"$tmp/esp/EFI/BOOT/splash.cpio" 2>/dev/null)
+}
+
+@test "the default picture is IronFlock's white logo at 320x320 pixels, a PNG the splash takes" {
+  f=$repo/docs/assets/ironflock-splash.png
+  splash check-png "$f"
+  [ "$status" -eq 0 ]
+  # IHDR: 320x320, 8 bits, RGBA (transparent around the logo).
+  [ "$(od -An -v -tx1 -j 16 -N 10 "$f" | tr -d ' \n')" = 00000140000001400806 ]
+}
+
+@test "the theme draws the picture by the contract: centred, own size, smaller to fit, no spinner, none and fade" {
+  s=$theme_src/ironflockos.script
+  grep -qx 'ModuleName=script' "$theme_src/ironflockos.plymouth"
+  grep -qx 'Theme=ironflockos' "$repo/overlay/etc/plymouth/plymouthd.conf"
+  # The settings block ironflockos-splash writes anew.
+  [ "$(sed -n '1p' "$s")" = '// --- settings ---' ]
+  grep -qx '// --- end of settings ---' "$s"
+  grep -qx 'animation = "fade";' "$s"
+  # The device's picture first, else IronFlock's logo.
+  grep -q 'Image("splash.png")' "$s" && grep -q 'Image("ironflock.png")' "$s"
+  # Centred, scaled only when larger than the screen.
+  grep -q 'Math.Int((Window.GetWidth() - shown.GetWidth()) / 2)' "$s"
+  grep -q 'if (shown.GetWidth() > Window.GetWidth() || shown.GetHeight() > Window.GetHeight())' "$s"
+  grep -q 'SetDisplayHotplugFunction(layout)' "$s"
+  # The fade only at the start, the message line below the picture.
+  grep -q 'if (animation == "fade" && Plymouth.GetMode() == "boot")' "$s"
+  grep -q 'SetDisplayMessageFunction(display_message)' "$s"
+  ! grep -v '^ *//' "$s" | grep -qi 'progress\|throbber\|spinner'
+}
+
+@test "data-layout makes the screen folder, owned by root, before Docker" {
+  IRONFLOCKOS_DATA=$tmp/data run sh "$lib/data-layout"
+  [ "$status" -eq 0 ]
+  [ "$(ls -ld "$tmp/data/ironflockos/screen" | cut -c1-10)" = drwxr-xr-x ]
+  grep -qx 'Before=local-fs.target shutdown.target' "$units/ironflockos-data-layout.service"
+}
+
+@test "splash: no files, no archive; a picture and its settings become splash.cpio for the next boot" {
+  splash
+  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash.cpio" ]
+  png "$tmp/screen/splash.png" 640 400
+  printf 'background=#204060  # dark blue\r\nanimation=None\n' >"$tmp/screen/splash.conf"
+  splash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"the splash from the next boot on: the device's picture, background #204060, animation none"* ]]
+  # Plymouth's theme folder in the initramfs, the picture first; nothing else.
+  [ "$(listing | tr '\n' ' ')" = "usr/share/plymouth/themes/ironflockos/splash.png usr/share/plymouth/themes/ironflockos/ironflockos.script " ]
+  unpack "$tmp/x"
+  d=$tmp/x/usr/share/plymouth/themes/ironflockos
+  cmp "$d/splash.png" "$tmp/screen/splash.png"
+  grep -qx 'background_red = 32;' "$d/ironflockos.script"
+  grep -qx 'background_green = 64;' "$d/ironflockos.script"
+  grep -qx 'background_blue = 96;' "$d/ironflockos.script"
+  grep -qx 'animation = "none";' "$d/ironflockos.script"
+  # The rest is the image's own script.
+  diff <(sed '1,/^\/\/ --- end of settings ---$/d' "$d/ironflockos.script") <(sed '1,/^\/\/ --- end of settings ---$/d' "$theme_src/ironflockos.script")
+  # No temporary file left on the partition or in /run.
+  [ "$(ls -A "$tmp/esp/EFI/BOOT")" = splash.cpio ]
+  [ -z "$(ls -A "$tmp/run" | grep -v '^splash-theme$')" ]
+}
+
+@test "splash: the same files make the same archive, which is not written again" {
+  png "$tmp/screen/splash.png" 64 48
+  splash
+  [ "$status" -eq 0 ]
+  cp "$tmp/esp/EFI/BOOT/splash.cpio" "$tmp/first.cpio"
+  touch -t 202001010000 "$tmp/esp/EFI/BOOT/splash.cpio"
+  sleep 1
+  touch "$tmp/screen/splash.png"
+  splash
+  [ "$status" -eq 0 ] && [ -z "$output" ]
+  cmp "$tmp/first.cpio" "$tmp/esp/EFI/BOOT/splash.cpio"
+  [ -z "$(find "$tmp/esp/EFI/BOOT/splash.cpio" -newer "$tmp/first.cpio")" ]
+}
+
+@test "splash: splash.conf alone sets the colour for IronFlock's logo; removing both brings the image's splash back" {
+  printf 'background=#FFFFFF\n' >"$tmp/screen/splash.conf"
+  splash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IronFlock's logo, background #ffffff, animation fade"* ]]
+  [ "$(listing | tr '\n' ' ')" = "usr/share/plymouth/themes/ironflockos/ironflockos.script " ]
+  rm "$tmp/screen/splash.conf"
+  splash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"IronFlock's logo from the next boot on"* ]]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash.cpio" ]
+  [ ! -e "$tmp/run/splash-theme" ]
+}
+
+@test "splash: what the contract refuses is refused, says why, and the splash stays as it was" {
+  png "$tmp/screen/splash.png" 64 48
+  splash
+  cp "$tmp/esp/EFI/BOOT/splash.cpio" "$tmp/good.cpio"
+  refused() {
+    splash
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"refused: $1; the splash stays as it was"* ]]
+    cmp "$tmp/good.cpio" "$tmp/esp/EFI/BOOT/splash.cpio"
+  }
+  echo 'not a picture' >"$tmp/screen/splash.png"
+  refused "splash.png is not a PNG"
+  head -c $((4 * 1024 * 1024 + 1)) /dev/zero >"$tmp/screen/splash.png"
+  refused "splash.png is larger than 4 MiB"
+  png "$tmp/screen/splash.png" 3841 100
+  refused "splash.png is 3841x100 pixels, more than 3840x2160"
+  png "$tmp/screen/splash.png" 100 2161
+  refused "splash.png is 100x2161 pixels, more than 3840x2160"
+  png "$tmp/screen/splash.png" 64 48 tEXt
+  refused "splash.png has the chunk tEXt: only IHDR, PLTE, tRNS, IDAT and IEND are taken"
+  png "$tmp/screen/splash.png" 64 48 iCCP
+  refused "splash.png has the chunk iCCP: only IHDR, PLTE, tRNS, IDAT and IEND are taken"
+  png "$tmp/screen/splash.png" 64 48
+  head -c 40 "$tmp/screen/splash.png" >"$tmp/cut.png" && mv "$tmp/cut.png" "$tmp/screen/splash.png"
+  refused "splash.png ends inside a chunk"
+  png "$tmp/screen/splash.png" 64 48
+  echo trailing >>"$tmp/screen/splash.png"
+  refused "splash.png has data after IEND"
+  png "$tmp/screen/splash.png" 0 48
+  refused "splash.png has no pixels"
+  ln -sf /etc/hostname "$tmp/screen/splash.png"
+  refused "splash.png is not a file"
+  rm "$tmp/screen/splash.png"
+  mkdir "$tmp/screen/splash.png"
+  refused "splash.png is not a file"
+  rmdir "$tmp/screen/splash.png"
+  png "$tmp/screen/splash.png" 64 48
+  printf 'background=#204060\ncolour=red\n' >"$tmp/screen/splash.conf"
+  refused "splash.conf: line 2: unknown key colour"
+  printf 'background=blue\n' >"$tmp/screen/splash.conf"
+  refused "splash.conf: line 1: background must be a colour #RRGGBB"
+  printf 'animation=spin\n' >"$tmp/screen/splash.conf"
+  refused "splash.conf: line 1: animation must be none or fade"
+  printf 'animation=fade\nanimation=none\n' >"$tmp/screen/splash.conf"
+  refused "splash.conf: line 2: animation is given twice"
+  printf 'just words\n' >"$tmp/screen/splash.conf"
+  refused "splash.conf: line 1 is not a key=value line"
+  printf 'animation=fade\0\n' >"$tmp/screen/splash.conf"
+  refused "splash.conf holds a NUL byte"
+}
+
+@test "splash: the PNG's own rules: IHDR first, a palette picture with its palette, PLTE and tRNS before the image data" {
+  for case in "IHDR-late" "palette" "plte-late" "idat-apart" "colour"; do
+    {
+      printf '\x89PNG\r\n\x1a\n'
+      case "$case" in
+        IHDR-late) chunk IDAT x ;;
+        palette) chunk IHDR "$(be32 8)$(be32 8)\\x08\\x03\\x00\\x00\\x00" && chunk IDAT x ;;
+        plte-late) chunk IHDR "$(be32 8)$(be32 8)\\x08\\x03\\x00\\x00\\x00" && chunk IDAT x && chunk PLTE 'abc' ;;
+        idat-apart) chunk IHDR "$(be32 8)$(be32 8)\\x08\\x03\\x00\\x00\\x00" && chunk PLTE 'abc' && chunk IDAT x && chunk tRNS a && chunk IDAT y ;;
+        colour) chunk IHDR "$(be32 8)$(be32 8)\\x10\\x03\\x00\\x00\\x00" && chunk IDAT x ;;
+      esac
+      chunk IEND ''
+    } >"$tmp/p.png"
+    splash check-png "$tmp/p.png"
+    [ "$status" -eq 1 ]
+    case "$case" in
+      IHDR-late) [ "$output" = "splash: splash.png does not start with IHDR" ] ;;
+      palette) [ "$output" = "splash: splash.png has a palette colour type and no PLTE" ] ;;
+      plte-late) [ "$output" = "splash: splash.png has PLTE after its image data" ] ;;
+      idat-apart) [ "$output" = "splash: splash.png has tRNS after its image data" ] ;;
+      colour) [ "$output" = "splash: splash.png has colour type 3 with 16 bits, which PNG does not know" ] ;;
+    esac
+  done
+  {
+    printf '\x89PNG\r\n\x1a\n'
+    chunk IHDR "$(be32 8)$(be32 8)\\x08\\x03\\x00\\x00\\x01"
+    chunk PLTE 'abc'
+    chunk tRNS a
+    chunk IDAT x
+    chunk IDAT y
+    chunk IEND ''
+  } >"$tmp/p.png"
+  splash check-png "$tmp/p.png"
+  [ "$status" -eq 0 ]
+}
+
+@test "splash: the app's temporary file changes nothing; only the two names are read" {
+  png "$tmp/screen/.splash.png.partial" 64 48
+  echo 'background=#ffffff' >"$tmp/screen/.splash.conf.partial"
+  png "$tmp/screen/other.png" 64 48
+  splash
+  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash.cpio" ]
+  # The rename makes it the splash.
+  mv "$tmp/screen/.splash.png.partial" "$tmp/screen/splash.png"
+  splash
+  [ "$status" -eq 0 ]
+  [ -e "$tmp/esp/EFI/BOOT/splash.cpio" ]
+  [ "$(listing | head -n 1)" = usr/share/plymouth/themes/ironflockos/splash.png ]
+}
+
+@test "splash: the theme for the shutdown gets the archive's files; a damaged archive leaves the image's theme" {
+  png "$tmp/screen/splash.png" 64 48
+  printf 'animation=none\n' >"$tmp/screen/splash.conf"
+  splash
+  [ "$status" -eq 0 ]
+  live=$tmp/run/splash-theme
+  cmp "$live/splash.png" "$tmp/screen/splash.png"
+  grep -qx 'animation = "none";' "$live/ironflockos.script"
+  cmp "$live/ironflock.png" "$repo/docs/assets/ironflock-splash.png"
+  cmp "$live/ironflockos.plymouth" "$theme_src/ironflockos.plymouth"
+  # Random bytes on the partition (the files on /data refused): no theme of
+  # its own, and the boot still shows IronFlock's logo.
+  head -c 4096 /dev/urandom >"$tmp/esp/EFI/BOOT/splash.cpio"
+  echo broken >"$tmp/screen/splash.png"
+  splash
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"splash.cpio is damaged: the next boot shows IronFlock's logo"* ]]
+  [ ! -e "$live" ]
+}
+
+@test "splash: without the IRONFLOCKOS partition nothing changes, and it says so" {
+  rm -rf "$tmp/esp"
+  png "$tmp/screen/splash.png" 64 48
+  splash
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not there (the IRONFLOCKOS partition is not mounted): nothing changes"* ]]
+}
+
+@test "splash's units: at every boot and on the two names, not required by anything, EFI devices only, masked on the installer" {
+  grep -qx 'PathChanged=/data/ironflockos/screen/splash.png' "$units/ironflockos-splash.path"
+  grep -qx 'PathChanged=/data/ironflockos/screen/splash.conf' "$units/ironflockos-splash.path"
+  [ "$(grep -c '^Path' "$units/ironflockos-splash.path")" -eq 2 ]
+  grep -qx 'Unit=ironflockos-splash.service' "$units/ironflockos-splash.path"
+  # It runs again for the path unit: no RemainAfterExit.
+  ! grep -q RemainAfterExit "$units/ironflockos-splash.service"
+  grep -qx 'ExecStart=/usr/lib/ironflockos/splash' "$units/ironflockos-splash.service"
+  ! grep -qE '^(Requires|BindsTo|Requisite|RequiredBy)=' "$units/ironflockos-splash.service" "$units/ironflockos-display.service"
+  grep -qx 'PathChanged=/data/ironflockos/display.conf' "$units/ironflockos-display.path"
+  c=$repo/build/customize.sh
+  grep -qx '    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service' "$c"
+  grep -qx '    ln -sfn /data/ironflockos/display.conf "$ROOT/etc/ironflockos/display.conf"' "$c"
+  grep -q 'mask ironflockos-splash.service ironflockos-splash.path' "$c"
+  grep -q 'ironflockos-display.service ironflockos-display.path$' "$c"
+}
+
+# display: the display script on the temporary device.
+display() {
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_DISPLAY_CONF=$tmp/display.conf IRONFLOCKOS_GRUBENV=$tmp/grubenv run bash "$lib/display"
+}
+
+@test "display: boot=text goes into grubenv for GRUB, boot=splash or no file takes it out" {
+  printf 'ORDER=A B\n' >"$tmp/grubenv"
+  display
+  [ "$status" -eq 0 ] && [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
+  printf '# the boot messages\nboot=text\n' >"$tmp/display.conf"
+  display
+  [ "$status" -eq 0 ]
+  grep -qx IRONFLOCKOS_BOOT=text "$tmp/grubenv"
+  [[ "$output" == *"the boot messages instead of the splash, from the next boot on"* ]]
+  display
+  [ "$status" -eq 0 ] && [ "$output" = "display: boot=text" ]
+  printf 'boot=splash\r\n' >"$tmp/display.conf"
+  display
+  [ "$status" -eq 0 ] && [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
+  printf 'boot=text\n' >"$tmp/display.conf"
+  display
+  rm "$tmp/display.conf"
+  display
+  [ "$status" -eq 0 ] && [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
+}
+
+@test "display: a file it does not understand changes nothing and says why" {
+  printf 'IRONFLOCKOS_BOOT=text\n' >"$tmp/grubenv"
+  for content in 'boot=quiet' 'screen=on' 'boot text' 'boot=splash\nboot=text'; do
+    printf "$content\n" >"$tmp/display.conf"
+    display
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"display: refused $tmp/display.conf: "*"; the boot stays as it was"* ]]
+    grep -qx IRONFLOCKOS_BOOT=text "$tmp/grubenv"
+  done
+}
+
+@test "GRUB: the splash by default; boot=text, or ironflockos.boot=text on the command line, boots as before" {
+  . "$repo/build/lib.sh"
+  load_conf "$repo/targets/amd64-efi/target.conf"
+  cfg=$(render "$repo/targets/amd64-efi/grub/grub.cfg")
+  echo "$cfg" | grep -qx 'set IRONFLOCKOS_BOOT=splash'
+  # The default comes before grubenv, which may name text.
+  [ "$(echo "$cfg" | grep -n 'set IRONFLOCKOS_BOOT=splash' | cut -d: -f1)" -lt "$(echo "$cfg" | grep -n '^load_env' | cut -d: -f1)" ]
+  echo "$cfg" | grep -qF 'if [ "${IRONFLOCKOS_BOOT}" = text ]; then set splash=no; fi'
+  echo "$cfg" | grep -qF "if regexp ' ironflockos\\.boot=text ' \" \${IRONFLOCKOS_CMDLINE} \"; then set splash=no; fi"
+  echo "$cfg" | grep -qx '    set SPLASH_CMDLINE="quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0"'
+  echo "$cfg" | grep -qx '    set SPLASH_CMDLINE="plymouth.enable=0"'
+  # The menu is hidden with the splash only; Esc during the timeout shows it.
+  [ "$(echo "$cfg" | grep -c 'timeout_style')" -eq 1 ]
+  echo "$cfg" | grep -qx '    set timeout_style=hidden'
+  echo "$cfg" | grep -qx 'set timeout=2'
+  # The device's own picture after the slot's initramfs, in both entries.
+  echo "$cfg" | grep -qF '    if [ -f ${prefix}/splash.cpio ]; then set splash_initrd=${prefix}/splash.cpio; fi'
+  [ "$(echo "$cfg" | grep -c 'initrd.img ${splash_initrd}$')" -eq 2 ]
+  echo "$cfg" | grep -q '^set CMDLINE=".* ${SPLASH_CMDLINE} ${IRONFLOCKOS_RT_CMDLINE} ${IRONFLOCKOS_CMDLINE}"$'
+}
+
+@test "the screen in the image: Plymouth on the EFI targets only, its theme before the initramfs, the installer on text" {
+  . "$repo/build/lib.sh"
+  for t in amd64-efi arm64-efi; do
+    for p in plymouth plymouth-label fontconfig; do
+      read_list "$repo/targets/$t/packages" | grep -qx "$p"
+    done
+  done
+  ! read_list "$repo/profiles/base/packages" "$repo/profiles/base/packages.debian" "$repo/targets/rpi-arm64/packages" "$repo/targets/jetson-orin/packages" 2>/dev/null | grep -q '^plymouth'
+  m=$repo/build/mkrootfs.sh
+  grep -qF 'upload $src/docs/assets/ironflock-splash.png $theme/ironflock.png' "$m"
+  grep -qF 'upload $src/overlay/etc/plymouth/plymouthd.conf /etc/plymouth/plymouthd.conf' "$m"
+  grep -qF -- "--chrooted-customize-hook='update-initramfs -u -k all'" "$m"
+  # The theme's hooks come before the nvidia variant's, which makes the
+  # initramfs again with them in place.
+  [ "$(grep -n 'update-initramfs -u -k all' "$m" | cut -d: -f1)" -lt "$(grep -n 'ironflockos-nvidia-modules.sh \$NVIDIA_DRIVER_VERSION' "$m" | cut -d: -f1)" ]
+  grep -qF 'grub-editenv "$esp_dir/EFI/BOOT/grubenv" set IRONFLOCKOS_BOOT=text' "$repo/build/mkimage.sh"
+}
+
+@test "with the splash, tty1 belongs to the screen and Plymouth leaves the picture on it" {
+  grep -qx 'ConditionKernelCommandLine=!splash' "$units/getty@tty1.service.d/ironflockos-splash.conf"
+  q=$units/plymouth-quit.service.d/ironflockos.conf
+  [ "$(grep '^ExecStart=' "$q" | tr '\n' '|')" = "ExecStart=|ExecStart=-/usr/bin/plymouth quit --retain-splash|" ]
+}

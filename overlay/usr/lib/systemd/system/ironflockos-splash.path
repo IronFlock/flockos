@@ -1,0 +1,15 @@
+# Takes a new splash picture or splash.conf as soon as a screen app has put it
+# there (docs/kiosk-plan.md: written under another name, synced, renamed).
+# While one of the two is missing, systemd watches the folder in its stead,
+# and another name written there starts the service too: it reads only these
+# two names, and nothing changes then.
+[Unit]
+Description=IronFlockOS: watch /data/ironflockos/screen
+
+[Path]
+PathChanged=/data/ironflockos/screen/splash.png
+PathChanged=/data/ironflockos/screen/splash.conf
+Unit=ironflockos-splash.service
+
+[Install]
+WantedBy=multi-user.target
