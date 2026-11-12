@@ -1611,17 +1611,21 @@ class Runner:
         # A person at the screen logs in on tty2: the name, which agetty
         # hands to login, which asks for the password; then the session.
         # Each stage is waited for on its own, so that a failure says which
-        # one did not come.
+        # one did not come. The image has no libpam-systemd (no Recommends),
+        # so a login is not a session of logind: the login is its shell on
+        # tty2, running as the user, after PAM opened the session.
         self.type_line(TEST_OWNER)
+        uid = self.vm.run(f"id -u {TEST_OWNER}").strip()
         try:
             self.wait_for(f"pgrep -t tty2 -x login >/dev/null", 30, f"login to take {TEST_OWNER} on tty2")
             time.sleep(1)
             self.type_line(password)
-            self.wait_for(f"loginctl list-sessions --no-legend | grep -E ' {TEST_OWNER} .*tty2'", 60,
+            self.wait_for(f"pgrep -t tty2 -u {uid} -x bash >/dev/null && "
+                          f"journalctl -b --no-pager -t login | grep -q 'session opened for user {TEST_OWNER}('", 60,
                           f"{TEST_OWNER} to log in on tty2 with the console password")
         except TestFailure as e:
             raise TestFailure(f"{e}\n{self.login_diagnostics()}") from None
-        self.vm.run(f"loginctl terminate-user {TEST_OWNER}")
+        self.vm.run(f"pkill -KILL -t tty2 -u {uid} || true")
         self.vm.run("rm /data/ironflockos/console-password")
         self.wait_for(locked, 60, "the password to be locked again")
 
