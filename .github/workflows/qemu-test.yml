@@ -3,8 +3,11 @@
 # job, not after the whole build.
 #
 # An image (variant base or nvidia): first boot, reboot, update into slot B
-# with the bundle of the same build, factory reset, fallback of an untested
-# slot, crash. The installer stick (variant installer, WP-3.2): it installs
+# with the bundle of the same build, `ironflock os rollback` back and forth
+# (under KVM), factory reset, fallback of an untested slot, crash; `ironflock
+# os update` and `os rollback` refusing along the way. What ironflock reads
+# and prints is uploaded with the logs (captured/, docs/testing.md). The
+# installer stick (variant installer, WP-3.2): it installs
 # the base image (installer.conf payload=) to a blank NVMe unattended; the
 # NVMe then boots alone.
 name: qemu-test
@@ -106,5 +109,6 @@ jobs:
             /mnt/ironflockos-qemu/console.log
             /mnt/ironflockos-qemu/shell.log
             /mnt/ironflockos-qemu/ironflockos-installer.log
+            /mnt/ironflockos-qemu/captured/
           if-no-files-found: ignore
           retention-days: 7
