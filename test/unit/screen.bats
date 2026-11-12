@@ -30,7 +30,7 @@ teardown() { rm -rf "$tmp"; }
 
 # splash [ARGS...]: the splash script on the temporary device.
 splash() {
-  IRONFLOCKOS_SCREEN=$tmp/screen IRONFLOCKOS_EFI_BOOT=$tmp/esp/EFI/BOOT IRONFLOCKOS_THEME=$tmp/theme \
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_SCREEN=$tmp/screen IRONFLOCKOS_EFI_BOOT=$tmp/esp/EFI/BOOT IRONFLOCKOS_THEME=$tmp/theme \
     IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_SPLASH_BIND=no run bash "$lib/splash" "$@"
 }
 
@@ -130,8 +130,11 @@ unpack() {
   # The rest is the image's own script.
   diff <(sed '1,/^\/\/ --- end of settings ---$/d' "$d/ironflockos.script") <(sed '1,/^\/\/ --- end of settings ---$/d' "$theme_src/ironflockos.script")
   # No temporary file left on the partition or in /run.
-  [ "$(ls -A "$tmp/esp/EFI/BOOT")" = splash.cpio ]
-  [ -z "$(ls -A "$tmp/run" | grep -v '^splash-theme$')" ]
+  [ "$(ls -A "$tmp/esp/EFI/BOOT" | tr '\n' ' ')" = "splash.cpio splash.env " ]
+  # GRUB's colour (WP-8.7); with animation=none no picture until the screen
+  # is taken after a boot.
+  grep -qx 'IRONFLOCKOS_SPLASH_BACKGROUND=#204060' "$tmp/esp/EFI/BOOT/splash.env"
+  [ -z "$(ls -A "$tmp/run" | grep -vE '^splash-(theme|booted)$')" ]
 }
 
 @test "splash: the same files make the same archive, which is not written again" {
@@ -305,7 +308,7 @@ unpack() {
   ! grep -qE '^(Requires|BindsTo|Requisite|RequiredBy)=' "$units/ironflockos-splash.service" "$units/ironflockos-display.service"
   grep -qx 'PathChanged=/data/ironflockos/display.conf' "$units/ironflockos-display.path"
   c=$repo/build/customize.sh
-  grep -qx '    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service' "$c"
+  grep -qx '    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service ironflockos-splash-capture.service' "$c"
   grep -qx '    ln -sfn /data/ironflockos/display.conf "$ROOT/etc/ironflockos/display.conf"' "$c"
   grep -q 'mask ironflockos-splash.service ironflockos-splash.path' "$c"
   grep -q '    ironflockos-display.service ironflockos-display.path' "$c"
@@ -361,7 +364,7 @@ display() {
   [ "$(echo "$cfg" | grep -n 'set IRONFLOCKOS_BOOT=splash' | cut -d: -f1)" -lt "$(echo "$cfg" | grep -n '^load_env' | cut -d: -f1)" ]
   echo "$cfg" | grep -qF 'if [ "${IRONFLOCKOS_BOOT}" = text ]; then set splash=no; fi'
   echo "$cfg" | grep -qF "if regexp ' ironflockos\\.boot=text ' \" \${IRONFLOCKOS_CMDLINE} \"; then set splash=no; fi"
-  echo "$cfg" | grep -qx '    set SPLASH_CMDLINE="quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0"'
+  echo "$cfg" | grep -qx '    set SPLASH_CMDLINE="quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0 fbcon=map:9"'
   echo "$cfg" | grep -qx '    set SPLASH_CMDLINE="plymouth.enable=0"'
   # The menu is hidden with the splash only; Esc during the timeout shows it.
   [ "$(echo "$cfg" | grep -c 'timeout_style')" -eq 1 ]
@@ -580,4 +583,159 @@ SH
     "$repo/profiles/nvidia/overlay/usr/lib/systemd/system/ironflockos-nvidia-secure-boot.service"
   # Plymouth quits after enroll: its message is the one that stays.
   grep -qx 'After=ironflockos-enroll.service' "$units/plymouth-quit.service.d/ironflockos.conf"
+}
+
+# --- no black between the firmware's picture and the splash (WP-8.7) --------
+
+@test "GRUB draws the splash's colour, and its picture from splash.env and splash-screen.png, in graphics mode kept for the kernel" {
+  . "$repo/build/lib.sh"
+  for t in amd64-efi arm64-efi; do
+    cfg=$(load_conf "$repo/targets/$t/target.conf" && render "$repo/targets/$t/grub/grub.cfg" | grep -v '^ *#')
+    terminal=$(load_conf "$repo/targets/$t/target.conf" && echo "$GRUB_TERMINAL")
+    block=$(echo "$cfg" | sed -n '/^if \[ "${splash}" = yes \]; then$/,/^else$/p')
+    [[ "$block" == *"load_env --file \${prefix}/splash.env --skip-sig IRONFLOCKOS_SPLASH_BACKGROUND IRONFLOCKOS_SPLASH_MODE"* ]]
+    [[ "$block" == *"if loadfont (memdisk)/fonts/unicode.pf2; then"* ]]
+    [[ "$block" == *"if terminal_output gfxterm $terminal; then"* ]]
+    [[ "$block" == *'background_color "${IRONFLOCKOS_SPLASH_BACKGROUND}"'* ]]
+    [[ "$block" == *'background_image -m normal ${prefix}/splash-screen.png'* ]]
+    [[ "$block" == *'set gfxmode="${IRONFLOCKOS_SPLASH_MODE},auto"'* ]]
+    [[ "$block" == *"set gfxpayload=keep"* ]]
+    # Without the splash none of it: the console terminal, as before.
+    [ "$(echo "$cfg" | grep -c 'gfxpayload\|terminal_output gfxterm\|background_')" -eq 4 ]
+  done
+  m=$repo/build/mkimage.sh
+  grep -qF 'grub-editenv "$esp_dir/EFI/BOOT/splash.env" set "IRONFLOCKOS_SPLASH_BACKGROUND=#000000"' "$m"
+  grep -qF '"$esp_dir/EFI/BOOT/grubenv" "$esp_dir/EFI/BOOT/splash.env" ::/EFI/BOOT/' "$m"
+}
+
+@test "consoles: the terminals get the console back only after a start with the console kept off the screen" {
+  printf 'root=x quiet splash\n' >"$tmp/cmdline"
+  mkdir -p "$tmp/dev"
+  echo fb >"$tmp/dev/fb0"
+  IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline IRONFLOCKOS_DEV=$tmp/dev run sh "$lib/consoles" fb0
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # With fbcon=map:9 it asks the kernel; a file that is no framebuffer
+  # refuses, which it says and does not fail on.
+  printf 'root=x quiet splash fbcon=map:9\n' >"$tmp/cmdline"
+  IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline IRONFLOCKOS_DEV=$tmp/dev run sh "$lib/consoles" fb0
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"the virtual terminals have no console on $tmp/dev/fb0"* ]]
+  grep -qx 'ACTION=="add", SUBSYSTEM=="graphics", KERNEL=="fb\[0-9\]\*", RUN+="/usr/lib/ironflockos/consoles %k"' \
+    "$repo/overlay/usr/lib/udev/rules.d/71-ironflockos-consoles.rules"
+}
+
+# framebuffer W H STRIDE: a 32-bit framebuffer in $tmp/fb with its sysfs
+# files: the background #204060, a 4x2 block of #f08010 in the middle.
+framebuffer() {
+  local w=$1 h=$2 stride=$3 x y
+  mkdir -p "$tmp/sys"
+  echo "$w,$h" >"$tmp/sys/virtual_size"
+  echo 32 >"$tmp/sys/bits_per_pixel"
+  echo "$stride" >"$tmp/sys/stride"
+  : >"$tmp/fb"
+  for ((y = 0; y < h; y++)); do
+    for ((x = 0; x < w; x++)); do
+      if [ "$x" -ge 2 ] && [ "$x" -lt 6 ] && [ "$y" -ge 1 ] && [ "$y" -lt 3 ]; then
+        printf '\x10\x80\xf0\x00' >>"$tmp/fb"
+      else
+        printf '\x60\x40\x20\x00' >>"$tmp/fb"
+      fi
+    done
+    if [ "$stride" -gt $((4 * w)) ]; then head -c $((stride - 4 * w)) /dev/zero >>"$tmp/fb"; fi
+  done
+}
+
+capture() {
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_SCREEN=$tmp/screen IRONFLOCKOS_EFI_BOOT=$tmp/esp/EFI/BOOT IRONFLOCKOS_THEME=$tmp/theme \
+    IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_SPLASH_BIND=no IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline IRONFLOCKOS_SYS_FB=$tmp/sys \
+    IRONFLOCKOS_FB=$tmp/fb IRONFLOCKOS_SYS_TTY_ACTIVE=$tmp/active IRONFLOCKOS_TTY1_MODE=${mode:-graphics} \
+    run bash "$lib/splash" capture
+}
+
+@test "capture: with animation=none the whole screen becomes GRUB's picture, at its size; a new splash drops it" {
+  png "$tmp/screen/splash.png" 64 48
+  printf 'background=#204060\nanimation=none\n' >"$tmp/screen/splash.conf"
+  splash
+  [ "$status" -eq 0 ]
+  printf 'root=x quiet splash fbcon=map:9\n' >"$tmp/cmdline"
+  echo tty1 >"$tmp/active"
+  framebuffer 8 4 40
+  # The boot that took the files started without the archive.
+  capture
+  [[ "$output" == *"the splash changed during this boot: the screen is taken after the next one"* ]]
+  # The next boot starts with it.
+  rm "$tmp/run/splash-booted"
+  splash
+  capture
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"took the screen (8x4): GRUB draws the splash from the next boot on"* ]]
+  grep -qx 'IRONFLOCKOS_SPLASH_MODE=8x4' "$tmp/esp/EFI/BOOT/splash.env"
+  # A PNG the image itself would take, of the framebuffer's pixels.
+  splash check-png "$tmp/esp/EFI/BOOT/splash-screen.png"
+  [ "$status" -eq 0 ]
+  if command -v python3 >/dev/null; then
+    run python3 -I -c '
+import sys, zlib
+d = open(sys.argv[1], "rb").read()
+pos, idat = 8, b""
+while pos < len(d):
+    n = int.from_bytes(d[pos:pos + 4], "big"); kind = d[pos + 4:pos + 8]; body = d[pos + 8:pos + 8 + n]
+    assert zlib.crc32(kind + body) == int.from_bytes(d[pos + 8 + n:pos + 12 + n], "big"), kind
+    if kind == b"IDAT": idat += body
+    pos += 12 + n
+rows = zlib.decompress(idat)
+print(" ".join(rows[y * 25 + 1:(y + 1) * 25].hex() for y in range(4)))' "$tmp/esp/EFI/BOOT/splash-screen.png"
+    [ "$status" -eq 0 ]
+    bg=204060 fg=f08010
+    [ "$output" = "$bg$bg$bg$bg$bg$bg$bg$bg $bg$bg$fg$fg$fg$fg$bg$bg $bg$bg$fg$fg$fg$fg$bg$bg $bg$bg$bg$bg$bg$bg$bg$bg" ]
+  fi
+  # The same again: nothing to do.
+  capture
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # A new picture drops GRUB's; the boot after it takes the screen anew.
+  png "$tmp/screen/splash.png" 32 32
+  splash
+  [ "$status" -eq 0 ]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash-screen.png" ]
+  ! grep -q IRONFLOCKOS_SPLASH_MODE "$tmp/esp/EFI/BOOT/splash.env"
+  capture
+  [[ "$output" == *"the splash changed during this boot: the screen is taken after the next one"* ]]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash-screen.png" ]
+}
+
+@test "capture: nothing with fade, without the splash, with another terminal in front or not in graphics mode, or not the splash's colour" {
+  png "$tmp/screen/splash.png" 64 48
+  printf 'background=#204060\n' >"$tmp/screen/splash.conf"
+  splash
+  printf 'root=x quiet splash fbcon=map:9\n' >"$tmp/cmdline"
+  echo tty1 >"$tmp/active"
+  framebuffer 8 4 32
+  capture
+  [ "$status" -eq 0 ]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash-screen.png" ]
+  printf 'background=#204060\nanimation=none\n' >"$tmp/screen/splash.conf"
+  splash
+  rm "$tmp/run/splash-booted"
+  splash
+  printf 'root=x plymouth.enable=0\n' >"$tmp/cmdline"
+  capture
+  [ -z "$output" ]
+  printf 'root=x quiet splash fbcon=map:9\n' >"$tmp/cmdline"
+  echo tty2 >"$tmp/active"
+  capture
+  [[ "$output" == *"the first terminal is not the splash's: the screen is not taken"* ]]
+  echo tty1 >"$tmp/active"
+  mode=text capture
+  [[ "$output" == *"the first terminal is not the splash's: the screen is not taken"* ]]
+  printf 'background=#000000\nanimation=none\n' >"$tmp/screen/splash.conf"
+  splash
+  rm "$tmp/run/splash-booted"
+  splash
+  capture
+  [[ "$output" == *"the screen does not show the splash's background: it is not taken"* ]]
+  [ ! -e "$tmp/esp/EFI/BOOT/splash-screen.png" ]
+  grep -qx 'ConditionKernelCommandLine=splash' "$units/ironflockos-splash-capture.service"
+  grep -qx 'After=plymouth-quit.service ironflockos-splash.service' "$units/ironflockos-splash-capture.service"
 }

@@ -1,0 +1,29 @@
+#!/bin/sh
+# consoles [fbN]: the virtual terminals get the kernel's console on the screen
+# back (docs/build.md, "The screen"). With the splash the kernel starts with
+# its console off the screen (fbcon=map:9 names a framebuffer that is never
+# there), so that it does not clear the picture GRUB left there before
+# Plymouth draws the same. udev runs this for every framebuffer the running
+# system finds (71-ironflockos-consoles.rules), by then Plymouth has drawn
+# and holds the first terminal in graphics mode, where the console draws
+# nothing: the terminals 2 to 6 get their text, the login prompts and the
+# boot messages Esc shows, and the picture stays. Without the splash it does
+# nothing.
+# IRONFLOCKOS_PROC_CMDLINE, IRONFLOCKOS_DEV: for the unit tests only.
+cmdline=${IRONFLOCKOS_PROC_CMDLINE:-/proc/cmdline}
+dev=${IRONFLOCKOS_DEV:-/dev}
+fb=$dev/${1:-fb0}
+case " $(cat "$cmdline" 2>/dev/null) " in
+  *" fbcon=map:9 "*) ;;
+  *) exit 0 ;;
+esac
+[ -e "$fb" ] || exit 0
+# FBIOPUT_CON2FBMAP: console N (1-based) to the framebuffer's number.
+n=${fb##*fb}
+perl -e '
+  my ($path, $fbnum) = @ARGV;
+  open(my $fb, "+<", $path) or die "$path: $!\n";
+  for my $console (1 .. 6) {
+    ioctl($fb, 0x4610, pack("LL", $console, $fbnum)) or die "console $console: $!\n";
+  }
+' "$fb" "$n" || echo "consoles: the virtual terminals have no console on $fb" >&2

@@ -45,6 +45,11 @@ bind=${IRONFLOCKOS_SPLASH_BIND:-yes}
 archive=$boot_dir/splash.cpio
 part=$boot_dir/.splash.cpio.part
 live=$run/splash-theme
+# What GRUB draws (WP-8.7): its settings, and the picture of the whole screen.
+splash_env=$boot_dir/splash.env
+screen_png=$boot_dir/splash-screen.png
+# The archive this boot started with (GRUB loaded it), noted by the first run.
+booted=$run/splash-booted
 # Where the archive puts its files: the theme's folder in the initramfs.
 theme_path=usr/share/plymouth/themes/ironflockos
 max_png=$((4 * 1024 * 1024))
@@ -391,10 +396,14 @@ take_into() {
     return 1
   fi
   if [ ! -e "$stage/splash.png" ] && [ ! -e "$stage/splash.conf" ]; then
+    background_red=0 background_green=0 background_blue=0 animation=fade
     if [ -e "$archive" ]; then
       rm -f "$archive"
       sync
       say "no splash.png and no splash.conf in $screen: IronFlock's logo from the next boot on"
+      grub_files changed
+    else
+      grub_files same
     fi
     return 0
   fi
@@ -410,6 +419,7 @@ take_into() {
   write_script "$stage/ironflockos.script" || return 1
   make_archive "$stage" "$stage/splash.cpio"
   if cmp -s "$stage/splash.cpio" "$archive"; then
+    grub_files same
     return 0
   fi
   if ! cp "$stage/splash.cpio" "$part" || ! sync || ! mv -f "$part" "$archive"; then
@@ -422,6 +432,162 @@ take_into() {
   if [ -e "$stage/splash.png" ]; then what="the device's picture"; fi
   say "the splash from the next boot on: $what, background" \
     "#$(printf '%02x%02x%02x' "$background_red" "$background_green" "$background_blue"), animation $animation"
+  grub_files changed
+}
+
+# env_get KEY: a value of splash.env.
+env_get() {
+  { grub-editenv "$splash_env" list 2>/dev/null || true; } | sed -n "s/^$1=//p"
+}
+
+# grub_files changed|same: what GRUB draws before the kernel, for the
+# settings this run took. The background colour always. The picture only
+# with animation=none (with fade the picture fades in on the colour), and
+# only as long as the archive it was taken under stays: "changed" drops it,
+# and the next boot with the splash takes it anew (capture).
+grub_files() {
+  local want
+  want=$(printf '#%02x%02x%02x' "$background_red" "$background_green" "$background_blue")
+  if [ ! -f "$splash_env" ]; then grub-editenv "$splash_env" create || return 0; fi
+  if [ "$(env_get IRONFLOCKOS_SPLASH_BACKGROUND)" != "$want" ]; then
+    grub-editenv "$splash_env" set "IRONFLOCKOS_SPLASH_BACKGROUND=$want" || say "could not write $splash_env"
+  fi
+  if [ "$1" = changed ] || [ "$animation" != none ]; then drop_screen; fi
+}
+
+# drop_screen: GRUB draws no picture.
+drop_screen() {
+  if [ -n "$(env_get IRONFLOCKOS_SPLASH_MODE)" ]; then grub-editenv "$splash_env" unset IRONFLOCKOS_SPLASH_MODE || true; fi
+  rm -f "$screen_png"
+}
+
+# be32 N: N as four bytes, most significant first.
+be32() {
+  printf '%b' "$(printf '\\x%02x\\x%02x\\x%02x\\x%02x' $(($1 >> 24 & 255)) $(($1 >> 16 & 255)) $(($1 >> 8 & 255)) $(($1 & 255)))"
+}
+
+# png_chunk TYPE FILE: a PNG chunk of FILE's bytes; gzip computes its CRC-32
+# (the last 8 bytes of its output are the CRC and the size, least significant
+# byte first).
+png_chunk() {
+  local crc
+  be32 "$(size "$2")"
+  printf '%s' "$1"
+  cat "$2"
+  crc=$({ printf '%s' "$1" && cat "$2"; } | gzip -1 -n -c | tail -c 8 | head -c 4 | od -An -v -tx1 | tr -d ' \n')
+  be32 $((16#${crc:6:2}${crc:4:2}${crc:2:2}${crc:0:2}))
+}
+
+# png_from_fb RAW WIDTH HEIGHT STRIDE OUT: an 8-bit RGB PNG of a framebuffer
+# of 32 bits a pixel, blue, green, red and one unused byte in memory (the
+# kernel's XRGB8888). gzip does the deflate; the zlib stream around it needs
+# the Adler-32 of the rows, which perl counts.
+png_from_fb() {
+  local raw=$1 w=$2 h=$3 stride=$4 out=$5 dir n adler
+  dir=$(mktemp -d "$run/splash-png.XXXXXX")
+  # shellcheck disable=SC2016 # perl programs
+  if ! perl -e 'my ($w, $h, $stride) = @ARGV; binmode STDIN; binmode STDOUT; local $/; my $raw = <STDIN>;
+      length($raw) >= $stride * ($h - 1) + $w * 4 or die "the framebuffer is shorter than its size\n";
+      for my $y (0 .. $h - 1) { my $l = substr($raw, $y * $stride, $w * 4); $l =~ s/(.)(.)(.)./$3$2$1/gs; print "\0", $l; }' \
+    "$w" "$h" "$stride" <"$raw" >"$dir/rows" ||
+    ! adler=$(perl -e 'binmode STDIN; my ($a, $b) = (1, 0); my $buf;
+      while (read(STDIN, $buf, 4096)) { for my $c (unpack("C*", $buf)) { $a += $c; $b += $a } $a %= 65521; $b %= 65521 }
+      printf "%d\n", $b * 65536 + $a' <"$dir/rows") ||
+    ! gzip -1 -n -c <"$dir/rows" >"$dir/rows.gz"; then
+    rm -rf "$dir"
+    return 1
+  fi
+  n=$(size "$dir/rows.gz")
+  {
+    printf '\170\001'
+    tail -c +11 "$dir/rows.gz" | head -c $((n - 18))
+    be32 "$adler"
+  } >"$dir/idat"
+  {
+    be32 "$w"
+    be32 "$h"
+    printf '\010\002\000\000\000'
+  } >"$dir/ihdr"
+  : >"$dir/iend"
+  {
+    printf '\211PNG\r\n\032\n'
+    png_chunk IHDR "$dir/ihdr"
+    png_chunk IDAT "$dir/idat"
+    png_chunk IEND "$dir/iend"
+  } >"$out"
+  rm -rf "$dir"
+}
+
+# tty1_graphics: whether the first virtual terminal is in graphics mode
+# (KDGETMODE), where the kernel's console draws nothing.
+tty1_graphics() {
+  if [ -n "${IRONFLOCKOS_TTY1_MODE:-}" ]; then
+    [ "$IRONFLOCKOS_TTY1_MODE" = graphics ]
+    return
+  fi
+  # shellcheck disable=SC2016 # a perl program
+  [ "$(perl -e 'open(my $t, "<", "/dev/tty1") or die; my $m = pack("L", 0); ioctl($t, 0x4B3B, $m) or die; print unpack("L", $m)' 2>/dev/null)" = 1 ]
+}
+
+# capture: the picture GRUB draws (WP-8.7), taken from the screen at the end
+# of a boot with the splash, after Plymouth quit: the framebuffer Plymouth
+# drew into holds the whole splash at the screen's size, as GRUB draws it
+# from the top left corner. Only with animation=none, only when the archive
+# is the one this boot started with, only while the first terminal is in
+# front and in graphics mode (nothing has drawn on it since), and only from
+# a framebuffer of 32 bits a pixel whose corner is the background colour.
+# Changes nothing otherwise.
+capture() {
+  local fbsys=${IRONFLOCKOS_SYS_FB:-/sys/class/graphics/fb0} fbdev=${IRONFLOCKOS_FB:-/dev/fb0}
+  local size w h stride raw tmp
+  case " $(cat "${IRONFLOCKOS_PROC_CMDLINE:-/proc/cmdline}" 2>/dev/null) " in *" splash "*) ;; *) return 0 ;; esac
+  [ -f "$archive" ] || return 0
+  if [ "$(cat "$booted" 2>/dev/null)" != "$(cksum <"$archive")" ]; then
+    say "the splash changed during this boot: the screen is taken after the next one"
+    return 0
+  fi
+  tmp=$(mktemp -d "$run/splash-capture.XXXXXX")
+  if ! extract_archive "$archive" "$tmp" || ! grep -qx 'animation = "none";' "$tmp/ironflockos.script"; then
+    rm -rf "$tmp"
+    return 0
+  fi
+  rm -rf "$tmp"
+  if command -v plymouth >/dev/null && plymouth --ping 2>/dev/null; then
+    say "Plymouth still runs: the screen is not taken"
+    return 0
+  fi
+  if [ "$(cat "${IRONFLOCKOS_SYS_TTY_ACTIVE:-/sys/class/tty/tty0/active}" 2>/dev/null)" != tty1 ] || ! tty1_graphics; then
+    say "the first terminal is not the splash's: the screen is not taken"
+    return 0
+  fi
+  size=$(cat "$fbsys/virtual_size" 2>/dev/null || true)
+  stride=$(cat "$fbsys/stride" 2>/dev/null || true)
+  w=${size%,*} h=${size#*,}
+  if [ "$(cat "$fbsys/bits_per_pixel" 2>/dev/null)" != 32 ] || [[ ! "$w" =~ ^[0-9]+$ ]] || [[ ! "$h" =~ ^[0-9]+$ ]] ||
+    [[ ! "$stride" =~ ^[0-9]+$ ]] || [ "$w" -gt "$max_width" ] || [ "$h" -gt "$max_height" ]; then
+    say "the framebuffer is not one of 32 bits a pixel up to ${max_width}x$max_height: the screen is not taken"
+    return 0
+  fi
+  if [ "$(env_get IRONFLOCKOS_SPLASH_MODE)" = "${w}x$h" ] && [ -s "$screen_png" ]; then
+    return 0
+  fi
+  raw=$run/splash-screen.raw
+  head -c $((stride * h)) "$fbdev" >"$raw" 2>/dev/null || true
+  # The corner is the background colour, or this is not the splash.
+  if [ "$(od -An -v -tx1 -N 3 "$raw" | tr -d ' \n')" != "$(env_get IRONFLOCKOS_SPLASH_BACKGROUND | sed 's/^#\(..\)\(..\)\(..\)$/\3\2\1/')" ]; then
+    rm -f "$raw"
+    say "the screen does not show the splash's background: it is not taken"
+    return 0
+  fi
+  if ! png_from_fb "$raw" "$w" "$h" "$stride" "$screen_png.part" || ! sync || ! mv -f "$screen_png.part" "$screen_png"; then
+    rm -f "$raw" "$screen_png.part"
+    say "could not write $screen_png"
+    return 1
+  fi
+  rm -f "$raw"
+  grub-editenv "$splash_env" set "IRONFLOCKOS_SPLASH_MODE=${w}x$h" || return 1
+  sync
+  say "took the screen (${w}x$h): GRUB draws the splash from the next boot on"
 }
 
 # unbind: the running system's theme as the image has it.
@@ -464,9 +630,9 @@ case "${1:-}" in
     }; fi
     exit 0
     ;;
-  "") ;;
+  "" | capture) ;;
   *)
-    echo "usage: splash [check-png|check-conf FILE]" >&2
+    echo "usage: splash [check-png|check-conf FILE|capture]" >&2
     exit 2
     ;;
 esac
@@ -476,6 +642,13 @@ if [ ! -d "$boot_dir" ]; then
   exit 1
 fi
 mkdir -p "$run"
+if [ "${1:-}" = capture ]; then
+  capture
+  exit $?
+fi
+if [ ! -e "$booted" ]; then
+  if [ -f "$archive" ]; then cksum <"$archive" >"$booted"; else echo none >"$booted"; fi
+fi
 rm -f "$part"
 unbind
 rc=0

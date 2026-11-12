@@ -1,0 +1,5 @@
+# The virtual terminals get the kernel's console back on every framebuffer
+# the running system finds, once Plymouth has drawn the splash (docs/build.md,
+# "The screen"). Not in the initramfs: there the console stays off the screen,
+# so that GRUB's picture stays until Plymouth draws the same.
+ACTION=="add", SUBSYSTEM=="graphics", KERNEL=="fb[0-9]*", RUN+="/usr/lib/ironflockos/consoles %k"

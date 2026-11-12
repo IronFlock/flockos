@@ -1,0 +1,15 @@
+[Unit]
+Description=IronFlockOS: the splash as GRUB draws it, taken from the screen
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+# At the end of a boot with the splash: Plymouth has quit and left the
+# whole splash in the framebuffer (docs/build.md, "The screen").
+After=plymouth-quit.service ironflockos-splash.service
+ConditionKernelCommandLine=splash
+ConditionPathIsDirectory=/boot/efi/EFI/BOOT
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/splash capture
+
+[Install]
+WantedBy=multi-user.target

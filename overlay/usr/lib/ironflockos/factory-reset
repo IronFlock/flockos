@@ -653,9 +653,11 @@ attempt() {
     else
       step_failed grubenv
     fi
-    # The device's own splash goes with /data/ironflockos/screen: the
-    # restart shows IronFlock's logo (docs/build.md, "The screen").
-    if ! rm -f "${grubenv%/*}/splash.cpio" "${grubenv%/*}/.splash.cpio.part"; then
+    # The device's own splash goes with /data/ironflockos/screen, and what
+    # GRUB draws of it: the restart shows IronFlock's logo on black
+    # (docs/build.md, "The screen").
+    if ! rm -f "${grubenv%/*}/splash.cpio" "${grubenv%/*}/.splash.cpio.part" "${grubenv%/*}/splash-screen.png" \
+      "${grubenv%/*}/splash-screen.png.part" "${grubenv%/*}/splash.env"; then
       step_failed splash
     fi
   fi
