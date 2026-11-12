@@ -14,7 +14,7 @@ browser that shows the UI is an app that IronFlock provides, not a part of the i
 | Phase | On the screen | Keys |
 |-------|---------------|------|
 | Firmware | the firmware's own picture | the firmware's setup key, as the PC's maker set it |
-| GRUB, up to 2 s | the splash's background colour and picture (WP-8.7; before it, black) | Esc: the boot menu, with the slots and "Firmware setup" |
+| GRUB, up to 2 s | the splash's background colour (WP-8.7; before it, black); its picture as well later (WP-8.8) | Esc: the boot menu, with the slots and "Firmware setup" |
 | Kernel and boot | the splash: IronFlock's logo, or the picture the device was given, on its background colour, with its animation | Esc: the boot messages, and back to the splash |
 | Running, no kiosk app | the splash stays | Ctrl+Alt+F2 to F6: a login prompt; Ctrl+Alt+F1: back |
 | Running, kiosk app | the UI of the app the kiosk is pointed at | the same keys, and the kiosk's own key to IronFlock Studio |
@@ -42,7 +42,7 @@ Proposed by this plan, to be confirmed with it:
 |---|----------|-----|
 | P1 | The first virtual terminal belongs to the screen: the splash, then the kiosk. Login prompts are on terminals 2 to 6. | One rule with and without a kiosk app, and no prompt that draws over the logo. |
 | P2 | D4 goes through the image: the app puts a PNG into one folder, and the image checks it and installs it for the next boot. The app never writes to the IRONFLOCKOS partition. | The splash is drawn before Docker runs, from a partition that also holds `grubenv`. A full or damaged partition must not be an app's doing. |
-| P3 | GRUB hides its menu and, with WP-8.7, shows the splash's background colour and picture itself. Until WP-8.7 it shows nothing, and the default background is black. | Debian's kernel clears the screen when its console takes it, one to two seconds before Plymouth draws: a picture from GRUB alone would appear, go and come back. On black nothing of that is seen. WP-8.7 keeps the console off the screen, and only then is GRUB's picture a gain. Debian's signed GRUB has the PNG decoder and the graphics terminal built in. |
+| P3 | GRUB hides its menu and, with WP-8.7, fills the screen with the splash's background colour; with WP-8.8 (later) it draws the picture as well. Until WP-8.7 it shows nothing, and the default background is black. | Debian's kernel clears the screen when its console takes it, one to two seconds before Plymouth draws: a picture from GRUB alone would appear, go and come back. On black nothing of that is seen. WP-8.7 keeps the console off the screen, and only then is GRUB's picture a gain. Debian's signed GRUB has the PNG decoder and the graphics terminal built in. |
 | P6 | Animations are built into the theme and chosen by name; a device brings a picture and a colour, not frames. The first two: `none` and `fade` (the picture fades in and stays), `fade` being the default. | One picture and one colour can be checked; a set of frames cannot, and it would have to fit the partition. An animation that ends in a still picture lets the screen app take over without a visible step. |
 | P4 | The kernel's `quiet` comes with the splash, also on the serial console. `boot=text` in `display.conf` turns both off for a device; the installer stick and the QEMU tests stay on text. The level is not lowered further (`loglevel=3`): errors stay on the serial console, and the kept splash is safe from them because its terminal is in graphics mode, which WP-8.1 tests. | The kernel has one log level for all consoles. The journal keeps every line. |
 | P5 | The EFI targets first (`amd64-efi`, `arm64-efi`). The Raspberry Pi and Jetson follow in work packages of their own. | Their boot files and graphics drivers differ. |
@@ -206,31 +206,57 @@ The app guarantees:
 
 ### WP-8.7 No black between the firmware's picture and the splash (3 days, and the machine)
 
-- Scope: GRUB in graphics mode at the panel's resolution, kept for the kernel
-  (`gfxpayload=keep`); GRUB fills the screen with the splash's background colour and
-  draws its picture, both written next to `grubenv` by `ironflockos-splash` (the
-  default ones by the build); the kernel's console stays off the screen until Plymouth
-  has drawn the same picture, and the virtual terminals 2 to 6 get their text back
-  after the boot, so the keys of WP-8.2 keep working; with `boot=text` all of it is off.
-- Risk: whether the picture survives the moment the graphics driver takes the screen
+- Scope: GRUB in graphics mode, kept for the kernel (`gfxpayload=keep`); GRUB fills the
+  screen with the splash's background colour, written next to `grubenv` by
+  `ironflockos-splash` (black by the build); the kernel's console stays off the screen
+  until Plymouth has drawn, and the virtual terminals 2 to 6 get their text back after
+  the boot, so the keys of WP-8.2 keep working; with `boot=text` all of it is off. The
+  picture from GRUB is WP-8.8.
+- Risk: whether the colour survives the moment the graphics driver takes the screen
   from the firmware's framebuffer depends on the driver. Intel's keeps it; QEMU's
   graphics devices do not show what Intel's does. The last word is the machine's.
-- Acceptance: in QEMU, GRUB's screen and Plymouth's first frame are the same picture,
+- Acceptance: in QEMU, the whole screen in the splash's colour before the kernel
+  starts, then nothing but that colour, empty screens of it or black, and the splash,
   and the keys of WP-8.2 work; on the first machine, a recording of the screen from
-  power-on to the UI shows the firmware's picture, then the splash without a black
-  frame, a text line or a picture that goes and comes back.
+  power-on to the UI shows the firmware's picture, then the colour and the splash
+  without a text line or a picture that goes and comes back.
 - As built (branch `splash`, `docs/build.md` "From the firmware's picture to the
-  splash"): GRUB cannot centre a picture on a screen whose size it learns only at boot,
-  so the picture it draws is the whole screen, taken from the framebuffer Plymouth left
-  at the end of an earlier boot (`ironflockos-splash capture`), with the size as GRUB's
-  graphics mode. GRUB draws it only with `animation=none`: with `fade`, a picture from
-  GRUB that Plymouth then fades in from nothing would be one that goes and comes back;
-  GRUB shows the background colour then. The kernel's console stays off the screen with
-  `fbcon=map:9` until udev in the running system gives it back to the terminals; in the
-  initramfs Esc shows no messages. The QEMU test boots once more with the splash after
-  the screen was taken: GRUB's picture before the kernel, then nothing but the splash;
-  frames without the whole picture in between (QEMU's drivers start with an empty
-  framebuffer) are counted, not failed. What Intel's driver does is WP-8.6's.
+  splash"): GRUB fills its whole screen with the colour (no border, the frames of the
+  QEMU test show) and draws it at once with a `clear`, for the whole of its timeout;
+  its text has a transparent background, so its clear before the boot leaves the
+  colour; the menu (Esc) shows its chosen entry inverted. The kernel's console stays off
+  the screen with `fbcon=map:9` until udev in the running system gives it back to the
+  terminals; in the initramfs Esc shows no messages. The QEMU test boots once more with
+  the device's colour: GRUB's colour before the kernel, then nothing but the colour,
+  empty screens (QEMU's drivers start with an empty framebuffer; QEMU's standard VGA
+  shows one frame of the screen before read with 24 bits a pixel while `bochs` sets
+  its mode, which counts as an empty screen only when its bytes are exactly that
+  screen's) and the splash. What Intel's driver does is WP-8.6's.
+- Decided by Marko on 2026-11-12, after two CI rounds on GRUB's picture: 0.17.0 ships
+  with the colour only; the picture moves to WP-8.8.
+
+### WP-8.8 GRUB draws the splash's picture too (1.5 days, and the machine; after 0.17.0)
+
+- Scope: with `animation=none` GRUB draws the picture on the colour, so that the screen
+  is the whole splash from GRUB on. GRUB cannot centre a picture on a screen whose size
+  it learns only at boot, so the picture is the whole screen, taken from the framebuffer
+  Plymouth left at the end of an earlier boot, with that size as GRUB's graphics mode.
+  With `fade` GRUB keeps the colour only: a picture that Plymouth then fades in from
+  nothing would be one that goes and comes back.
+- What the branch `splash` learned before it was taken out (CI runs 43284925346 and
+  43288466265): `gfxterm` puts its background picture at the screen's corner, not
+  inside its 10-pixel border; it draws a new background only with its next output (a
+  `clear` is one, an empty `echo` is not); `background_color` makes the text's
+  background opaque, and `color_normal` and `color_highlight` with a black background
+  make it transparent again. With these GRUB's frame was Plymouth's, pixel for pixel,
+  but for a crop that moved it by 10 pixels. The capture (`ironflockos-splash capture`
+  at the end of a boot with the splash, an 8-bit RGB PNG of the framebuffer, and
+  `IRONFLOCKOS_SPLASH_MODE` in `splash.env`) is in the history of that branch.
+- Risk: the panel's mode in GRUB and in the kernel's driver may differ (a mode set
+  between them shows black or a step), and whether the picture survives the driver
+  taking the screen.
+- Acceptance: as WP-8.7, with the whole splash from GRUB on, in QEMU and in a recording
+  on the first machine.
 
 ### WP-8.5 The kiosk app (own repository, estimate from its own plan)
 
@@ -260,14 +286,16 @@ The app guarantees:
 | 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | built on `splash`, proof in CI |
 | 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | built on `splash`, proof in CI |
 | 8.5 | The kiosk app | its own | own plan | the contract | open |
-| 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | built on `splash`, proof in CI and on the machine (WP-8.6) |
+| 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | built on `splash` (GRUB's colour only), proof in CI and on the machine (WP-8.6) |
 | 8.6 | Acceptance on the first machine | ironflockos, hardware | 1 | 8.1 to 8.5, 8.7 | open |
+| 8.8 | GRUB draws the splash's picture too | ironflockos, hardware | 1.5 | 8.7, 8.6 | open, after 0.17.0 |
 
 WP-8.5 needs only the contract, so it starts at once and is tested against the image as
 WP-8.1 and WP-8.4 arrive.
 
 Marko decided on 2026-11-12 that WP-8.1, WP-8.2, WP-8.3, WP-8.4 and WP-8.7 go into the
-next IronFlockOS release.
+next IronFlockOS release, 0.17.0, and later the same day that WP-8.7 goes in with GRUB's
+colour only: GRUB's picture is WP-8.8, after the release, proven on the panel.
 
 ## What changes for every device
 
@@ -292,8 +320,8 @@ next IronFlockOS release.
 - Until WP-8.7 the screen is black between the firmware's picture and the splash, for
   GRUB's two seconds and the kernel's first one or two. A background colour other than
   black shows that gap; black hides it. With WP-8.7 GRUB fills it with the background
-  colour, and with `animation=none` also with the picture, from the second boot with a
-  new picture, setting or screen on (the first one takes the screen for GRUB).
+  colour; the picture appears with Plymouth, on the same colour, about two seconds after
+  the kernel started. GRUB's picture is WP-8.8.
 - With the splash the kernel's console is off the screen until the running system's
   udev gives it back: Esc shows no messages in the initramfs, and a boot that fails
   there says why on the serial console only. "Start with messages" in the boot menu,

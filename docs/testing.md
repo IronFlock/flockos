@@ -197,19 +197,23 @@ Sequence:
    a login prompt, and Ctrl+Alt+F1 back to tty1. Enrolled, a SHA-512 hash in
    `/data/ironflockos/console-password` becomes the enrolled user's password
    and no other account's (root stays `*`), `sshd -T` still says no to
-   passwords for that user and root, the user logs in on tty2 with it
-   (`loginctl`), and without the file the password is locked again. The boot
+   passwords for that user and root, the user logs in on tty2 with it (the
+   user's shell on tty2 after PAM's session in the journal), and without the
+   file the password is locked again. The boot
    menu and its "Firmware setup" are checked in the rendered `grub.cfg`
-   (`test/unit/screen.bats`), not in QEMU. *GRUB draws the splash* (WP-8.7):
-   at the end of the boot with the device's picture (`animation=none`)
-   `ironflockos-splash-capture` has taken the screen into
-   `splash-screen.png`, which is what `screendump` shows, pixel for pixel,
-   and `splash.env` names its size and the colour; the next boot shows the
-   whole splash before the kernel starts (by the kernel's uptime at the
-   shell's first answer), and from there to the end the rule above. The
+   (`test/unit/screen.bats`), not in QEMU. *GRUB's colour* (WP-8.7): after
+   the own splash step `splash.env` names its colour, and the next boot
+   shows the whole screen in that colour before the kernel starts (by the
+   kernel's uptime at the shell's first answer, after the firmware's last
+   picture); from there to the end only that colour, empty screens of it or
+   black, and the splash, and the rule above. An empty screen of another
+   colour fails, and so does anything else; the one frame QEMU's standard VGA
+   shows while the kernel's `bochs` driver sets its mode, the screen before
+   read with 24 bits a pixel, counts as an empty one only when its bytes are
+   exactly that screen's. GRUB draws no picture (a later work package). The
    kernel command line keeps the console off the screen
    (`fbcon=map:9`), and after the boot the framebuffer console is bound
-   again. Not tested in QEMU: whether the picture survives the moment a real
+   again. Not tested in QEMU: whether the colour survives the moment a real
    graphics driver (Intel's) takes the screen from the firmware, the frames
    before the root filesystem's system (the initramfs's are not read one by
    one: the check there is that Plymouth started in it), and the shutdown
