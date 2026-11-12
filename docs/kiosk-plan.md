@@ -14,8 +14,8 @@ browser that shows the UI is an app that IronFlock provides, not a part of the i
 | Phase | On the screen | Keys |
 |-------|---------------|------|
 | Firmware | the firmware's own picture | the firmware's setup key, as the PC's maker set it |
-| GRUB, up to 2 s | nothing | Esc: the boot menu, with the slots and "Firmware setup" |
-| Kernel and boot | the splash: IronFlock's logo, or the image the device was given | Esc: the boot messages, and back to the splash |
+| GRUB, up to 2 s | the splash's background colour and picture (WP-8.7; before it, black) | Esc: the boot menu, with the slots and "Firmware setup" |
+| Kernel and boot | the splash: IronFlock's logo, or the picture the device was given, on its background colour, with its animation | Esc: the boot messages, and back to the splash |
 | Running, no kiosk app | the splash stays | Ctrl+Alt+F2 to F6: a login prompt; Ctrl+Alt+F1: back |
 | Running, kiosk app | the UI of the app the kiosk is pointed at | the same keys, and the kiosk's own key to IronFlock Studio |
 | Shutdown and restart | the splash | |
@@ -32,6 +32,7 @@ Decided by Marko on 2026-11-12:
 | D4 | The kiosk app can give the device its splash picture and change it. |
 | D5 | The kiosk app has no content of its own. It shows the UI of another app, and which one is a setting of the kiosk app. |
 | D6 | The kiosk app has a key that opens IronFlock Studio, at its login when nobody is signed in. |
+| D7 | The start is polished from the firmware's picture to the UI: no text, no black in between, and nothing that appears, goes and comes back. The background colour can be set, and the splash can have a small animation. |
 
 Proposed by this plan, to be confirmed with it:
 
@@ -39,7 +40,8 @@ Proposed by this plan, to be confirmed with it:
 |---|----------|-----|
 | P1 | The first virtual terminal belongs to the screen: the splash, then the kiosk. Login prompts are on terminals 2 to 6. | One rule with and without a kiosk app, and no prompt that draws over the logo. |
 | P2 | D4 goes through the image: the app puts a PNG into one folder, and the image checks it and installs it for the next boot. The app never writes to the IRONFLOCKOS partition. | The splash is drawn before Docker runs, from a partition that also holds `grubenv`. A full or damaged partition must not be an app's doing. |
-| P3 | GRUB shows no picture and hides its menu. | Its two seconds are not worth GRUB's image decoders in the boot path. |
+| P3 | GRUB hides its menu and, with WP-8.7, shows the splash's background colour and picture itself. Until WP-8.7 it shows nothing, and the default background is black. | Debian's kernel clears the screen when its console takes it, one to two seconds before Plymouth draws: a picture from GRUB alone would appear, go and come back. On black nothing of that is seen. WP-8.7 keeps the console off the screen, and only then is GRUB's picture a gain. Debian's signed GRUB has the PNG decoder and the graphics terminal built in. |
+| P6 | Animations are built into the theme and chosen by name; a device brings a picture and a colour, not frames. The first two: `none` and `fade` (the picture fades in and stays), `fade` being the default. | One picture and one colour can be checked; a set of frames cannot, and it would have to fit the partition. An animation that ends in a still picture lets the screen app take over without a visible step. |
 | P4 | The kernel's `quiet` comes with the splash, also on the serial console. `boot=text` in `display.conf` turns both off for a device; the installer stick and the QEMU tests stay on text. The level is not lowered further (`loglevel=3`): errors stay on the serial console, and the kept splash is safe from them because its terminal is in graphics mode, which WP-8.1 tests. | The kernel has one log level for all consoles. The journal keeps every line. |
 | P5 | The EFI targets first (`amd64-efi`, `arm64-efi`). The Raspberry Pi and Jetson follow in work packages of their own. | Their boot files and graphics drivers differ. |
 
@@ -75,9 +77,14 @@ The image guarantees:
 - The image takes a PNG of at most 4 MiB and 3840x2160 pixels with the chunks `IHDR`,
   `PLTE`, `tRNS`, `IDAT` and `IEND`. It refuses anything else, says so in the journal,
   and keeps the splash it had.
-- The picture is drawn centred, at its own size in pixels, on black (`#000000`), and
+- `/data/ironflockos/screen/splash.conf`, next to the picture or alone, sets
+  `background=#RRGGBB` (default `#000000`) and `animation=none|fade` (default `fade`).
+  It is taken and checked as the picture is; an unknown key or value is refused and the
+  splash stays as it was.
+- The picture is drawn centred, at its own size in pixels, on the background colour, and
   nothing else is on the screen but a message below it when the image has one to give
   (WP-8.3). It is never made larger; one larger than the screen is made smaller to fit.
+  When the boot ends, the animation has ended in the still picture.
   The default picture is one file, `docs/assets/ironflock-splash.png` (WP-8.1 adds it:
   `ironflock-white.svg` at 320x320 pixels, transparent around the logo). An app that
   wants the hand-over from the splash to be invisible draws that file by the same rule.
@@ -99,8 +106,9 @@ The app guarantees:
 ### WP-8.1 The splash by default on the EFI targets (3 days)
 
 - Scope: Plymouth in `profiles/base/packages` and in the initramfs; a theme
-  `ironflockos` that draws the default picture by the contract's rule, without a
-  spinner, so that an app's first frame can look the same; `quiet splash
+  `ironflockos` that draws the default picture by the contract's rule, with the
+  animations `none` and `fade` and no spinner, so that an app's first frame can look the
+  same as the splash's last; `quiet splash
   plymouth.ignore-serial-consoles vt.global_cursor_default=0` on the kernel command line
   of `grub.cfg` (Plymouth draws nothing while a serial console is named, unless told to
   ignore it); GRUB's menu hidden; no `getty@tty1` while the splash is on; Plymouth quits
@@ -143,9 +151,9 @@ The app guarantees:
 
 - Scope: `ironflockos-data-layout` makes `/data/ironflockos/screen` at every boot,
   before Docker; `ironflockos-splash` with a path unit on `splash.png` in it, which
-  other names in the folder do not start: it checks `splash.png` as the contract says,
-  packs it as the theme's logo into a cpio archive and renames that into place as
-  `splash.cpio` next to `grubenv`; `grub.cfg` loads the
+  other names in the folder do not start: it checks `splash.png` and `splash.conf` as
+  the contract says, packs the picture and the theme's settings into a cpio archive and
+  renames that into place as `splash.cpio` next to `grubenv`; `grub.cfg` loads the
   archive after the slot's `initrd.img` when the file is there, so the picture is in
   place before Plymouth starts and no initramfs is built on a device; the same picture
   for the shutdown splash; removal of the file; the factory reset (ADR-0015) removes the
@@ -155,6 +163,22 @@ The app guarantees:
   refused and the earlier splash stays; an archive of random bytes on the partition
   does not stop the boot, which then shows IronFlock's logo; after a factory reset the
   logo is IronFlock's.
+
+### WP-8.7 No black between the firmware's picture and the splash (3 days, and the machine)
+
+- Scope: GRUB in graphics mode at the panel's resolution, kept for the kernel
+  (`gfxpayload=keep`); GRUB fills the screen with the splash's background colour and
+  draws its picture, both written next to `grubenv` by `ironflockos-splash` (the
+  default ones by the build); the kernel's console stays off the screen until Plymouth
+  has drawn the same picture, and the virtual terminals 2 to 6 get their text back
+  after the boot, so the keys of WP-8.2 keep working; with `boot=text` all of it is off.
+- Risk: whether the picture survives the moment the graphics driver takes the screen
+  from the firmware's framebuffer depends on the driver. Intel's keeps it; QEMU's
+  graphics devices do not show what Intel's does. The last word is the machine's.
+- Acceptance: in QEMU, GRUB's screen and Plymouth's first frame are the same picture,
+  and the keys of WP-8.2 work; on the first machine, a recording of the screen from
+  power-on to the UI shows the firmware's picture, then the splash without a black
+  frame, a text line or a picture that goes and comes back.
 
 ### WP-8.5 The kiosk app (own repository, estimate from its own plan)
 
@@ -184,7 +208,8 @@ The app guarantees:
 | 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | open |
 | 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | open |
 | 8.5 | The kiosk app | its own | own plan | the contract | open |
-| 8.6 | Acceptance on the first machine | ironflockos, hardware | 1 | 8.1 to 8.5 | open |
+| 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | open |
+| 8.6 | Acceptance on the first machine | ironflockos, hardware | 1 | 8.1 to 8.5, 8.7 | open |
 
 WP-8.5 needs only the contract, so it starts at once and is tested against the image as
 WP-8.1 and WP-8.4 arrive.
@@ -206,6 +231,12 @@ WP-8.1 and WP-8.4 arrive.
   picture therefore come with a new installation. A device installed earlier keeps the
   text boot after an update. No device is in the field yet (`docs/build.md`); changing
   `grub.cfg` on installed devices would be a work package of its own.
+- The first picture a person sees is the firmware's, for as long as the firmware takes
+  (nine seconds on the first machine). IronFlockOS cannot change it; the PC's maker sets
+  it, to the same logo or to black.
+- Until WP-8.7 the screen is black between the firmware's picture and the splash, for
+  GRUB's two seconds and the kernel's first one or two. A background colour other than
+  black shows that gap; black hides it.
 - Without a kiosk app, the first virtual terminal does not get the logo back after a
   visit to another terminal: nothing is left that draws it. A screen app draws again.
 - The first boot of a device shows IronFlock's logo. Its own picture comes with the
@@ -219,4 +250,5 @@ WP-8.1 and WP-8.4 arrive.
 - The splash on the Raspberry Pi and on Jetson (P5).
 - A setting in Studio for the splash picture or the kiosk's target; both are settings of
   the kiosk app at first.
-- A display server in the image, and a GRUB that shows a picture.
+- A display server in the image.
+- Animations a device brings as frames of its own (P6).
