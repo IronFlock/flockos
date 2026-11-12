@@ -460,6 +460,27 @@ class ScreenWatch:
         if frames[-1][2] < 0.97:
             raise TestFailure(f"the picture is not whole at the end (alpha {frames[-1][2]:.2f}):\n{self.timeline(t0)}")
 
+    def check_grub(self, t0, t_kernel):
+        """WP-8.7: after the firmware's last picture, and before the kernel
+        started, the whole splash is on the screen (GRUB drew it), and from
+        there to the end nothing but the splash. Frames without the whole
+        picture in between (black: the graphics driver taking the screen
+        from the firmware's framebuffer, before Plymouth draws again) are
+        counted, not failed: QEMU's drivers are not the machine's. Returns
+        their number."""
+        frames = [f for f in self.frames if f[1] is not None]
+        firmware = max((i for i, f in enumerate(frames) if not f[1] and f[0] < t_kernel), default=-1)
+        first = next((i for i in range(firmware + 1, len(frames))
+                      if frames[i][1] and frames[i][2] >= 0.97 and frames[i][0] < t_kernel), None)
+        if first is None:
+            raise TestFailure(f"GRUB did not draw the splash before the kernel started ({t_kernel - t0:.1f}s):\n"
+                              f"{self.timeline(t0)}")
+        if not all(f[1] for f in frames[first:]):
+            raise TestFailure(f"something besides the splash after GRUB drew it:\n{self.timeline(t0)}")
+        if frames[-1][2] < 0.97:
+            raise TestFailure(f"the picture is not whole at the end:\n{self.timeline(t0)}")
+        return sum(1 for f in frames[first:] if f[2] < 0.97)
+
 
 TEST_OWNER = "ironflockostest"
 TEST_FLOCK_NAME = "ironflockos-ci"
@@ -1202,16 +1223,18 @@ class Runner:
         or on text."""
         self.vm.run(f"grub-editenv {self.GRUBENV} set 'IRONFLOCKOS_CMDLINE={debug_cmdline(self.vm.arch, splash)}'")
 
-    def splash_boot(self, expect, name):
+    def splash_boot(self, expect, name, grub=False):
         """Restart with the splash; the screen is watched from the restart to
         the end of the boot and must be the splash (expect) from before the
         root filesystem on, faded in and never back; Plymouth ran from the
-        initramfs and is gone at the end."""
+        initramfs and is gone at the end. grub: GRUB draws the splash
+        (WP-8.7), checked by ScreenWatch.check_grub instead."""
         watch = ScreenWatch(self.vm.screen_qmp(), expect, self.vm.workdir, name)
         t0 = time.time()
         try:
             self.vm.reboot(self.boot_timeout, quiet=True)
             t_shell = time.time()
+            t_kernel = t_shell - float(self.vm.run("cut -d' ' -f1 /proc/uptime").strip())
             early = self.vm.run("pid=$(cat /run/plymouth/pid 2>/dev/null) && echo plymouthd=$(cut -d' ' -f22 /proc/$pid/stat) "
                                 "hz=$(getconf CLK_TCK); journalctl -b -o short-monotonic --no-pager _PID=1 | "
                                 "sed -n '1s/^\\[ *\\([0-9]*\\)\\.\\([0-9]*\\)\\].*/systemd=\\1.\\2/p'", check=False)
@@ -1220,8 +1243,12 @@ class Runner:
             time.sleep(5)
         finally:
             watch.stop()
-        log(f"the screen from the restart ({name}):\n{watch.timeline(t0)}")
-        watch.check(t0, t_shell)
+        log(f"the screen from the restart ({name}; the kernel started at {t_kernel - t0:.1f}s):\n{watch.timeline(t0)}")
+        if grub:
+            gaps = watch.check_grub(t0, t_kernel)
+            log(f"frames without the whole picture after GRUB drew it: {gaps} (the graphics driver's hand-over in QEMU)")
+        else:
+            watch.check(t0, t_shell)
         got = dict(word.split("=", 1) for word in early.split() if "=" in word)
         try:
             started = int(got["plymouthd"]) / int(got["hz"])
@@ -1232,10 +1259,14 @@ class Runner:
             raise TestFailure(f"Plymouth started at {started:.2f}s, not in the initramfs (systemd at {systemd:.2f}s)")
         cmdline = self.vm.run("cat /proc/cmdline").split()
         for want in ("quiet", "splash", "plymouth.ignore-serial-consoles", "plymouth.force-frame-buffer-on-boot",
-                     "vt.global_cursor_default=0"):
+                     "vt.global_cursor_default=0", "fbcon=map:9"):
             if want not in cmdline:
                 raise TestFailure(f"{want} is not on the kernel command line: {' '.join(cmdline)}")
         self.vm.run("! pidof plymouthd")
+        # The terminals have their console back (ironflockos-consoles): the
+        # framebuffer console is bound.
+        self.vm.run("for v in /sys/class/vtconsole/vtcon*; do grep -q 'frame buffer' \"$v/name\" && "
+                    "[ \"$(cat \"$v/bind\")\" = 1 ] && exit 0; done; exit 1")
 
     def splash(self):
         """WP-8.1 (docs/kiosk-plan.md): the splash by default. The initramfs
@@ -1348,7 +1379,31 @@ class Runner:
         if self.vm.run(f"cksum < {self.ARCHIVE}").strip() != good:
             raise TestFailure("the boot did not keep splash.cpio as it was")
         self.splash_archive = good
-        # The steps after this one read the boot on the serial console.
+        # WP-8.7: with animation=none the screen at the end of this boot,
+        # which started with the archive, becomes the picture GRUB draws; it
+        # is what the screen shows, pixel for pixel.
+        boot = "/boot/efi/EFI/BOOT"
+        self.wait_for(f"test -s {boot}/splash-screen.png && grub-editenv {boot}/splash.env list | "
+                      "grep -q '^IRONFLOCKOS_SPLASH_MODE='", 120, "ironflockos-splash-capture to take the screen")
+        self.vm.run(f"grub-editenv {boot}/splash.env list | grep -qx 'IRONFLOCKOS_SPLASH_BACKGROUND=#204060'")
+        taken = base64.b64decode(self.vm.run(f"base64 -w0 {boot}/splash-screen.png").strip())
+        width, height, rgba = png_decode(taken)
+        screen = self.vm.screen_qmp().screen(os.path.join(self.vm.workdir, "screendump.ppm"))
+        rgb = bytes(b for i, b in enumerate(rgba) if i % 4 != 3)
+        if (width, height) != screen[:2] or rgb != screen[2]:
+            save_screen((width, height, rgb), os.path.join(self.vm.workdir, "screen-own-taken.png"))
+            raise TestFailure(f"the picture taken for GRUB ({width}x{height}) is not what the screen shows "
+                              f"({screen[0]}x{screen[1]})")
+
+    def grub_splash(self):
+        """WP-8.7: the boot after the screen was taken. GRUB draws the
+        splash before the kernel starts, the kernel keeps its framebuffer and
+        its console off the screen, and Plymouth draws the same picture; from
+        GRUB's picture to the end of the boot the screen is the splash and
+        nothing else, and the terminals have their console back. Then the
+        steps after this one boot on text again: they read the serial
+        console."""
+        self.splash_boot(Splash(test_picture(), (0x20, 0x40, 0x60)), "grub", grub=True)
         self.set_boot_cmdline(splash=False)
 
     def keys(self, *names):
@@ -2417,7 +2472,7 @@ class Runner:
         self.vm.run("test ! -e /apps/prod/ironflockos-reset-test && test ! -e /data/ironflockos-test-marker")
         # The device's own splash went with the old owner's data: IronFlock's
         # logo from the restart on, and an empty screen folder.
-        self.vm.run(f"test ! -e {self.ARCHIVE} && test -d /data/ironflockos/screen"
+        self.vm.run(f"test ! -e {self.ARCHIVE} && test ! -e /boot/efi/EFI/BOOT/splash-screen.png && test -d /data/ironflockos/screen"
                     " && test -z \"$(ls -A /data/ironflockos/screen)\"")
         boots = self.vm.run("journalctl --list-boots --no-pager | grep -cE '^ *-?[0-9]+ '").strip()
         if boots != "1":
@@ -2735,6 +2790,8 @@ def main():
                     runner.own_splash)
         runner.step("keys and messages: Esc for the boot messages, a message below the picture, Ctrl+Alt+F2 and back"
                     + (", the console password on tty2" if flock else ""), runner.usual_keys)
+        runner.step("GRUB draws the splash: from GRUB's picture to the end of the boot nothing but the splash",
+                    runner.grub_splash)
         if args.only != "boot":
             runner.step("update into slot B; ironflock os refuses while RAUC installs and while the update waits",
                         runner.update_to_b)
