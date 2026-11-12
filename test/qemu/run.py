@@ -1570,6 +1570,25 @@ class Runner:
         self.keys("ctrl", "alt", "f1")
         self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty1 ]", 30, "Ctrl+Alt+F1 to lead back to tty1")
 
+    def login_diagnostics(self):
+        """What a login on tty2 that did not come needs in CI's log: the
+        screen, the processes on tty2, the sessions, the journal of agetty,
+        login, PAM and logind, /run/nologin, and the account's state (not
+        its hash)."""
+        try:
+            save_screen(self.vm.screen_qmp().screen(os.path.join(self.vm.workdir, "screendump.ppm")),
+                        os.path.join(self.vm.workdir, "screen-keys-login.png"))
+        except (TestFailure, OSError):
+            pass
+        return self.vm.run(
+            "echo '== ps -t tty2'; ps -t tty2 -o pid,stat,lstart,args; echo '== who'; who; "
+            "echo '== loginctl'; loginctl list-sessions --no-legend; "
+            f"echo '== account'; getent passwd {TEST_OWNER}; passwd -S {TEST_OWNER}; "
+            f"getent shadow {TEST_OWNER} | cut -d: -f3-; ls -l /run/nologin /etc/nologin 2>&1; "
+            "echo '== journal'; journalctl -b --no-pager -o short-monotonic -t login -t agetty "
+            "-u autovt@tty2.service -u getty@tty2.service -u systemd-logind.service | tail -n 60",
+            check=False)
+
     def console_password(self):
         password = "ironflock" + uuid.uuid4().hex[:6]
         hashed = subprocess.run(["openssl", "passwd", "-6", password], check=True, capture_output=True,
@@ -1589,12 +1608,19 @@ class Runner:
             for want in ("passwordauthentication no", "kbdinteractiveauthentication no"):
                 if want not in conf.splitlines():
                     raise TestFailure(f"sshd does not say {want!r} for {user}")
-        # A person at the screen logs in on tty2.
+        # A person at the screen logs in on tty2: the name, which agetty
+        # hands to login, which asks for the password; then the session.
+        # Each stage is waited for on its own, so that a failure says which
+        # one did not come.
         self.type_line(TEST_OWNER)
-        time.sleep(2)
-        self.type_line(password)
-        self.wait_for(f"loginctl list-sessions --no-legend | grep -E ' {TEST_OWNER} .*tty2'", 60,
-                      f"{TEST_OWNER} to log in on tty2 with the console password")
+        try:
+            self.wait_for(f"pgrep -t tty2 -x login >/dev/null", 30, f"login to take {TEST_OWNER} on tty2")
+            time.sleep(1)
+            self.type_line(password)
+            self.wait_for(f"loginctl list-sessions --no-legend | grep -E ' {TEST_OWNER} .*tty2'", 60,
+                          f"{TEST_OWNER} to log in on tty2 with the console password")
+        except TestFailure as e:
+            raise TestFailure(f"{e}\n{self.login_diagnostics()}") from None
         self.vm.run(f"loginctl terminate-user {TEST_OWNER}")
         self.vm.run("rm /data/ironflockos/console-password")
         self.wait_for(locked, 60, "the password to be locked again")
