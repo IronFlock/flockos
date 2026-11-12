@@ -19,31 +19,44 @@ Sequence (WP-1.3, WP-1.4, WP-1.7): first boot (boot chain and Secure Boot
 state, partitions grown, /data layout, identity, SSH policy, RAUC slot A good,
 Docker, fwupd, enrolled through `ironflock enroll`); ironflock in the image
 (WP-5.1 of the CLI's plan: /usr/bin/ironflock, `ironflock status`, its refusals, a .flock that
-is not accepted); enrolled, the device changes hands with `sudo ironflock
+is not accepted); `ironflock os` on the device as written (WP-5.2, WP-5.3:
+`os rollback` refuses, `os update` refuses a catalog of the test's own, which
+IronFlock did not sign); enrolled, the device changes hands with `sudo ironflock
 agent configure -c` run by its owner over SSH, and back; for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
 (state persists, a proxy.conf and a static network profile on the IRONFLOCKOS
-partition are taken); update into slot B with the bundle of the same build;
+partition are taken); update into slot B with the bundle of the same build
+(while RAUC installs, `os update` and `os rollback` refuse; installed, `os
+rollback` refuses the update that waits for its restart);
+under KVM, `ironflock os rollback` back to slot A and forward to slot B;
 factory reset (ADR-0015): the device in slot B, with a running container,
 resets, keeps its network settings and RAUC's state, enrolls with a new
 .flock, and slot A is cleared too;
-fallback: an update into slot A that is never marked good falls back to B;
+fallback: an update into slot A that is never marked good falls back to B,
+and `os rollback` refuses that slot;
 a kernel crash without a connection: the device restarts by itself on a slot
 that has proven itself, and the crash is on record on /data.
 
+What ironflock reads and prints along the way (RAUC's status, grubenv, the
+`ironflock os` commands as text and JSON) is kept in <work>/captured/, for
+the CLI's fixtures.
+
 Needs: qemu-system-<arch>, OVMF/AAVMF firmware (for --secure-boot the
 builds with Microsoft's keys: Debian's and Ubuntu's ovmf, qemu-efi-aarch64),
-mtools (mcopy). Standard library only; run with `python3 -I`.
+mtools (mcopy), OpenSSL 3 (Ed25519 keys and signatures). Standard library
+only; run with `python3 -I`.
 """
 
 import argparse
 import base64
 import gzip
+import hashlib
 import http.server
 import json
 import os
 import re
 import select
+import shlex
 import shutil
 import socket
 import subprocess
@@ -418,18 +431,191 @@ class VM:
 
 
 def serve(directory):
-    handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=directory, **k)  # noqa: E731
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    server.RequestHandlerClass.log_message = lambda *a: None
+    """An HTTP server for directory on a free port of the host, which the VM
+    reaches as 10.0.2.2. Each request is logged on stderr, and its path is
+    kept in the server's `requests`, in order."""
+    requests = []
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **k):
+            super().__init__(*a, directory=directory, **k)
+
+        def send_head(self):
+            requests.append(self.path)
+            return super().send_head()
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.requests = requests
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1]
+
+
+def link_or_copy(src, dst):
+    """dst as a hard link of src where both are on one file system, else a copy."""
+    if os.stat(src).st_dev == os.stat(os.path.dirname(dst)).st_dev:
+        os.link(src, dst)
+    else:
+        shutil.copy(src, dst)
+
+
+# --- a catalog of the test's own (WP-5.2 of the CLI's plan) ------------------
+#
+# `ironflock os update` installs what the signed catalog
+# <download base>/ironflockos/manifest.json names (docs/manifest.schema.json,
+# ADR-0009). The ironflock in the image trusts IronFlock's catalog key alone,
+# which only a release run may use. The test serves a catalog of its own from
+# the host: a valid one that names a release above this build, with this
+# build's bundle, signed with a key made for this run. The ironflock of a
+# release refuses it; one that trusts the run's key would install from it
+# (docs/testing.md, "What os update needs").
+
+CATALOG_CONTEXT = "ironflockos-manifest:v1"
+CATALOG_PATH = "ironflockos/manifest.json"
+# An Ed25519 public key in DER (SubjectPublicKeyInfo) before its 32 raw bytes.
+ED25519_SPKI = bytes.fromhex("302a300506032b6570032100")
+
+
+def next_version(version):
+    """A release above version: the next patch release, or the release of a
+    pre-release."""
+    m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?", version)
+    if not m:
+        raise TestFailure(f"VERSION {version!r} is not a release version")
+    major, minor, patch = (int(x) for x in m.groups()[:3])
+    return f"{major}.{minor}.{patch}" if m.group(4) else f"{major}.{minor}.{patch + 1}"
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(16 * 1024 * 1024), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def sign_catalog(payload, keydir):
+    """The envelope of payload as a release publishes the catalog,
+    {"payload": <base64>, "signature": <base64 Ed25519 signature>}, signed over
+    the three lines "ironflockos-manifest:v1", "ironflockos/manifest.json" and
+    the payload's SHA-256 (docs/manifest.schema.json), with a key made here.
+    The key stays in keydir, which is neither served nor uploaded. Returns the
+    envelope, the key's id as ironflock names keys (the first 8 hex digits of
+    the SHA-256 of the raw key) and the raw public key in base64."""
+    os.makedirs(keydir, mode=0o700, exist_ok=True)
+    key, pub = os.path.join(keydir, "catalog.key"), os.path.join(keydir, "catalog.pub")
+    message, sig = os.path.join(keydir, "message"), os.path.join(keydir, "signature")
+    openssl = lambda *args: subprocess.run(["openssl", *args], check=True, capture_output=True).stdout  # noqa: E731
+    openssl("genpkey", "-algorithm", "ed25519", "-out", key)
+    openssl("pkey", "-in", key, "-pubout", "-out", pub)
+    der = openssl("pkey", "-in", key, "-pubout", "-outform", "DER")
+    if len(der) != len(ED25519_SPKI) + 32 or not der.startswith(ED25519_SPKI):
+        raise TestFailure("openssl made no Ed25519 key for the test catalog")
+    with open(message, "wb") as fh:
+        fh.write(f"{CATALOG_CONTEXT}\n{CATALOG_PATH}\n{hashlib.sha256(payload).hexdigest()}".encode())
+    openssl("pkeyutl", "-sign", "-inkey", key, "-rawin", "-in", message, "-out", sig)
+    # The signature verifies with the run's key: a refusal of the catalog is
+    # the key's, not a fault of the envelope.
+    openssl("pkeyutl", "-verify", "-pubin", "-inkey", pub, "-rawin", "-in", message, "-sigfile", sig)
+    with open(sig, "rb") as fh:
+        signature = fh.read()
+    if len(signature) != 64:
+        raise TestFailure(f"the test catalog's signature has {len(signature)} bytes, not 64")
+    envelope = json.dumps({"payload": base64.b64encode(payload).decode(),
+                           "signature": base64.b64encode(signature).decode()}, indent=2).encode() + b"\n"
+    if len(envelope) > 64 * 1024:
+        raise TestFailure(f"the test catalog has {len(envelope)} bytes; ironflock reads at most 64 KiB")
+    raw = der[len(ED25519_SPKI):]
+    return envelope, hashlib.sha256(raw).hexdigest()[:8], base64.b64encode(raw).decode()
+
+
+def put_test_catalog(serve_dir, workdir, image_id, version, artefacts, image):
+    """The test catalog below serve_dir as a download base serves it:
+    ironflockos/manifest.json, and the bundle at
+    ironflockos/<release>/<image id>-<release>.raucb, a link of this build's.
+    The catalog names one release, above VERSION, in both channels, with this
+    build's image and bundle (their sizes and SHA-256) for image_id; image
+    has the image's target, variant, kernel and architecture. Returns the
+    release it names."""
+    release = next_version(version)
+    name = f"{image_id}-{version}"
+    osr_file = os.path.join(artefacts, f"{name}.os-release")
+    build_id = load_conf(osr_file).get("BUILD_ID", "") if os.path.exists(osr_file) else ""
+    # A build of a tree with changes has "-dirty" on its BUILD_ID, which the
+    # catalog's build_id does not take.
+    build_id_pattern = r"(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-g[0-9a-f]{7,40}"
+    build_id = build_id.removesuffix("-dirty")
+    if not re.fullmatch(build_id_pattern, build_id):
+        build_id = "19700101T000000Z-g0000000"
+    m = re.fullmatch(build_id_pattern, build_id)
+    url = f"https://ironflockos-ci.invalid/dl/ironflockos/{release}/{image_id}-{release}"
+    img_gz, bundle = os.path.join(artefacts, f"{name}.img.gz"), os.path.join(artefacts, f"{name}.raucb")
+    disk = {"url": f"{url}.img.gz", "sha256": file_sha256(img_gz), "size": os.path.getsize(img_gz)}
+    sizes = os.path.join(artefacts, f"{name}.sizes")
+    if os.path.exists(sizes):
+        s = load_conf(sizes)
+        disk["raw_size"], disk["min_disk_size"] = int(s["raw_size"]), int(s["min_disk_size"])
+    min_agent = load_conf(os.path.join(REPO, "build", "release.conf")).get("CATALOG_MIN_AGENT", "1.6.3")
+    payload = {
+        "schema": 1,
+        "issued_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "channels": {"production": release, "test": release},
+        "releases": {release: {
+            "build_id": build_id,
+            "buildtime": "{}-{}-{}T{}:{}:{}Z".format(*m.groups()),
+            "min_agent": min_agent,
+            "images": {image_id: dict(image, image=disk, bundle={
+                "url": f"{url}.raucb", "sha256": file_sha256(bundle), "size": os.path.getsize(bundle),
+                "compatible": image_id})},
+        }},
+        "boards": [],
+    }
+    data = json.dumps(payload, indent=2).encode() + b"\n"
+    envelope, key_id, public = sign_catalog(data, os.path.join(workdir, "catalog-key"))
+    folder = os.path.join(serve_dir, "ironflockos")
+    os.makedirs(os.path.join(folder, release), exist_ok=True)
+    with open(os.path.join(folder, "manifest.json"), "wb") as fh:
+        fh.write(envelope)
+    link_or_copy(bundle, os.path.join(folder, release, f"{image_id}-{release}.raucb"))
+    log(f"test catalog: IronFlockOS {release} with this build's bundle, signed with the run's key {key_id} ({public})")
+    return release
+
+
+# --- what ironflock reads and runs on the device (cli/ironflockos) -----------
+
+RAUC_STATUS = ["rauc", "status", "--detailed", "--output-format=json"]
+GRUBENV = "/boot/efi/EFI/BOOT/grubenv"
+CACHE = "/var/cache/ironflockos"
+TEST_BUNDLE = f"{CACHE}/test.raucb"
+# RAUC's own word on whether it installs (its D-Bus property Operation).
+RAUC_OPERATION = "busctl get-property de.pengutronix.rauc / de.pengutronix.rauc.Installer Operation"
+# Where a command that restarts the device leaves what it printed: /data
+# outlives the restart.
+REBOOT_OUT = "/data/ironflockos-ci"
+# What `ironflock os update` and `os rollback` say while RAUC installs
+# (docs/cli.md of IronFlock/ironflock-cli).
+RAUC_BUSY = "RAUC is installing an update right now"
+
+
+def grub_next(env):
+    """The slot GRUB starts next with this grubenv (targets/*/grub/grub.cfg):
+    the first of ORDER that is OK and not tried; when every slot was tried,
+    the first that is OK; else A."""
+    order = [s for s in env.get("ORDER", "A B").split() if s in ("A", "B")]
+    for s in order:
+        if env.get(f"{s}_OK", "0") == "1" and env.get(f"{s}_TRY", "0") == "0":
+            return s
+    for s in order:
+        if env.get(f"{s}_OK", "0") == "1":
+            return s
+    return "A"
 
 
 # --- the tests ---------------------------------------------------------------
 
 
 class Runner:
-    def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout, disk_dev="/dev/vda", flock=None):
+    def __init__(self, vm, conf, image_id, http_port, docker_tar, boot_timeout, disk_dev="/dev/vda", flock=None,
+                 requests=None, captured=None):
         self.vm, self.conf, self.image_id = vm, conf, image_id
         self.secure_boot = vm.secure_boot
         self.disk_dev = disk_dev
@@ -438,6 +624,11 @@ class Runner:
         self.docker_tar = docker_tar
         self.boot_timeout = boot_timeout
         self.results = []
+        # The paths the VM asked the host's HTTP server for (serve), and where
+        # what ironflock reads and prints is kept (keep).
+        self.requests = requests if requests is not None else []
+        self.captured = captured
+        self.kept = 0
 
     def step(self, name, fn):
         log(f"--- {name}")
@@ -1002,17 +1193,29 @@ class Runner:
         self.vm.run("journalctl -b --no-pager -o cat -u ironflockos-network-profiles-trial"
                     " | grep -q 'the profiles from the IRONFLOCKOS partition stay'")
 
+    def fetch_bundle(self):
+        self.vm.run(f"curl -fsS -o {TEST_BUNDLE} {self.http}/bundle.raucb", timeout=600)
+
     def install_bundle(self):
-        self.vm.run(f"curl -fsS -o /var/cache/ironflockos/test.raucb {self.http}/bundle.raucb", timeout=600)
-        out = self.vm.run("rauc install /var/cache/ironflockos/test.raucb", timeout=900)
-        self.vm.run("rm -f /var/cache/ironflockos/test.raucb")
+        self.fetch_bundle()
+        out = self.vm.run(f"rauc install {TEST_BUNDLE}", timeout=900)
+        self.vm.run(f"rm -f {TEST_BUNDLE}")
         return out
 
     def update_to_b(self):
-        self.install_bundle()
+        """The update into slot B, as before, with `ironflock os` around it
+        (WP-5.2, WP-5.3 of the CLI's plan): while RAUC writes slot B, `os
+        rollback` and `os update` refuse (exit code 3) and say that RAUC
+        installs; once it is installed and waits for the restart, `os rollback`
+        refuses that too and changes nothing."""
+        self.os_while_installing()
         primary = self.rauc_status().get("boot_primary")
         if primary != "rootfs.1":
             raise TestFailure(f"after the install the primary slot is {primary}, expected rootfs.1")
+        self.snapshot("pending")
+        upcoming = self.rollback_refused("pending", "chosen to start with the next restart")
+        if upcoming != "B":
+            raise TestFailure(f"with the update installed, GRUB would start slot {upcoming}, not B")
         self.vm.reboot(self.boot_timeout)
         self.wait_running()
         if self.booted() != "B":
@@ -1029,6 +1232,340 @@ class Runner:
             raise TestFailure("the SSH host key changed with the update")
         self.mark_good("B", "rootfs.1")
         self.wait_for("test -e /var/lib/ironflockos/slot-proven", 60, "slot B to remember it was marked good")
+        self.snapshot("updated")
+
+    # --- ironflock os: update and rollback (WP-5.2, WP-5.3 of the CLI's plan) --
+    #
+    # The captures (keep) are what the CLI's fixtures can take over
+    # (cli/ironflockos/testdata/<state>/ in IronFlock/ironflock-cli): one file
+    # per command, <NN>-<state>--<name>.json with the command line as the
+    # fixtures key it (its words joined by spaces), its exit code, stdout and
+    # stderr; and the files ironflock reads, as they are.
+
+    def keep(self, state, name, data):
+        """Keeps data as captured/<NN>-<state>--<name>."""
+        if not self.captured:
+            return
+        os.makedirs(self.captured, exist_ok=True)
+        self.kept += 1
+        with open(os.path.join(self.captured, f"{self.kept:02d}-{state}--{name}"), "wb") as fh:
+            fh.write(data if isinstance(data, bytes) else data.encode())
+
+    @staticmethod
+    def capture_snippet(argv, prefix):
+        """The shell line that runs argv without a terminal and leaves its
+        stdout, stderr and exit code in prefix.1, prefix.2 and prefix.rc."""
+        line = " ".join(shlex.quote(a) for a in argv)
+        return f"{line} >{prefix}.1 2>{prefix}.2 </dev/null; echo $? >{prefix}.rc"
+
+    def collect(self, state, name, argv, prefix):
+        """What capture_snippet left at prefix: kept, and returned as (exit code,
+        stdout, stderr); the exit code is None when none was written."""
+        lines = self.vm.run(f"cat {prefix}.rc 2>/dev/null || echo none; base64 -w0 {prefix}.1 2>/dev/null; echo; "
+                            f"base64 -w0 {prefix}.2 2>/dev/null; echo").splitlines()
+        if len(lines) < 3 or not (lines[-3].strip().isdigit() or lines[-3].strip() == "none"):
+            raise TestFailure(f"no exit code and output of `{' '.join(argv)}` in {prefix}.*:\n{lines}")
+        rc = int(lines[-3]) if lines[-3].strip().isdigit() else None
+        out, err = (base64.b64decode(x.strip()).decode("utf-8", "replace") for x in lines[-2:])
+        self.keep(state, f"{name}.json", json.dumps({"command": " ".join(argv), "exit": rc, "stdout": out,
+                                                     "stderr": err}, indent=2) + "\n")
+        return rc, out, err
+
+    def capture(self, state, name, argv, timeout=120):
+        """Runs argv in the VM as root, without a terminal and with an empty
+        stdin, keeps what it printed and returns (exit code, stdout, stderr)."""
+        prefix = "/run/ironflockos-ci-capture"
+        self.vm.run(self.capture_snippet(argv, prefix), timeout=timeout)
+        try:
+            return self.collect(state, name, argv, prefix)
+        finally:
+            self.vm.run(f"rm -f {prefix}.*")
+
+    def capture_file(self, state, name, path):
+        data = base64.b64decode(self.vm.run(f"base64 -w0 {path}").strip())
+        self.keep(state, name, data)
+        return data
+
+    def json_result(self, stdout, what):
+        """The result of a command run with --json: the JSON object on the last
+        line of stdout. Other lines there are not the contract's (docs/cli.md:
+        stdout carries the result and nothing else); they are logged, not
+        judged."""
+        lines = [line for line in stdout.splitlines() if line.strip()]
+        if not lines:
+            raise TestFailure(f"`{what}` wrote no result on stdout")
+        if len(lines) > 1:
+            log(f"note: stdout of `{what}` carries more than its JSON result: {lines[:-1]}")
+        try:
+            result = json.loads(lines[-1])
+        except ValueError:
+            result = None
+        if not isinstance(result, dict):
+            raise TestFailure(f"the last line on stdout of `{what}` is no JSON object: {lines[-1]!r}")
+        return result
+
+    def failure(self, argv, rc, out, err, kind):
+        """The message of a command that failed: stderr's, or with --json the
+        error object's on stdout, which must be of this kind."""
+        if "--json" not in argv:
+            return err
+        error = self.json_result(out, " ".join(argv)).get("error")
+        if not isinstance(error, dict) or error.get("kind") != kind:
+            raise TestFailure(f"`{' '.join(argv)}` ended with {rc} without an error of the kind {kind}:\n{out}{err}")
+        return str(error.get("message"))
+
+    def grubenv(self):
+        out = self.vm.run(f"grub-editenv {GRUBENV} list")
+        return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+    def slots_state(self):
+        """What a refused `ironflock os` command must leave as it was: GRUB's
+        environment and RAUC's view of the slots."""
+        return self.grubenv(), json.loads(self.vm.run(" ".join(RAUC_STATUS) + " 2>/dev/null"))
+
+    def snapshot(self, state):
+        """What ironflock reads of the slots in this state, kept: RAUC's status
+        as ironflock asks for it, grubenv, and on slot B the image's version in
+        slot A, read with debugfs as ironflock reads it; then `ironflock status
+        --json`, whose result it returns."""
+        rc, out, err = self.capture(state, "rauc-status", RAUC_STATUS)
+        if rc != 0:
+            raise TestFailure(f"`{' '.join(RAUC_STATUS)}` ended with {rc}:\n{err}")
+        self.capture_file(state, "grubenv", GRUBENV)
+        if json.loads(out).get("booted") == "B":
+            self.capture(state, "debugfs-rootfs-a-os-release",
+                         ["debugfs", "-c", "-R", "cat /usr/lib/os-release", "/dev/disk/by-partlabel/rootfs-a"])
+        argv = ["ironflock", "status", "--json"]
+        _, out, _ = self.capture(state, "ironflock-status-json", argv)
+        return self.json_result(out, " ".join(argv))
+
+    def image_version(self):
+        osr = self.vm.run("cat /etc/os-release").splitlines()
+        return next((line.split("=", 1)[1].strip('"') for line in osr if line.startswith("IMAGE_VERSION=")), None)
+
+    def rollback_refused(self, state, reason):
+        """`ironflock os rollback --yes` refuses in this state, as text and with
+        --json: exit code 3 and the reason docs/cli.md gives. It changes
+        nothing: GRUB's environment and RAUC's slots are as they were, so the
+        device starts what it would have started. Returns that slot."""
+        before = self.slots_state()
+        for name, argv in (("ironflock-os-rollback", ["ironflock", "os", "rollback", "--yes"]),
+                           ("ironflock-os-rollback-json", ["ironflock", "os", "rollback", "--yes", "--json"])):
+            rc, out, err = self.capture(state, name, argv)
+            if rc != 3 or reason not in self.failure(argv, rc, out, err, "precondition"):
+                raise TestFailure(f"`{' '.join(argv)}` ended with {rc}, expected 3 and {reason!r}:\n{out}{err}")
+        after = self.slots_state()
+        if after != before:
+            raise TestFailure(f"a refused os rollback changed the slots:\nbefore: {before}\nafter: {after}")
+        return grub_next(after[0])
+
+    def update_refused(self, state):
+        """`ironflock os update --yes --download-base <the test host>` reads the
+        test catalog (put_test_catalog), which names a release above this
+        build with this build's bundle and is signed with the run's key. The
+        image's ironflock trusts IronFlock's catalog key alone and refuses it,
+        as text and with --json: exit code 1, the catalog refused for its
+        signature. It refuses before anything is downloaded: the host was asked
+        for the catalog and nothing else, /var/cache/ironflockos keeps no bundle
+        and no copy of the catalog, and the slots are as they were."""
+        before = self.slots_state()
+        asked = len(self.requests)
+        for name, argv in (("ironflock-os-update", ["ironflock", "os", "update", "--yes", "--download-base", self.http]),
+                           ("ironflock-os-update-json",
+                            ["ironflock", "os", "update", "--yes", "--json", "--download-base", self.http])):
+            rc, out, err = self.capture(state, name, argv)
+            message = self.failure(argv, rc, out, err, "failed")
+            if rc != 1 or "is refused" not in message or "does not verify" not in message:
+                raise TestFailure(f"`{' '.join(argv)}` ended with {rc}, expected 1 and the catalog refused for its "
+                                  f"signature:\n{out}{err}")
+        got = self.requests[asked:]
+        if got != ["/" + CATALOG_PATH] * 2:
+            raise TestFailure(f"os update asked the test host for {got}, expected the catalog once per run and nothing else")
+        self.vm.run(f"test -z \"$(find {CACHE} \\( -name '*.raucb*' -o -name manifest.json \\) -print 2>/dev/null)\"")
+        after = self.slots_state()
+        if after != before:
+            raise TestFailure(f"a refused os update changed the slots:\nbefore: {before}\nafter: {after}")
+
+    def os_fresh(self):
+        """`ironflock os` on the device as it was written: slot A runs and is
+        good, slot B holds nothing. `os rollback` refuses, as there is nothing to
+        go back to, and the device keeps starting slot A; `os update` refuses
+        the test's catalog (update_refused). What ironflock reads of the
+        device is kept, with RAUC's system.conf and os-release."""
+        status = self.snapshot("fresh")
+        self.capture_file("fresh", "system.conf", "/etc/rauc/system.conf")
+        self.capture_file("fresh", "os-release", "/etc/os-release")
+        if (status.get("os") or {}).get("booted_slot") != "A":
+            raise TestFailure(f"ironflock status: the device as written does not run from slot A:\n{status}")
+        upcoming = self.rollback_refused("fresh", "slot B holds no system yet")
+        if upcoming != "A":
+            raise TestFailure(f"after the refused rollback GRUB would start slot {upcoming}, not A")
+        self.update_refused("fresh")
+
+    def os_while_installing(self):
+        """The update's bundle, installed by `rauc install` in the background.
+        As soon as RAUC reports that it installs (Operation on D-Bus), the
+        checks run back to back in the VM: `rauc status` as ironflock asks it,
+        `ironflock os rollback --yes` and `ironflock os update --yes` (each also
+        with --json), then RAUC is asked again. Installing before and after,
+        RAUC was busy all through the checks: then both commands refuse with
+        exit code 3, saying that RAUC installs. An installation that ended
+        during the checks leaves them kept but not judged (logged). rauc
+        install's own output is kept as well."""
+        update = ["ironflock", "os", "update", "--yes", "--download-base", self.http]
+        checks = [("rauc-status", RAUC_STATUS),
+                  ("ironflock-os-rollback", ["ironflock", "os", "rollback", "--yes"]),
+                  ("ironflock-os-rollback-json", ["ironflock", "os", "rollback", "--yes", "--json"]),
+                  ("ironflock-os-update", update),
+                  ("ironflock-os-update-json", update[:4] + ["--json"] + update[4:])]
+        self.fetch_bundle()
+        d = "/run/ironflockos-ci-install"
+        install = ["rauc", "install", TEST_BUNDLE]
+        script = [f"rm -rf {d} && mkdir -p {d}",
+                  f"setsid -f sh -c {shlex.quote(self.capture_snippet(install, d + '/install'))} </dev/null >/dev/null 2>&1",
+                  # Until RAUC installs, or the installation has ended.
+                  f"i=0; until {RAUC_OPERATION} 2>/dev/null | grep -q '\"installing\"' || [ -e {d}/install.rc ] "
+                  f"|| [ $i -ge 3000 ]; do i=$((i+1)); sleep 0.1; done",
+                  f"{RAUC_OPERATION} >{d}/before 2>&1"]
+        script += [self.capture_snippet(argv, f"{d}/{name}") for name, argv in checks]
+        script += [f"{RAUC_OPERATION} >{d}/after 2>&1"]
+        # Its exit code is busctl's; what before and after say is judged below.
+        self.vm.run("; ".join(script), timeout=400, check=False)
+        before = self.vm.run(f"cat {d}/before", check=False).strip()
+        after = self.vm.run(f"cat {d}/after", check=False).strip()
+        results = [(argv, self.collect("busy", name, argv, f"{d}/{name}")) for name, argv in checks]
+        self.wait_for(f"test -e {d}/install.rc", 900, "rauc install to end")
+        rc, out, err = self.collect("install", "rauc-install", install, f"{d}/install")
+        self.vm.run(f"rm -rf {d}; rm -f {TEST_BUNDLE}")
+        if rc != 0:
+            raise TestFailure(f"`{' '.join(install)}` exited {rc}:\n{out}{err}")
+        if '"installing"' not in before:
+            if '"idle"' not in before:
+                raise TestFailure(f"RAUC does not say whether it installs (`{RAUC_OPERATION}`: {before!r})")
+            log(f"RAUC had installed before the checks began: they are kept, not judged ({before!r})")
+            return
+        if '"installing"' not in after:
+            log(f"RAUC's installation ended during the checks: they are kept, not judged ({after!r})")
+            return
+        for argv, (rc, out, err) in results[1:]:
+            if rc != 3 or RAUC_BUSY not in self.failure(argv, rc, out, err, "precondition"):
+                raise TestFailure(f"`{' '.join(argv)}` while RAUC installs ended with {rc}, expected 3 and "
+                                  f"{RAUC_BUSY!r}:\n{out}{err}")
+
+    def reboot_by(self, state, name, argv):
+        """Runs argv, an ironflock command that restarts the device when it
+        succeeds, and waits for the restart. What it prints and its exit code
+        go to /data, which outlives the restart; they are kept and returned
+        once the device is back, the exit code None when the restart came
+        before the shell had written it. A command that ends without the
+        restart fails the step at once."""
+        prefix = f"{REBOOT_OUT}/{name}"
+        line = " ".join(argv)
+        self.vm.run(f"mkdir -p {REBOOT_OUT} && rm -f {prefix}.*")
+        old = self.vm.run("cat /proc/sys/kernel/random/boot_id").strip()
+        starts = self.vm.kernel_starts()
+        tag = uuid.uuid4().hex[:8]
+        self.vm.buf = b""
+        self.vm._send(f"{self.capture_snippet(argv, prefix)}; sync; echo __EN''D_{tag}=$(cat {prefix}.rc)\r")
+        deadline = time.time() + self.boot_timeout
+        while self.vm.kernel_starts() <= starts:
+            m = self.vm._read_until(rb"__END_" + tag.encode() + rb"=(\d+)", 2)
+            if m and m.group(1) != b"0":
+                rc, out, err = self.collect(state, name, argv, prefix)
+                raise TestFailure(f"`{line}` ended with {rc} and did not restart the device:\n{out}{err}")
+            if time.time() > deadline:
+                raise TestFailure(f"`{line}` did not restart the device within {self.boot_timeout}s")
+            if m:
+                time.sleep(1)
+        if self.vm.wait_shell(max(10, deadline - time.time()), starts) == old:
+            raise TestFailure(f"`{line}`: the same boot answers after the restart")
+        rc, out, err = self.collect(state, name, argv, prefix)
+        self.vm.run(f"rm -rf {REBOOT_OUT}")
+        if rc is None:
+            log(f"note: `{line}` restarted the device before its exit code was written; judged by its result")
+        elif rc != 0:
+            raise TestFailure(f"`{line}` ended with {rc}, yet the device restarted:\n{out}{err}")
+        return out
+
+    def back_on(self, slot, other, installed_b):
+        """The device after a rollback: up on slot, online (the test host
+        answers), the same device as before (machine-id, host key, /data and
+        the app's file in /apps, enrolled again from the agent's copy); RAUC's
+        record of the update in slot B is the one it had: a rollback changes no
+        slot's content. GRUB starts slot from now on, and other, the slot it
+        came from, is kept good: if slot does not prove itself, the device goes
+        back there."""
+        self.wait_running()
+        if self.booted() != slot:
+            raise TestFailure(f"booted {self.booted()} after the rollback, expected {slot}")
+        self.vm.run(f"curl -fsS -o /dev/null {self.http}/")
+        if self.vm.run("cat /etc/machine-id").strip() != self.machine_id:
+            raise TestFailure("machine-id changed with the rollback")
+        if self.vm.run("ssh-keygen -lf /data/etc/ssh/ssh_host_ed25519_key.pub").strip() != self.host_key:
+            raise TestFailure("the SSH host key changed with the rollback")
+        self.vm.run("grep -qx ironflockos-test /data/ironflockos-test-marker")
+        self.apps_on_data()
+        self.vm.run("grep -qx ironflockos-test /apps/prod/ironflockos-test/data.txt")
+        if self.flock:
+            self.enrolled(first=False)
+        if self.slot_installed("rootfs.1") != installed_b:
+            raise TestFailure(f"RAUC's record of slot B changed with the rollback: {installed_b} before")
+        env = self.grubenv()
+        if env.get("ORDER", "").split()[:1] != [slot] or env.get(f"{other}_OK") != "1" or env.get(f"{other}_TRY") != "0":
+            raise TestFailure(f"after the rollback to {slot}, slot {other} is not kept good behind it: {env}")
+
+    def keep_good(self, slot):
+        """In the agent's place, the slot the device rolled back to is marked
+        good (ironflockos-slot-keep may have been first: the slot had proven
+        itself before). It is still that proven system: its slot-proven mark
+        is there."""
+        self.vm.run("rauc status mark-good")
+        env = self.grubenv()
+        if env.get(f"{slot}_OK") != "1" or env.get(f"{slot}_TRY") != "0":
+            raise TestFailure(f"slot {slot} is not good after rauc status mark-good: {env}")
+        self.vm.run("test -e /var/lib/ironflockos/slot-proven")
+
+    def rollback(self):
+        """`ironflock os rollback` (WP-5.3 of the CLI's plan) on the device
+        that runs the update in slot B, good, with slot A holding the system it
+        was written with, good since the first boot. The command restarts the
+        device into slot A, which runs again (back_on, `ironflock status`
+        reports slot A and its version); marked good, the device goes forward
+        to slot B the same way, with --json. Both slots hold this build: the
+        versions the command and `ironflock status` report are the same on
+        both, the slot tells the systems apart. Whether the agent reaches
+        IronFlock again QEMU cannot show (no platform answers)."""
+        version = self.image_version()
+        installed_b = self.slot_installed("rootfs.1")
+        argv = ["ironflock", "os", "rollback", "--yes"]
+        out = self.reboot_by("updated", "ironflock-os-rollback", argv)
+        if f"Rolled back to IronFlockOS {version} in slot A" not in out:
+            raise TestFailure(f"`{' '.join(argv)}` printed no rollback to IronFlockOS {version} in slot A:\n{out}")
+        self.back_on("A", "B", installed_b)
+        system = self.snapshot("rolled-back").get("os") or {}
+        if system.get("booted_slot") != "A" or system.get("version") != version:
+            raise TestFailure(f"ironflock status after the rollback: {system}, expected slot A and {version}")
+        self.keep_good("A")
+
+        argv = ["ironflock", "os", "rollback", "--yes", "--json"]
+        result = self.json_result(self.reboot_by("rolled-back", "ironflock-os-rollback-json", argv), " ".join(argv))
+        want = {"action": "rolled_back", "slot": "B", "version": version, "from_slot": "A", "from_version": version}
+        if {key: result.get(key) for key in want} != want:
+            raise TestFailure(f"`{' '.join(argv)}` reported {result}, expected {want}")
+        self.back_on("B", "A", installed_b)
+        self.keep_good("B")
+        system = self.snapshot("rolled-forward").get("os") or {}
+        if system.get("booted_slot") != "B" or system.get("primary_slot") != "B":
+            raise TestFailure(f"ironflock status after the rollback to slot B: {system}")
+
+    def rollback_after_fallback(self):
+        """After the fallback, slot A holds the update that was tried once and
+        never marked good: `ironflock os rollback` refuses it and changes
+        nothing, and the device keeps starting slot B."""
+        self.snapshot("fell-back")
+        upcoming = self.rollback_refused("fell-back", "which did not start successfully")
+        if upcoming != "B":
+            raise TestFailure(f"after the refused rollback GRUB would start slot {upcoming}, not B")
 
     def slot_installed(self, slot):
         """When RAUC recorded the installation of a slot (its state on /data)."""
@@ -1447,16 +1984,19 @@ def main():
 
     serve_dir = os.path.join(workdir, "http")
     os.makedirs(serve_dir, exist_ok=True)
-    os.link(bundle, os.path.join(serve_dir, "bundle.raucb")) if os.stat(bundle).st_dev == os.stat(serve_dir).st_dev else shutil.copy(bundle, os.path.join(serve_dir, "bundle.raucb"))
+    link_or_copy(bundle, os.path.join(serve_dir, "bundle.raucb"))
     if args.docker_image_tar:
         shutil.copy(args.docker_image_tar, serve_dir)
+    put_test_catalog(serve_dir, workdir, image_id, version, artefacts,
+                     {"target": args.target, "variant": args.variant, "kernel": args.kernel, "architecture": arch})
     server, port = serve(serve_dir)
 
     accel = pick_accel(arch)
     boot_timeout = 300 if accel != "tcg" else 1500
     log(f"accelerator: {accel}{' (slow)' if accel == 'tcg' else ''}; Secure Boot {'on' if args.secure_boot else 'off'}")
     vm = VM(arch, disk, workdir, accel, secure_boot=args.secure_boot)
-    runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout, flock=flock)
+    runner = Runner(vm, conf, image_id, port, args.docker_image_tar, boot_timeout, flock=flock,
+                    requests=server.requests, captured=os.path.join(workdir, "captured"))
     ok = False
     try:
         vm.start(conf["QEMU_SYSTEM"], port)
@@ -1465,6 +2005,8 @@ def main():
                     + ", partitions, /data, identity, SSH, RAUC, Docker, fwupd", runner.first_boot)
         runner.step("ironflock: /usr/bin/ironflock, status, refusals, a .flock that is not accepted",
                     runner.ironflock_cli)
+        runner.step("ironflock os as written: rollback refuses, update refuses a catalog IronFlock did not sign",
+                    runner.os_fresh)
         if flock:
             runner.step("change hands: sudo ironflock agent configure -c over SSH by the owner, and back",
                         runner.change_hands)
@@ -1479,11 +2021,21 @@ def main():
         runner.step("reboot: machine-id, host key, journal persist, proxy.conf and the static profile from IRONFLOCKOS",
                     runner.reboot_persists)
         if args.only != "boot":
-            runner.step("update into slot B", runner.update_to_b)
+            runner.step("update into slot B; ironflock os refuses while RAUC installs and while the update waits",
+                        runner.update_to_b)
             if args.only != "update":
+                # Two restarts more: under emulation (the arm64 runners) each
+                # takes minutes, so there only the refusals run.
+                if accel != "tcg":
+                    runner.step("os rollback: back to slot A, which runs again, and forward to slot B",
+                                runner.rollback)
+                else:
+                    log("--- os rollback back to slot A and forward: left out under emulation")
                 runner.step("factory reset: identity, containers and data gone, network kept, "
                             + ("enrolled anew" if flock else "unenrolled") + ", slot A cleared", runner.factory_reset)
                 runner.step("fallback: an untested slot A falls back to B", runner.fallback)
+                runner.step("os rollback refuses the slot that was tried and not marked good",
+                            runner.rollback_after_fallback)
                 runner.step("crash: restarts by itself on a proven slot, on record on /data", runner.crash_offline)
         ok = True
     except TestFailure:
@@ -1494,7 +2046,8 @@ def main():
         print("\nresults:")
         for name, passed, secs in runner.results:
             print(f"  {'ok  ' if passed else 'FAIL'} {name} ({secs:.0f}s)")
-        print(f"console: {vm.console}\nshell transcript: {os.path.join(workdir, 'shell.log')}")
+        print(f"console: {vm.console}\nshell transcript: {os.path.join(workdir, 'shell.log')}\n"
+              f"what ironflock read and printed: {runner.captured}")
         if not args.keep and ok:
             shutil.rmtree(workdir, ignore_errors=True)
     sys.exit(0 if ok else 1)
