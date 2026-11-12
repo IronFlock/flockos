@@ -1,0 +1,8 @@
+# IronFlockOS: what Debian's profile for chronyd (/etc/apparmor.d/usr.sbin.chronyd,
+# which includes this file) does not allow and the image's chrony reads
+# (/etc/chrony/conf.d/10-ironflockos.conf): the PTP source that
+# ironflockos-ptp writes (confdir) and the NTP servers of proxy.conf that
+# ironflockos-proxy writes (sourcedir). Without these lines chronyd, confined
+# by AppArmor, would run without both (ADR-0020).
+@{run}/ironflockos/chrony/{,**} r,
+@{run}/ironflockos/chrony-sources/{,**} r,

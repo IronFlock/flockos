@@ -807,6 +807,58 @@ class Runner:
         self.vm.run("test -e /run/ironflockos/rt-reboot-required")
         self.rt_pending = True
 
+    def confinement(self):
+        """AppArmor (docs/build.md, "AppArmor"): on in the kernel, its profiles
+        loaded, Docker's default profile on a container that is not
+        privileged, and chronyd under Debian's profile. That chronyd still
+        reads the PTP source and the NTP servers of proxy.conf, which that
+        profile allows only through the image's local file, is what the time
+        and the proxy steps check after this one."""
+        enabled = self.vm.run("cat /sys/module/apparmor/parameters/enabled", check=False).strip()
+        if enabled != "Y":
+            raise TestFailure(f"AppArmor is not on in the kernel: {enabled!r}")
+        state = self.vm.run("systemctl is-active apparmor.service", check=False).strip()
+        if state != "active":
+            raise TestFailure(f"apparmor.service is {state}:\n{self.explain('apparmor.service')}")
+        options = self.vm.run("docker info --format '{{.SecurityOptions}}'").strip()
+        if "name=apparmor" not in options:
+            raise TestFailure(f"Docker does not confine containers with AppArmor: {options}")
+        self.vm.run("grep -qx 'docker-default (enforce)' /sys/kernel/security/apparmor/profiles")
+        label = self.vm.run("cat /proc/$(pidof chronyd | awk '{print $1}')/attr/current").strip()
+        if label != "/usr/sbin/chronyd (enforce)":
+            raise TestFailure(f"chronyd does not run under its profile: {label!r}")
+        if self.docker_tar:
+            label = self.vm.run("cid=$(docker run -d hello-world) && "
+                                "docker inspect --format '{{.AppArmorProfile}}' \"$cid\"; docker rm -f \"$cid\" >/dev/null",
+                                timeout=120).strip()
+            if label != "docker-default":
+                raise TestFailure(f"a container that is not privileged has the profile {label!r}")
+
+    def fsck_repair(self):
+        """A filesystem that a preen gives up on is repaired at boot
+        (ADR-0020): fsck.repair=yes is on the kernel command line, and
+        systemd-fsck, the program the boot runs for /data and the IRONFLOCKOS
+        partition, takes it from there. Tried on a small filesystem of the
+        test's own with an illegal block number in a file, which `e2fsck -p`
+        refuses."""
+        if "fsck.repair=yes" not in self.vm.run("cat /proc/cmdline").split():
+            raise TestFailure("fsck.repair=yes is not on the kernel command line")
+        out = self.vm.run(
+            "d=$(mktemp -d /run/ironflockos-fsck.XXXXXX) && cd \"$d\" && truncate -s 16M fs.img && "
+            "mkfs.ext4 -q -F fs.img && debugfs -w -R 'write /etc/hostname victim' fs.img >/dev/null 2>&1 && "
+            "debugfs -w -R 'sif victim block[0] 4000000000' fs.img >/dev/null 2>&1 && "
+            "debugfs -w -R 'ssv state 2' fs.img >/dev/null 2>&1 && cp fs.img control.img; "
+            "e2fsck -p control.img >/dev/null 2>&1; echo preen=$?; "
+            "dev=$(losetup --find --show fs.img) && udevadm settle && "
+            "{ /usr/lib/systemd/systemd-fsck \"$dev\" >/dev/null 2>&1; echo boot=$?; "
+            "e2fsck -fn \"$dev\" >/dev/null 2>&1; echo after=$?; losetup -d \"$dev\"; }; "
+            "cd / && rm -rf \"$d\"", timeout=120, check=False)
+        got = dict(line.split("=", 1) for line in out.split() if "=" in line)
+        if not got.get("preen", "").isdigit() or not int(got["preen"]) & 4:
+            raise TestFailure(f"the test's damage is not one a preen refuses:\n{out}")
+        if got.get("boot") != "0" or got.get("after") != "0":
+            raise TestFailure(f"systemd-fsck did not repair the filesystem:\n{out}")
+
     def time_sync(self):
         """Time (docs/build.md, "Time"): chrony instead of systemd-timesyncd.
         A ptp.conf that names the NIC gives chrony a PTP source and starts
@@ -2037,6 +2089,9 @@ def main():
             runner.step("rt kernel: PREEMPT_RT, tuning from rt.conf into grubenv", runner.rt_kernel)
         if args.variant == "nvidia":
             runner.step("nvidia: driver, open modules, container runtime, no toolchain", runner.nvidia)
+        runner.step("confinement: AppArmor on, Docker's profile on containers, chronyd under its profile",
+                    runner.confinement)
+        runner.step("filesystem check: the boot repairs what a preen refuses", runner.fsck_repair)
         runner.step("time: chrony, PTP from ptp.conf as chrony's source", runner.time_sync)
         runner.step("proxy: proxy.conf to Docker, the agent and chrony", runner.proxy)
         runner.step("network profile: a static profile on the IRONFLOCKOS partition, for the next boot",

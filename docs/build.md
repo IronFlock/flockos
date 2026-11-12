@@ -72,6 +72,19 @@ whose `/data` cannot be mounted runs on the root slot's own folders, without
 Docker, and `ironflockos-data-missing` says so on the console and in
 `/run/ironflockos/data-missing` (ADR-0015).
 
+`/data` and the IRONFLOCKOS partition are checked before they are mounted
+(`systemd-fsck`, the last field of their lines in `/etc/fstab`), and
+`fsck.repair=yes` on the kernel command line of every target (ADR-0020) has the
+check repair what it finds. Without it the check only preens, and a `/data` with
+damage a preen gives up on, as a power cut can leave it, would stay unmounted
+with nobody there to run `fsck` by hand. A repair can drop damaged files. The
+check is not forced at every boot: it runs when the filesystem is marked as not
+clean or as having errors. The root slot is mounted by the initramfs, where
+ext4 replays its journal; a slot that does not boot falls back to the other one
+("Boot and A/B"). On the EFI targets the command line is in `grub.cfg` on the
+IRONFLOCKOS partition, which an update does not write, so a device installed
+before this keeps the preen.
+
 | Path | From |
 |------|------|
 | `/opt/ironflock` | `/data/ironflock` (agent, `.flock` copy, Docker data-root) |
@@ -549,6 +562,31 @@ from this section.
   | `left` | `gave-up`: what of the old owner may still be on the device, space-separated, of `data`, `booted-slot`, `other-slot`; empty when nothing is |
 
   It names nothing of the old owner.
+
+## AppArmor
+
+The Debian images carry AppArmor's tools (`apparmor` in
+`profiles/base/packages.debian`; ADR-0020). Debian's kernels have AppArmor on,
+and with the tools:
+
+- Docker puts its `docker-default` profile on every container that is not
+  privileged, as on any Debian or Ubuntu host: no mounts, no writes to the
+  sensitive parts of `/proc` and `/sys`. A privileged container, and one
+  started with `apparmor=unconfined`, gets no profile. `docker info` names
+  `apparmor` among its security options.
+- The profiles that Debian's packages bring are in force. In the image that is
+  chrony's (`/etc/apparmor.d/usr.sbin.chronyd`). It does not allow the two
+  folders the image has chronyd read below `/run/ironflockos` (the PTP source
+  of "Time", the NTP servers of "Proxy"), so the image adds them in
+  `/etc/apparmor.d/local/usr.sbin.chronyd`, which that profile includes. A new
+  folder in `overlay/etc/chrony/conf.d` needs its line there; a unit test
+  compares the two.
+
+IronFlockOS brings no profiles of its own. `aa-status` shows what is loaded and
+which processes are confined; a denial is in the journal
+(`journalctl -k -g apparmor`). On the Raspberry Pi the kernel is Raspberry Pi's
+and decides whether AppArmor is on; with it off the package does nothing. The
+Jetson image (Ubuntu, NVIDIA's kernel) does not carry the package yet.
 
 ## The nvidia variant
 
