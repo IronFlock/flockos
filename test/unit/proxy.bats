@@ -173,7 +173,7 @@ JSON
   grep -qx 'ExecStart=/usr/lib/ironflockos/proxy apply' "$units/ironflockos-proxy-reload.service"
   grep -qx 'sourcedir /run/ironflockos/chrony-sources' "$repo/overlay/etc/chrony/conf.d/10-ironflockos.conf"
   grep -q 'ln -sfn /data/ironflockos/proxy.conf "$ROOT/etc/ironflockos/proxy.conf"' "$repo/build/customize.sh"
-  grep -q 'ironflockos-proxy.service$' "$repo/build/customize.sh"
-  grep -q 'systemd-repart.service ironflockos-proxy.service ironflockos-proxy.path ironflockos-proxy-reload.service$' "$repo/build/customize.sh"
+  grep -qE 'ironflockos-proxy.service( |$)' "$repo/build/customize.sh"
+  grep -qE 'systemd-repart.service ironflockos-proxy.service ironflockos-proxy.path ironflockos-proxy-reload.service( |$)' "$repo/build/customize.sh"
   grep -q 'carry+=("$esp/proxy.conf")' "$repo/profiles/installer/overlay/usr/lib/ironflockos/installer"
 }

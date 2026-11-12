@@ -102,13 +102,13 @@ check "the apps' data is /data/apps, the mount point in the image" \
 for unit in ironflockos-ssh-hostkeys.service ironflockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service ironflockos-ptp.service ironflockos-ptp.path \
   ironflockos-ptp4l.service ironflockos-phc2sys.service ironflockos-proxy.service ironflockos-proxy.path \
-  ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
+  ironflockos-ca.service ironflockos-ca.path ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$work/root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$work/root/usr/lib/systemd/system/systemd-timesyncd.service"
 check "a factory reset runs before /data is mounted, and no mount stops the boot (ADR-0015)" \
   bash -c "test -x '$work/root/usr/lib/ironflockos/factory-reset' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/ironflockos-factory-reset.service' && test -e '$work/root/usr/lib/systemd/system/data.mount.wants/ironflockos-data-missing.service' && ! grep -v '^#' '$work/root/etc/fstab' | grep . | grep -v nofail"
-for setting in ptp.conf proxy.conf; do
+for setting in ptp.conf proxy.conf ca.crt; do
   check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$work/root/etc/ironflockos/$setting')\" = /data/ironflockos/$setting ]"
 done
 check "rauc-mark-good is masked" bash -c "[ \"\$(systemctl --root='$work/root' is-enabled rauc-mark-good.service)\" = masked ]"
@@ -124,6 +124,8 @@ check "no account has a password" awk -F: '$2 !~ /^[!*]/ { bad = 1 } END { exit 
 mount -t proc proc "$work/root/proc"
 in_root() { chroot "$work/root" "$@"; }
 check "chroot: systemd runs" in_root /usr/bin/systemctl --version
+check "chroot: openssl and update-ca-certificates, for the trusted CAs" \
+  bash -c "chroot '$work/root' /usr/bin/openssl version && test -x '$work/root/usr/sbin/update-ca-certificates'"
 check "chroot: Docker's CLI runs" in_root /usr/bin/docker --version
 check "chroot: RAUC runs" in_root /usr/bin/rauc --version
 check "rpi-eeprom-update is there" test -x "$work/root/usr/bin/rpi-eeprom-update"

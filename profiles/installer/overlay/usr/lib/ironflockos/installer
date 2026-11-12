@@ -90,11 +90,12 @@ else
 fi
 
 esp_target=$(installer_partition "$target" 1)
-# The .flock, and the site's proxy (docs/build.md, "Proxy"), which the
-# installed device takes over on its first boot.
+# The .flock, the site's proxy (docs/build.md, "Proxy") and its trusted CAs
+# ("Trusted CAs"), which the installed device takes over on its first boot.
 carry=()
 [ -n "$flock" ] && carry+=("$flock")
 [ -f "$esp/proxy.conf" ] && carry+=("$esp/proxy.conf")
+[ -f "$esp/ca.crt" ] && carry+=("$esp/ca.crt")
 if [ ${#carry[@]} -gt 0 ]; then
   for f in "${carry[@]}"; do
     say "copying $(basename "$f") to the new IRONFLOCKOS partition ($esp_target)"

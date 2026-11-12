@@ -4,8 +4,8 @@
 #
 # The request is the file factory-reset.conf on the IRONFLOCKOS partition
 # (/boot/efi), KEY=value lines; # starts a comment, also after a value:
-#   keep-network=yes|no   keep the network profiles, proxy.conf and ptp.conf
-#                         (default no)
+#   keep-network=yes|no   keep the network profiles, proxy.conf, ptp.conf and
+#                         ca.crt (default no)
 # An empty file asks for a reset that keeps no network settings. A file with
 # anything else (another key or value, a line that is not KEY=value, a NUL
 # byte) is refused: nothing is cleared, the file is renamed to
@@ -30,11 +30,11 @@
 #     holds; the next boot tries again. After the third failure the reset
 #     gives up: a /data it had begun to erase gets a new filesystem, the record
 #     says what of the old owner is left, and the boot goes on.
-# /run/ironflockos/factory-reset-hold tells enroll and ironflockos-proxy what to do
-# with the IRONFLOCKOS partition's .flock and proxy.conf meanwhile: "wait" while
-# the old owner's data may still be on /data (the old identity runs), "copy"
-# once it is being erased (take them, and leave them there for the reset that
-# is still to come).
+# /run/ironflockos/factory-reset-hold tells enroll, ironflockos-proxy and
+# ironflockos-ca what to do with the IRONFLOCKOS partition's .flock, proxy.conf
+# and ca.crt meanwhile: "wait" while the old owner's data may still be on
+# /data (the old identity runs), "copy" once it is being erased (take them,
+# and leave them there for the reset that is still to come).
 #
 # "check FILE" prints keep-network=yes or keep-network=no for a request this
 # device accepts (exit 0), or the reason it refuses it on stderr (exit 1), and
@@ -77,12 +77,16 @@ limit_short=60
 image_hostname=ironflockos
 # What is kept of /data: RAUC's state always, the network on request.
 keep_always="rauc"
-keep_network_items="network/connections ironflockos/proxy.conf ironflockos/ptp.conf"
+keep_network_items="network/connections ironflockos/proxy.conf ironflockos/ptp.conf ironflockos/ca.crt"
 # Folders below /data, and in the root slots, are never followed through a
 # symbolic link that the old owner may have put there.
 mount_opts=nodev,nosuid,nosymfollow
 
 say() { echo "factory-reset: $*"; }
+
+# on_screen TEXT: TEXT for a person at the device, on the splash
+# (IRONFLOCKOS_SCREEN_MESSAGE: for the unit tests only).
+on_screen() { "${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}" "$1" 2>/dev/null || true; }
 
 # lim SECONDS COMMAND...: COMMAND, stopped when it runs longer.
 lim() {
@@ -207,12 +211,13 @@ state_set() {
   done
 }
 
-# hold wait|copy|gave-up|none: what enroll and ironflockos-proxy do with the
-# IRONFLOCKOS partition's .flock and proxy.conf at this boot. wait: a reset is
-# open and the old owner's data may be on /data, leave them; copy: a reset is
-# open and has begun to erase, take them and leave them there; gave-up: a
-# reset gave up with the old data and could not remove the files that came
-# for the device after it, leave them; none (no file): take them as usual.
+# hold wait|copy|gave-up|none: what enroll, ironflockos-proxy and ironflockos-ca
+# do with the IRONFLOCKOS partition's .flock, proxy.conf and ca.crt at this
+# boot. wait: a reset is open and the old owner's data may be on /data, leave
+# them; copy: a reset is open and has begun to erase, take them and leave them
+# there; gave-up: a reset gave up with the old data and could not remove the
+# files that came for the device after it, leave them; none (no file): take
+# them as usual.
 hold() {
   mkdir -p "$run" 2>/dev/null || true
   if [ "$1" = none ]; then
@@ -637,14 +642,23 @@ attempt() {
   say "kept: ${kept:-nothing}"
 
   if [ -n "$grubenv" ]; then
-    # The platform's real-time tuning goes with rt.conf: the next boot runs
-    # the image's defaults, as a flashed device does.
+    # The platform's real-time tuning goes with rt.conf, the display setting
+    # with display.conf: the next boot runs the image's defaults, as a
+    # flashed device does.
     if env=$(lim "$limit_short" grub-editenv "$grubenv" list); then
-      if grep -q '^IRONFLOCKOS_RT_CMDLINE=' <<<"$env"; then
-        lim "$limit_short" grub-editenv "$grubenv" unset IRONFLOCKOS_RT_CMDLINE || step_failed grubenv
-      fi
+      for var in IRONFLOCKOS_RT_CMDLINE IRONFLOCKOS_BOOT; do
+        if grep -q "^$var=" <<<"$env"; then
+          lim "$limit_short" grub-editenv "$grubenv" unset "$var" || step_failed grubenv
+        fi
+      done
     else
       step_failed grubenv
+    fi
+    # The device's own splash goes with /data/ironflockos/screen, and what
+    # GRUB draws of it: the restart shows IronFlock's logo on black
+    # (docs/build.md, "The screen").
+    if ! rm -f "${grubenv%/*}/splash.cpio" "${grubenv%/*}/.splash.cpio.part" "${grubenv%/*}/splash.env"; then
+      step_failed splash
     fi
   fi
   # The mark that this request is done, with what the record says of it: for
@@ -723,9 +737,9 @@ mark_data() {
 
 # retire OLD-DATA: a request that gave up triggers no more: renamed to
 # factory-reset.conf.gave-up. With the old owner's data still on /data the
-# .flock and proxy.conf that came for the device after the reset go too: the
-# device stays the device it was. Sets the hold: gave-up while they could not
-# be removed (a read-only IRONFLOCKOS partition), none otherwise.
+# .flock, proxy.conf and ca.crt that came for the device after the reset go
+# too: the device stays the device it was. Sets the hold: gave-up while they
+# could not be removed (a read-only IRONFLOCKOS partition), none otherwise.
 retire() {
   local f left=no
   if [ -e "$request" ]; then
@@ -734,7 +748,7 @@ retire() {
   fi
   if [ "$1" = yes ]; then
     # Every .flock enroll would take, whatever the case of its name.
-    for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk] "$esp/proxy.conf"; do
+    for f in "$esp"/*.[Ff][Ll][Oo][Cc][Kk] "$esp/proxy.conf" "$esp/ca.crt"; do
       if [ -e "$f" ]; then remove "$f" 2>/dev/null || left=yes; fi
     done
   fi
@@ -826,6 +840,7 @@ give_up() {
   fi
   remove_files || say "could not remove factory-reset.keep or a part file"
   say "GAVE UP after $attempts_max attempts ($reason); the device boots with /data as it is ($data_left)${left:+; left of the old owner: $left}"
+  on_screen "The factory reset gave up: see factory-reset.log on the IRONFLOCKOS partition."
   write_record gave-up "attempt=$attempt" "attempts-max=$attempts_max" "reason=$reason" "keep-network=$keep_network" \
     "data=$data_left" "left=$left" || true
   # The old owner's data is still on /data: the device stays the device it
@@ -861,6 +876,7 @@ completed() {
   hold none
   lim "$limit_short" sync || true
   say "${failed:+incomplete ($failed), }done; restarting into a first boot"
+  on_screen "Factory reset done: the device restarts."
   if ! systemctl --no-block reboot; then
     # This boot goes on: it needs a valid machine-id, a new one.
     tr -d '-' </proc/sys/kernel/random/uuid >"$root/etc/machine-id" 2>/dev/null || true
@@ -1004,6 +1020,7 @@ if [ "$begun" = yes ]; then
 else
   say "attempt $attempt of $attempts_max: resetting the device (keep network: $keep_network)"
 fi
+on_screen "Factory reset: this takes a few minutes. Do not turn the device off."
 
 rootdev=$(root_device)
 rm -f "$result_file"
@@ -1036,6 +1053,7 @@ if [ "$erase" = started ]; then
   if fresh_data; then data_now=new; else data_now=none; fi
 fi
 say "attempt $attempt of $attempts_max failed ($reason); the next boot tries again, this one goes on (/data: $data_now)"
+on_screen "The factory reset failed this time: the next start tries again."
 write_record failed "attempt=$attempt" "attempts-max=$attempts_max" "reason=$reason" "begun=$begun" "data=$data_now" || true
 if [ "$erase" = started ]; then hold copy; else hold wait; fi
 exit 0

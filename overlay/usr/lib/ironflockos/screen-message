@@ -1,0 +1,12 @@
+#!/bin/sh
+# screen-message TEXT: TEXT on the splash, on the line below the picture, for
+# a person at the device (docs/build.md, "The screen"). The scripts that have
+# something to say to that person say it on the console and in the journal as
+# before, and here too. Only while Plymouth runs (a boot with the splash); the
+# last message stays on the splash Plymouth leaves on the screen. Nothing
+# happens without Plymouth, and it never fails: a message is no step of the
+# boot.
+[ "$#" -eq 1 ] || exit 0
+command -v plymouth >/dev/null 2>&1 || exit 0
+plymouth --ping 2>/dev/null || exit 0
+plymouth display-message --text="$1" 2>/dev/null || true

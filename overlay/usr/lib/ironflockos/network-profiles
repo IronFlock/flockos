@@ -275,6 +275,10 @@ take() {
   name=$(basename -- "$f")
   if ! check "$f"; then
     say "refused $name: $reason; renamed to $name.refused" >&2
+    # For a person at the device, on the splash (IRONFLOCKOS_SCREEN_MESSAGE:
+    # for the unit tests only).
+    "${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}" \
+      "The network profile $name was refused: it is not taken." 2>/dev/null || true
     rm -rf "$f.refused" 2>/dev/null
     if [ -e "$f.refused" ] || [ -L "$f.refused" ] || ! mv -f "$f" "$f.refused" 2>/dev/null; then
       say "could not rename $name: it is refused again at the next boot" >&2

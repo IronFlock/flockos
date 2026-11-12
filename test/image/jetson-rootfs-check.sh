@@ -103,13 +103,13 @@ check "the apps' data is /data/apps, the mount point in the tree" \
 for unit in ironflockos-ssh-hostkeys.service ironflockos-enroll.service ssh.service \
   docker.service NetworkManager.service chrony.service ironflockos-ptp.service ironflockos-ptp.path \
   ironflockos-ptp4l.service ironflockos-phc2sys.service ironflockos-proxy.service ironflockos-proxy.path \
-  ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
+  ironflockos-ca.service ironflockos-ca.path ironflockos-apps-check.service ironflockos-network-profiles.service ironflockos-network-profiles-trial.service; do
   check "$unit is enabled" systemctl --root="$root" -q is-enabled "$unit"
 done
 check "chrony keeps the time, not systemd-timesyncd" test ! -e "$root/usr/lib/systemd/system/systemd-timesyncd.service"
 check "a factory reset runs before /data is mounted, and no mount stops the boot (ADR-0015)" \
   bash -c "test -x '$root/usr/lib/ironflockos/factory-reset' && test -e '$root/usr/lib/systemd/system/data.mount.wants/ironflockos-factory-reset.service' && test -e '$root/usr/lib/systemd/system/data.mount.wants/ironflockos-data-missing.service' && ! grep -v '^#' '$root/etc/fstab' | grep . | grep -v nofail"
-for setting in ptp.conf proxy.conf; do
+for setting in ptp.conf proxy.conf ca.crt; do
   check "$setting is the device's, on /data" bash -c "[ \"\$(readlink '$root/etc/ironflockos/$setting')\" = /data/ironflockos/$setting ]"
 done
 check "no unit marks the slot good at boot (the device-agent does, once online)" \
@@ -136,6 +136,8 @@ in_root() { chroot "$root" "$@"; }
 check "chroot: dpkg reports nothing half-installed" bash -c "[ -z \"\$(chroot '$root' dpkg --audit)\" ]"
 check "chroot: apt's dependencies hold" in_root apt-get check -qq
 check "chroot: systemd runs" in_root /usr/bin/systemctl --version
+check "chroot: openssl and update-ca-certificates, for the trusted CAs" \
+  bash -c "chroot '$root' /usr/bin/openssl version && test -x '$root/usr/sbin/update-ca-certificates'"
 check "chroot: Docker's CLI runs" in_root /usr/bin/docker --version
 check "chroot: containerd runs" in_root /usr/bin/containerd --version
 check "chroot: RAUC runs" in_root /usr/bin/rauc --version

@@ -17,3 +17,6 @@ Type=oneshot
 StandardOutput=journal+console
 SyslogLevel=warning
 ExecStart=/usr/bin/echo "IronFlockOS: Secure Boot is on, and this machine does not trust the NVIDIA driver's kernel modules: the GPU cannot be used. Turn Secure Boot off in the firmware setup to use it."
+# The same for a person at the device, on the splash (docs/build.md, "The
+# screen").
+ExecStartPost=-/usr/lib/ironflockos/screen-message "Secure Boot is on: the NVIDIA GPU cannot be used. Turn Secure Boot off in the firmware setup."

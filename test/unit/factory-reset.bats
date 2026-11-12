@@ -247,8 +247,8 @@ EOF
 
 # device: an enrolled amd64-efi device booted from slot A, slot B written by an
 # update, the data partition (vda4, which the link IRONFLOCKOS_DATA_DEV stands for
-# /dev/disk/by-partlabel/data points at) in use, a new .flock and proxy.conf
-# waiting on the IRONFLOCKOS partition.
+# /dev/disk/by-partlabel/data points at) in use, a new .flock, proxy.conf and
+# ca.crt waiting on the IRONFLOCKOS partition.
 device() {
   mkdir -p "$tmp/dev"
   : >"$tmp/dev/vda4"
@@ -274,6 +274,8 @@ device() {
   printf '[connection]\nid=site-lan\n' >"$d/network/connections/site-lan.nmconnection"
   printf 'http_proxy=http://user:proxy-password@proxy.owner.example:3128\n' >"$d/ironflockos/proxy.conf"
   printf 'interface=enp88s0\n' >"$d/ironflockos/ptp.conf"
+  printf '# the owner-device corporate CA\n' >"$d/ironflockos/ca.crt"
+  chmod 0644 "$d/ironflockos/ca.crt"
   printf 'hostname-from-flock=no\n' >"$d/ironflockos/enroll.conf"
   printf 'isolate=2-3\n' >"$d/ironflockos/rt.conf"
   chmod 0700 "$d/network/connections"
@@ -288,11 +290,13 @@ device() {
   echo crash >"$d/pstore/dmesg.txt"
   echo 'left by the owner' >"$d/owner-notes.txt"
   mkdir -p "$tmp/esp/EFI/BOOT" "$tmp/run"
-  printf 'ORDER=A B\nA_OK=1\nA_TRY=1\nB_OK=1\nB_TRY=0\nIRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1\nIRONFLOCKOS_RT_CMDLINE=isolcpus=2-3\n' \
+  printf 'ORDER=A B\nA_OK=1\nA_TRY=1\nB_OK=1\nB_TRY=0\nIRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1\nIRONFLOCKOS_RT_CMDLINE=isolcpus=2-3\nIRONFLOCKOS_BOOT=text\n' \
     >"$tmp/esp/EFI/BOOT/grubenv"
+  echo "the owner's splash" >"$tmp/esp/EFI/BOOT/splash.cpio"
   echo shim >"$tmp/esp/EFI/BOOT/BOOTX64.EFI"
   echo '{"name": "new-device", "secret": "new"}' >"$tmp/esp/new-device.flock"
   printf 'http_proxy=http://new-proxy:3128\n' >"$tmp/esp/proxy.conf"
+  printf '# the new device corporate CA\n' >"$tmp/esp/ca.crt"
   cat >"$tmp/system.conf" <<EOF
 [system]
 compatible=ironflockos-amd64-efi-base
@@ -364,7 +368,7 @@ state() {
 # request and the record, grubenv, and in the root slots the paths of
 # clean_slot and the reset's own state.
 outside() {
-  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/grubenv|^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/ironflockos/(enrolled |factory-reset\.)'
+  state | grep -vE '^disk/vda4|^esp/factory-reset\.|^esp/EFI/BOOT/(grubenv|splash\.cpio) |^disk/rootfs-./(apps|root|var/tmp|var/lib/(containerd|NetworkManager|sudo/lectured))/|^disk/rootfs-./etc/(passwd|shadow|group|gshadow|subuid|subgid|hostname|hosts|machine-id)-? |^disk/rootfs-./etc/sudoers\.d/ironflock-|^disk/rootfs-./etc/systemd/system/(ironflock-device-agent\.service|ironflock\.slice|[^/]*\.wants/ironflock-device-agent\.service)|^disk/rootfs-./var/lib/ironflockos/(enrolled |factory-reset\.)'
 }
 
 # --- a reset that completes --------------------------------------------------
@@ -395,18 +399,19 @@ outside() {
   cmp -s "$esp/factory-reset.log" "$slot/var/lib/ironflockos/factory-reset.log"
 }
 
-@test "keep-network=yes keeps the network profiles, proxy.conf and ptp.conf with their modes; nothing else of /data" {
+@test "keep-network=yes keeps the network profiles, proxy.conf, ptp.conf and ca.crt with their modes; nothing else of /data" {
   request 'keep-network=yes\n'
   boot
   [ "$status" -eq 0 ]
-  [ "$(cd "$data" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./ironflockos/factory-reset.done ./ironflockos/proxy.conf ./ironflockos/ptp.conf ./network/connections/ironflock-wifi.nmconnection ./network/connections/site-lan.nmconnection ./rauc/central.raucs ./rauc/ironflockos-rpi-tryboot.state " ]
+  [ "$(cd "$data" && find . -type f | LC_ALL=C sort | tr '\n' ' ')" = "./ironflockos/ca.crt ./ironflockos/factory-reset.done ./ironflockos/proxy.conf ./ironflockos/ptp.conf ./network/connections/ironflock-wifi.nmconnection ./network/connections/site-lan.nmconnection ./rauc/central.raucs ./rauc/ironflockos-rpi-tryboot.state " ]
   grep -qx 'psk=wifi-password' "$data/network/connections/ironflock-wifi.nmconnection"
   [ "$(mode "$data/network/connections")" = 700 ]
   [ "$(mode "$data/network/connections/ironflock-wifi.nmconnection")" = 600 ]
   [ "$(mode "$data/ironflockos/proxy.conf")" = 600 ]
+  [ "$(mode "$data/ironflockos/ca.crt")" = 644 ]
   [ "$(mode "$data/ironflockos")" = 755 ]
   [ "$(value keep-network)" = yes ]
-  [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf" ]
+  [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf ironflockos/ca.crt" ]
 }
 
 @test "a kept file that cannot be read is a note, not a reason to stop" {
@@ -416,7 +421,7 @@ outside() {
   boot
   [ "$status" -eq 0 ]
   [ "$(value result)" = done ]
-  [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf" ]
+  [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ca.crt" ]
   [ "$(value note)" = "ironflockos/ptp.conf could not be read and was not kept" ]
 }
 
@@ -508,7 +513,7 @@ outside() {
   [ "$(cat "$tmp/systemctl.log")" = "--no-block reboot" ]
 }
 
-@test "GRUB: the booted slot's try flag is cleared just before the reset begins; the real-time tuning goes; the rest of grubenv stays" {
+@test "GRUB: the booted slot's try flag is cleared just before the reset begins; the real-time tuning, the display setting and the device's splash go; the rest of grubenv stays" {
   request ''
   boot
   [ "$status" -eq 0 ]
@@ -517,6 +522,8 @@ outside() {
   # flag is cleared.
   [ "$(head -n 5 "$tmp/calls" | tr '\n' '|')" = "mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|mount ro,noexec,nodev,nosuid,nosymfollow vda4|umount vda4|grub-editenv set A_TRY=0|" ]
   grep -qx 'grub-editenv unset IRONFLOCKOS_RT_CMDLINE' "$tmp/calls"
+  grep -qx 'grub-editenv unset IRONFLOCKOS_BOOT' "$tmp/calls"
+  [ ! -e "$esp/EFI/BOOT/splash.cpio" ] && [ -e "$esp/EFI/BOOT/BOOTX64.EFI" ]
 }
 
 @test "GRUB: a booted slot that is not good, or a command line without a slot, leaves the try flags alone" {
@@ -630,7 +637,7 @@ outside() {
   ! grep -q -e owner-device -e ironflockostest -e OwnerWiFi <<<"$output"
 }
 
-@test "nothing outside the data partition and the paths of the reset changes; a new .flock and proxy.conf wait for the next boot; part files go" {
+@test "nothing outside the data partition and the paths of the reset changes; a new .flock, proxy.conf and ca.crt wait for the next boot; part files go" {
   before=$(outside)
   echo '{"secret": "half written"}' >"$esp/.factory-reset.flock.part"
   request 'keep-network=yes\n'
@@ -639,6 +646,7 @@ outside() {
   [ "$(outside)" = "$before" ]
   [ "$(cat "$esp/new-device.flock")" = '{"name": "new-device", "secret": "new"}' ]
   grep -qx 'http_proxy=http://new-proxy:3128' "$esp/proxy.conf"
+  grep -qx '# the new device corporate CA' "$esp/ca.crt"
   [ ! -e "$esp/.factory-reset.flock.part" ]
 }
 
@@ -725,7 +733,7 @@ outside() {
   rm "$esp/factory-reset.log" "$slot/var/lib/ironflockos/factory-reset.log"
   request 'keep-network=yes\n'
   boot
-  [ "$(value result)" = done ] && [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf" ]
+  [ "$(value result)" = done ] && [ "$(value kept)" = "rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf ironflockos/ca.crt" ]
 }
 
 @test "a slot cleared halfway is finished the same at the next attempt" {
@@ -786,9 +794,10 @@ outside() {
   [[ "$(value reason)" == "the data partition is not the partition named data on the disk of the root slot" ]]
   [ "$(state_value outcome)" = gave-up ]
   # The device stays the device it was: the request is retired, the .flock and
-  # proxy.conf that came for after the reset are gone, nothing is held.
+  # proxy.conf and ca.crt that came for after the reset are gone, nothing is
+  # held.
   [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
-  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
+  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/proxy.conf" ] && [ ! -e "$esp/ca.crt" ] && [ "$(hold_mode)" = none ]
   grep -qx 'outcome=gave-up' "$data/ironflockos/factory-reset.done"
   [ "$(cd "$data" && find . | LC_ALL=C sort | grep -v factory-reset.done)" = "$data_before" ]
   # It is not tried again.
@@ -984,7 +993,7 @@ outside() {
   boot
   [ "$status" -eq 0 ]
   [ ! -e "$esp/factory-reset.conf" ] && [ -e "$esp/factory-reset.conf.gave-up" ]
-  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/Other.FLOCK" ] && [ ! -e "$esp/proxy.conf" ] && [ "$(hold_mode)" = none ]
+  [ ! -e "$esp/new-device.flock" ] && [ ! -e "$esp/Other.FLOCK" ] && [ ! -e "$esp/proxy.conf" ] && [ ! -e "$esp/ca.crt" ] && [ "$(hold_mode)" = none ]
   # An update carries the state into the new slot.
   grep -q 'reset_state=${IRONFLOCKOS_RESET_STATE:-/var/lib/ironflockos/factory-reset.state}' "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
   grep -q 'cp -p "$reset_state" "$mnt$reset_state"' "$repo/overlay/usr/lib/ironflockos/rauc-post-install"
@@ -1018,7 +1027,7 @@ outside() {
 
 # --- enroll and ironflockos-proxy, the units ----------------------------------------
 
-@test "enroll and ironflockos-proxy: wait leaves the IRONFLOCKOS partition's .flock and proxy.conf, copy takes them and leaves them there" {
+@test "enroll, ironflockos-proxy and ironflockos-ca: wait leaves the IRONFLOCKOS partition's .flock, proxy.conf and ca.crt, copy takes them and leaves them there" {
   lib=$repo/overlay/usr/lib/ironflockos
   mkdir -p "$tmp/agent" "$tmp/state" "$tmp/pdata" "$tmp/run"
   printf '#!/bin/bash\necho "$*" >>%s/init-calls\n' "$tmp" >"$tmp/ironflock"
@@ -1031,6 +1040,11 @@ outside() {
   enroll_env=(IRONFLOCKOS_AGENT_DIR="$tmp/agent" IRONFLOCKOS_STATE="$tmp/state" IRONFLOCKOS_IRONFLOCK="$tmp/ironflock"
     IRONFLOCKOS_ENROLL_CONF="$tmp/enroll.conf")
   proxy_env=(IRONFLOCKOS_PROXY_CONF="$tmp/pdata/proxy.conf" IRONFLOCKOS_AGENT_FLOCK="$tmp/agent/device-config.flock")
+  # The new owner's CA, a certificate as ironflockos-ca takes it.
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 -subj '/CN=New Owner CA' \
+    -keyout "$tmp/ca.key" -out "$esp/ca.crt" 2>/dev/null
+  printf '#!/bin/sh\n' >"$tmp/update-ca" && chmod +x "$tmp/update-ca"
+  ca_env=(IRONFLOCKOS_CA_CONF="$tmp/pdata/ca.crt" IRONFLOCKOS_CA_DIR="$tmp/store" IRONFLOCKOS_UPDATE_CA="$tmp/update-ca")
 
   echo wait >"$hold_file"
   : >"$tmp/state/enrolled"
@@ -1044,9 +1058,11 @@ outside() {
   [ "$status" -eq 0 ] && [[ "$output" == *"proxy.conf waits"* ]]
   grep -qx 'http_proxy=http://old:3128' "$tmp/pdata/proxy.conf" && [ -e "$esp/proxy.conf" ]
   grep -qx 'NO_PROXY=localhost,127.0.0.1,::1,old.example,.old.example' "$tmp/run/proxy.env"
+  run env "${ca_env[@]}" bash "$lib/ca"
+  [ "$status" -eq 0 ] && [[ "$output" == *"ca.crt waits"* ]] && [ ! -e "$tmp/pdata/ca.crt" ] && [ -e "$esp/ca.crt" ]
 
-  # copy: the .flock is used and stays, for the reset still to come; so does
-  # proxy.conf, and so do the other .flock files.
+  # copy: the .flock is used and stays, for the reset still to come; so do
+  # proxy.conf and ca.crt, and so do the other .flock files.
   echo copy >"$hold_file"
   run env "${enroll_env[@]}" bash "$lib/enroll"
   [ "$status" -eq 0 ]
@@ -1057,6 +1073,8 @@ outside() {
   [ "$status" -eq 0 ]
   grep -qx 'http_proxy=http://new-proxy:3128' "$tmp/pdata/proxy.conf" && [ -e "$esp/proxy.conf" ]
   grep -qx 'NO_PROXY=localhost,127.0.0.1,::1,new.example,.new.example' "$tmp/run/proxy.env"
+  run env "${ca_env[@]}" bash "$lib/ca"
+  [ "$status" -eq 0 ] && cmp -s "$tmp/pdata/ca.crt" "$esp/ca.crt"
 
   # Without /data (ironflockos-data-missing) both copy as well.
   rm "$hold_file"
@@ -1072,6 +1090,8 @@ outside() {
   [ ! -e "$esp/other.flock" ]
   run env "${proxy_env[@]}" bash "$lib/proxy"
   [ ! -e "$esp/proxy.conf" ]
+  run env "${ca_env[@]}" bash "$lib/ca"
+  [ "$status" -eq 0 ] && [ ! -e "$esp/ca.crt" ] && [ -e "$tmp/pdata/ca.crt" ]
 }
 
 @test "the units: the reset and the note of a missing /data are wanted by /data's mount; nothing of /data or IRONFLOCKOS can stop the boot" {
@@ -1082,7 +1102,7 @@ outside() {
   grep -qx 'ConditionPathIsMountPoint=!/data' "$u"
   grep -qx 'ExecStart=/usr/lib/ironflockos/factory-reset' "$u"
   grep -qx 'Before=systemd-fsck@dev-disk-by\\x2dpartlabel-data.service data.mount local-fs.target' "$u"
-  grep -qx 'Before=ironflockos-data-layout.service ironflockos-proxy.service ironflockos-ptp.service' "$u"
+  grep -qx 'Before=ironflockos-data-layout.service ironflockos-proxy.service ironflockos-ca.service ironflockos-ptp.service' "$u"
   grep -qE '^TimeoutStartSec=[0-9]+min$' "$u"
   ! grep -q '^\[Install\]' "$u"
   [ "$(readlink "$units/data.mount.wants/ironflockos-factory-reset.service")" = ../ironflockos-factory-reset.service ]

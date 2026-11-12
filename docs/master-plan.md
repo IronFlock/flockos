@@ -479,6 +479,8 @@ away (builds are 10 to 20 minutes). Jetson builds pull a 2 GB BSP; cache it with
 - No telemetry calls from login shells (the legacy motd called `ipinfo.io` three times
   per login).
 - Unattended upgrades off; the OS changes only through signed RAUC bundles.
+- AppArmor on the Debian images: Docker's default profile on every container that is
+  not privileged (ADR-0020).
 - `nftables` default-deny inbound except SSH and what Docker publishes (opt-in in Phase 2;
   Docker's own chains are respected).
 - Reproducible rootfs (`SOURCE_DATE_EPOCH`), SBOM per image, provenance attestations,

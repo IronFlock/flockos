@@ -160,16 +160,18 @@ SH
   grep -q 'target: /dev/nvme0n1' "$tmp/esp/ironflockos-installer.log"
 }
 
-@test "dry run: the .flock and the site's proxy.conf go to the new IRONFLOCKOS partition" {
+@test "dry run: the .flock and the site's proxy.conf and ca.crt go to the new IRONFLOCKOS partition" {
   fake_machine
   printf 'confirm=no\n' >"$tmp/esp/installer.conf"
   printf 'http_proxy=http://proxy:3128\n' >"$tmp/esp/proxy.conf"
+  printf '# a corporate CA\n' >"$tmp/esp/ca.crt"
   PATH="$tmp/bin:$PATH" IRONFLOCKOS_ESP=$tmp/esp IRONFLOCKOS_PAYLOAD_DIR=$tmp/payload IRONFLOCKOS_DRY_RUN=1 run bash "$lib/installer"
   [ "$status" -eq 0 ]
   [[ "$output" == *"copying device.flock to the new IRONFLOCKOS partition"* ]]
   [[ "$output" == *"copying proxy.conf to the new IRONFLOCKOS partition"* ]]
-  # The stick keeps it, for the next device.
-  [ -e "$tmp/esp/proxy.conf" ]
+  [[ "$output" == *"copying ca.crt to the new IRONFLOCKOS partition"* ]]
+  # The stick keeps them, for the next device.
+  [ -e "$tmp/esp/proxy.conf" ] && [ -e "$tmp/esp/ca.crt" ]
 }
 
 @test "dry run: with confirm=yes anything but 'yes' stops before writing" {

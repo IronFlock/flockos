@@ -19,7 +19,7 @@ After=boot-efi.mount systemd-remount-fs.service systemd-repart.service dev-disk-
 # Before /data is checked and mounted, and before anything that reads the
 # settings on it: Docker, containerd and the agent come after local-fs.target.
 Before=systemd-fsck@dev-disk-by\x2dpartlabel-data.service data.mount local-fs.target
-Before=ironflockos-data-layout.service ironflockos-proxy.service ironflockos-ptp.service
+Before=ironflockos-data-layout.service ironflockos-proxy.service ironflockos-ca.service ironflockos-ptp.service
 Conflicts=shutdown.target
 Before=shutdown.target
 

@@ -3,10 +3,11 @@
 # device comes up on the root slot's own folders, as /etc/fstab mounts /data
 # and its bind mounts with nofail. This says so as loudly as a device without
 # a person at it can: on the console, in the journal and in
-# /run/ironflockos/data-missing, which enroll and ironflockos-proxy read (they then
-# take the IRONFLOCKOS partition's .flock and proxy.conf without removing them:
-# what the device keeps now is lost with the next update). It also makes the
-# folders of /data that the SSH host keys, the proxy and RAUC are written to.
+# /run/ironflockos/data-missing, which enroll, ironflockos-proxy and ironflockos-ca
+# read (they then take the IRONFLOCKOS partition's .flock, proxy.conf and ca.crt
+# without removing them: what the device keeps now is lost with the next
+# update). It also makes the folders of /data that the SSH host keys, the
+# proxy, the trusted CAs and RAUC are written to.
 set -eu
 # IRONFLOCKOS_RUN, IRONFLOCKOS_DATA: for the unit tests only.
 run=${IRONFLOCKOS_RUN:-/run/ironflockos}
@@ -16,3 +17,7 @@ mkdir -p "$run"
 printf '%s\n' "$msg" >"$run/data-missing"
 mkdir -p "$d/etc/ssh" "$d/ironflockos" "$d/rauc" 2>/dev/null || true
 echo "data-missing: $msg"
+# For a person at the device, on the splash (IRONFLOCKOS_SCREEN_MESSAGE: for
+# the unit tests only).
+"${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}" \
+  "The data partition could not be mounted: the apps do not run." 2>/dev/null || true

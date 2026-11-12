@@ -51,6 +51,17 @@ CFG
 render "$target_dir/grub/grub.cfg" >"$esp_dir/EFI/BOOT/grub.cfg"
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" create
 grub-editenv "$esp_dir/EFI/BOOT/grubenv" set "ORDER=A B" A_OK=1 A_TRY=0 B_OK=0 B_TRY=0 IRONFLOCKOS_CMDLINE=
+# The installer talks to the person at the screen: it boots on text, as
+# before the splash (docs/build.md, "The screen"). A device boots with the
+# splash unless its display.conf says otherwise.
+if [ "${VARIANT:?}" = installer ]; then
+  grub-editenv "$esp_dir/EFI/BOOT/grubenv" set IRONFLOCKOS_BOOT=text
+fi
+# What GRUB draws at the start of the splash: the background colour (the
+# theme's default, black) and no picture until a device has taken one from
+# its screen. ironflockos-splash writes it from the device's splash.conf.
+grub-editenv "$esp_dir/EFI/BOOT/splash.env" create
+grub-editenv "$esp_dir/EFI/BOOT/splash.env" set "IRONFLOCKOS_SPLASH_BACKGROUND=#000000"
 cat >"$esp_dir/README.txt" <<'TXT'
 IronFlockOS
 ===========
@@ -71,7 +82,7 @@ export MTOOLS_SKIP_CHECK=1
 mmd -i "$esp" ::/EFI ::/EFI/BOOT ::/EFI/debian
 mcopy -i "$esp" -m "$esp_dir/README.txt" ::/README.txt
 mcopy -i "$esp" -m "$esp_dir/EFI/BOOT/$EFI_LOADER" "$esp_dir/EFI/BOOT/mm$EFI_ARCH.efi" "$esp_dir/EFI/BOOT/grub$EFI_ARCH.efi" \
-  "$esp_dir/EFI/BOOT/grub.cfg" "$esp_dir/EFI/BOOT/grubenv" ::/EFI/BOOT/
+  "$esp_dir/EFI/BOOT/grub.cfg" "$esp_dir/EFI/BOOT/grubenv" "$esp_dir/EFI/BOOT/splash.env" ::/EFI/BOOT/
 mcopy -i "$esp" -m "$esp_dir/EFI/debian/grub.cfg" ::/EFI/debian/
 
 # --- slot A: ext4 of the full slot size from the tree ----------------------

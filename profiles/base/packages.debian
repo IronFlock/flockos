@@ -10,3 +10,12 @@ firmware-iwlwifi
 firmware-atheros
 firmware-brcm80211
 firmware-mediatek
+
+# AppArmor's tools and its unit that loads the profiles (ADR-0020). Debian's
+# kernels have AppArmor on; with the tools Docker confines every container
+# that is not privileged with its docker-default profile, and the profiles
+# that Debian's packages bring come into force: chrony's, which the image
+# extends in /etc/apparmor.d/local/usr.sbin.chronyd. The Raspberry Pi's kernel
+# decides for itself whether AppArmor is on; with it off the package does
+# nothing. Not on Jetson (Ubuntu and NVIDIA's kernel) until it is tried there.
+apparmor

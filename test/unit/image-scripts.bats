@@ -178,6 +178,34 @@ slot_proven() {
   done
 }
 
+@test "the boot repairs a filesystem that a preen gives up on, on every target" {
+  repo="$BATS_TEST_DIRNAME/../.."
+  for boot in targets/amd64-efi/grub/grub.cfg targets/rpi-arm64/boot/cmdline.txt targets/jetson-orin/boot/extlinux.conf; do
+    grep -qE '(^|[[:space:]])fsck\.repair=yes([[:space:]]|$)' "$repo/$boot"
+    # Not forced at every boot: a check of all of /data takes its time.
+    ! grep -q 'fsck\.mode=force' "$repo/$boot"
+  done
+}
+
+@test "chrony's AppArmor profile allows every folder the image's chrony reads" {
+  repo="$BATS_TEST_DIRNAME/../.."
+  conf="$repo/overlay/etc/chrony/conf.d/10-ironflockos.conf"
+  local_profile="$repo/overlay/etc/apparmor.d/local/usr.sbin.chronyd"
+  dirs=$(awk '$1 == "confdir" || $1 == "sourcedir" { for (i = 2; i <= NF; i++) print $i }' "$conf")
+  [ -n "$dirs" ]
+  for dir in $dirs; do
+    case "$dir" in
+      # What Debian's profile allows itself.
+      /etc/chrony/* | /run/chrony/* | /run/chrony-dhcp) continue ;;
+      /run/*) ;;
+      *) echo "chrony reads $dir, which is not below /run: add it to the local profile by hand" && false ;;
+    esac
+    grep -qxF "@{run}/${dir#/run/}/{,**} r," "$local_profile"
+  done
+  # Debian images get AppArmor's tools; without them no profile is in force.
+  grep -qx apparmor "$repo/profiles/base/packages.debian"
+}
+
 @test "data-layout is idempotent and keeps what is there" {
   IRONFLOCKOS_DATA=$tmp sh "$lib/data-layout"
   echo keep >"$tmp/home/file"

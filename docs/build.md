@@ -72,6 +72,19 @@ whose `/data` cannot be mounted runs on the root slot's own folders, without
 Docker, and `ironflockos-data-missing` says so on the console and in
 `/run/ironflockos/data-missing` (ADR-0015).
 
+`/data` and the IRONFLOCKOS partition are checked before they are mounted
+(`systemd-fsck`, the last field of their lines in `/etc/fstab`), and
+`fsck.repair=yes` on the kernel command line of every target (ADR-0020) has the
+check repair what it finds. Without it the check only preens, and a `/data` with
+damage a preen gives up on, as a power cut can leave it, would stay unmounted
+with nobody there to run `fsck` by hand. A repair can drop damaged files. The
+check is not forced at every boot: it runs when the filesystem is marked as not
+clean or as having errors. The root slot is mounted by the initramfs, where
+ext4 replays its journal; a slot that does not boot falls back to the other one
+("Boot and A/B"). On the EFI targets the command line is in `grub.cfg` on the
+IRONFLOCKOS partition, which an update does not write, so a device installed
+before this keeps the preen.
+
 | Path | From |
 |------|------|
 | `/opt/ironflock` | `/data/ironflock` (agent, `.flock` copy, Docker data-root) |
@@ -170,7 +183,9 @@ tried, GRUB starts over with the first good one.
 
 `IRONFLOCKOS_CMDLINE` in `grubenv` appends kernel parameters on both slots, for
 diagnosis in the field (`grub-editenv /boot/efi/EFI/BOOT/grubenv set
-IRONFLOCKOS_CMDLINE=...`) and for the QEMU tests.
+IRONFLOCKOS_CMDLINE=...`) and for the QEMU tests. `IRONFLOCKOS_BOOT=text`
+boots without the splash, and `splash.cpio` next to `grubenv` is the device's
+own splash picture ([The screen](#the-screen)).
 
 Known limit of 1.x: slots are found by GPT partition name (`rootfs-a`,
 `rootfs-b`, `data`) and every image of a target has the same partition UUIDs.
@@ -319,6 +334,55 @@ NTP does not pass an HTTP proxy, and without the right time TLS through the
 proxy fails. chrony already uses the NTP servers DHCP hands out; `ntp=` adds
 servers for networks that hand out none (`chronyc sources` lists them).
 
+## Trusted CAs
+
+A device reaches an IronFlock appliance over TLS: the device-agent at
+`wss://ws.<domain>`, Docker and containerd at `registry.<domain>`, OS updates at
+the appliance's mirror. Where a corporate CA issued the appliance's certificate,
+the device has to trust that CA, from its first boot
+([ADR-0021](adr/0021-trusted-cas-come-with-the-boot-medium.md), from IronFlockOS
+0.17.0). Its CAs are a device setting: `/etc/ironflockos/ca.crt`, which links to
+`/data/ironflockos/ca.crt`, so they outlive updates. The file holds one or more
+PEM certificates; text outside them is a comment:
+
+```text
+# Example Corp: the root CA and the sub CA that issued the appliance's certificate
+-----BEGIN CERTIFICATE-----
+MIIBoTCCAUagAwIBAgIU...
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIBszCCAVmgAwIBAgIB...
+-----END CERTIFICATE-----
+```
+
+The CAs come with the boot medium, as the proxy does: a `ca.crt` on the
+IRONFLOCKOS partition, next to the `.flock`, replaces the device's set at the
+next boot and is removed from the partition. A file without a certificate
+clears the set. `ironflock os install` writes one with the machine's own extra
+CAs and the files of `--ca-cert`; `ironflock os flash --ca-cert` does too. The
+installer stick passes its `ca.crt` on to the disk it installs, and keeps it for
+the next device. During a factory reset it waits, or is taken and left there, as
+`proxy.conf` is ("Factory reset"). A file with a block that is not a
+certificate OpenSSL can read, or that is not text at all (a DER certificate),
+is refused as a whole: it stays on the partition, the device keeps its set, the
+journal says why and `ironflockos-ca` fails. On a device that runs, writing
+`/etc/ironflockos/ca.crt` applies within seconds.
+
+`ironflockos-ca` (`/usr/lib/ironflockos/ca`) puts the set into the system's
+trust store at every boot, before containerd, Docker, the device-agent, fwupd
+and RAUC start: one file per certificate, named by its SHA-256 fingerprint, in
+`/usr/local/share/ca-certificates/ironflockos`, then `update-ca-certificates`,
+only when the files changed. The store is in the root slot, which an update
+replaces, so the new slot gets the CAs on its first boot. Go programs (the
+agent, Docker, containerd), curl and OpenSSL read
+`/etc/ssl/certs/ca-certificates.crt`. A change of the file
+(`ironflockos-ca.path`) updates the store and restarts containerd, Docker and
+the agent if they run, as Go reads the store once, at a program's start.
+Removing the file removes the CAs. The journal names each CA the device
+trusts (`journalctl -u ironflockos-ca`): `ca: trusts <subject> (SHA-256
+<fingerprint>)`. Containers have their own trust stores; an app that talks to
+the appliance over TLS brings the CA itself.
+
 ## Network profiles
 
 NetworkManager keeps a device's network profiles in
@@ -387,7 +451,7 @@ It is requested by the file `factory-reset.conf` on the IRONFLOCKOS partition an
 runs at the next boot, before `/data` is mounted:
 
 ```ini
-keep-network=yes   # keep the network profiles, proxy.conf and ptp.conf (default no)
+keep-network=yes   # keep the network profiles, proxy.conf, ptp.conf and ca.crt (default no)
 ```
 
 `ironflockos-factory-reset` (`/usr/lib/ironflockos/factory-reset`) copies what is kept
@@ -396,15 +460,19 @@ enrollment, the agent, apps and users left in both root slots, makes a new
 filesystem on the data partition, puts the kept files back, writes
 `factory-reset.log`, removes the request and restarts. What is kept: RAUC's
 state (`/data/rauc`) always; with `keep-network=yes` also
-`/data/network/connections`, `/data/ironflockos/proxy.conf` and
-`/data/ironflockos/ptp.conf`. Everything else on `/data` goes. In the root slots
+`/data/network/connections`, `/data/ironflockos/proxy.conf`,
+`/data/ironflockos/ptp.conf` and `/data/ironflockos/ca.crt`. Everything else
+on `/data` goes. In the root slots
 the reset removes `/apps`, containerd's and NetworkManager's state, root's
 files, the sudo rule and the agent's unit, `/var/lib/ironflockos/enrolled` and the
 accounts the enrollment made, and sets the hostname back to `ironflockos` and the
 machine-id to `uninitialized`; `slot-proven`, `ORDER` and the `_OK` flags of
-`grubenv` stay. ADR-0015 lists every path. The boot after the reset is a first
-boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf` and a
-`.flock` on the IRONFLOCKOS partition taken in.
+`grubenv` stay. On the EFI targets it also takes `IRONFLOCKOS_RT_CMDLINE` and
+`IRONFLOCKOS_BOOT` out of `grubenv` and removes the device's own splash,
+`splash.cpio` and `splash.env` next to it
+([The screen](#the-screen)). ADR-0015 lists every path. The boot after the reset is a first
+boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf`, a
+`ca.crt` and a `.flock` on the IRONFLOCKOS partition taken in.
 
 No failure of the reset keeps a device offline. Each request has three
 attempts, counted in `/var/lib/ironflockos/factory-reset.state` of the booted slot
@@ -419,10 +487,10 @@ is never done twice. Where the count cannot be written there is no attempt.
 A request that ended never fires again: a given-up request is renamed to
 `factory-reset.conf.gave-up`, its outcome is marked on `/data`, and the state
 goes with every update into the new slot. After a give-up with the old data
-the device stays the device it was; the `.flock` and `proxy.conf` that came
-with the request are removed. `/run/ironflockos/factory-reset-hold` tells enroll
-and `ironflockos-proxy` what to do with the IRONFLOCKOS partition's `.flock` and
-`proxy.conf`: leave them (`wait`, a request is open and the old owner's data
+the device stays the device it was; the `.flock`, `proxy.conf` and `ca.crt`
+that came with the request are removed. `/run/ironflockos/factory-reset-hold`
+tells enroll, `ironflockos-proxy` and `ironflockos-ca` what to do with the
+IRONFLOCKOS partition's `.flock`, `proxy.conf` and `ca.crt`: leave them (`wait`, a request is open and the old owner's data
 may be on `/data`; `gave-up`, they could not be removed after a give-up), or
 take them and leave them there (`copy`, once the erase has begun). Network
 profiles there follow `wait` and `copy` the same way, and after a give-up they
@@ -469,13 +537,15 @@ from this section.
   which an update carries into the new slot. To try again, write a new
   request.
 - **The hold.** `/run/ironflockos/factory-reset-hold`, written at each boot the
-  reset runs: `wait` (a request is open; the IRONFLOCKOS partition's `.flock` and
-  `proxy.conf` stay unused while the old owner's data may be on `/data`),
+  reset runs: `wait` (a request is open; the IRONFLOCKOS partition's `.flock`,
+  `proxy.conf` and `ca.crt` stay unused while the old owner's data may be on
+  `/data`),
   `copy` (a request is open and has begun to erase; they are used and stay),
   `gave-up` (the reset gave up with the old data and could not remove them;
   they stay unused); no file: no request is open, they are used as on any
   device. After a give-up with the old data the device is the device it was,
-  and the `.flock` and `proxy.conf` that came with the request are removed.
+  and the `.flock`, `proxy.conf` and `ca.crt` that came with the request are
+  removed.
 - **Before writing.** The next start must run a system that has the reset: the
   running system must be the bootloader's next choice and marked good (`rauc
   status`: the booted slot is `boot_primary` and its `boot_status` is `good`),
@@ -496,7 +566,8 @@ from this section.
   `/boot/efi/<name>.flock`. Remove every other `*.flock` on the partition first:
   enroll takes the newest one by modification time, which FAT keeps to two
   seconds. If the `.flock` cannot be written, remove the request again. A
-  `proxy.conf` for the new site goes to `/boot/efi/proxy.conf` the same way.
+  `proxy.conf` for the new site goes to `/boot/efi/proxy.conf` the same way,
+  and its CAs to `/boot/efi/ca.crt` (IronFlockOS 0.17.0 and later).
   While the old owner's data may still be on `/data`, neither is taken: the
   new identity never runs on the old data. After a failed attempt that had
   begun to erase, both are taken and left on the partition, so the device
@@ -539,16 +610,267 @@ from this section.
   | `request` | the request's identity (checksum, size, time of change), as in the state; for `refused` too, `unreadable-<time>` when its content cannot be read |
   | `attempt`, `attempts-max` | all but `refused`: the attempt this is, of `3`, never `0`; with `reason=cannot count the attempt in <file>` the attempt that was due and not made |
   | `keep-network` | `done`, `incomplete`, `gave-up`: `yes` or `no` as the request said; `unknown` when it could not be read back from `factory-reset.keep` |
-  | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf`, space-separated |
+  | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf ironflockos/ca.crt`, space-separated |
   | `other-slot` | `done`, `incomplete`: `cleaned`, `none (...)` (no partition or filesystem), or `not cleaned (...)`: on another disk, no IronFlockOS, the booted slot is none of `system.conf`, cannot mount, error |
   | `note` | `done`, `incomplete`, when something could not be kept: why |
-  | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `keep-file` |
+  | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `splash`, `keep-file` |
   | `reason` | `failed`, `gave-up` (the last failure), `refused`: why; for `refused` one of the reasons of `check`; for `failed` also `cannot count the attempt in <file>` (no attempt was made) and `the attempt did not end within <n> seconds` |
   | `begun` | `failed`: whether `factory-reset.keep` had its name |
   | `data` | `failed`, `gave-up`: what `/data` holds now: `old` (not erased), `new` (a new filesystem, with the kept files; when no attempt was made, one that mounts), `none` (no filesystem mounts: the device runs without `/data`) |
   | `left` | `gave-up`: what of the old owner may still be on the device, space-separated, of `data`, `booted-slot`, `other-slot`; empty when nothing is |
 
   It names nothing of the old owner.
+
+## AppArmor
+
+The Debian images carry AppArmor's tools (`apparmor` in
+`profiles/base/packages.debian`; ADR-0020). Debian's kernels have AppArmor on,
+and with the tools:
+
+- Docker puts its `docker-default` profile on every container that is not
+  privileged, as on any Debian or Ubuntu host: no mounts, no writes to the
+  sensitive parts of `/proc` and `/sys`. A privileged container, and one
+  started with `apparmor=unconfined`, gets no profile. `docker info` names
+  `apparmor` among its security options.
+- The profiles that Debian's packages bring are in force. In the image that is
+  chrony's (`/etc/apparmor.d/usr.sbin.chronyd`). It does not allow the two
+  folders the image has chronyd read below `/run/ironflockos` (the PTP source
+  of "Time", the NTP servers of "Proxy"), so the image adds them in
+  `/etc/apparmor.d/local/usr.sbin.chronyd`, which that profile includes. A new
+  folder in `overlay/etc/chrony/conf.d` needs its line there; a unit test
+  compares the two.
+
+IronFlockOS brings no profiles of its own. `aa-status` shows what is loaded and
+which processes are confined; a denial is in the journal
+(`journalctl -k -g apparmor`). On the Raspberry Pi the kernel is Raspberry Pi's
+and decides whether AppArmor is on; with it off the package does nothing. The
+Jetson image (Ubuntu, NVIDIA's kernel) does not carry the package yet.
+
+## The screen
+
+A device with a screen shows a splash while it starts and keeps it on the
+screen until an app draws ([kiosk-plan.md](kiosk-plan.md) has the plan and
+the contract with a screen app). The EFI targets have it (`amd64-efi`,
+`arm64-efi`); the Raspberry Pi and Jetson boot on text as before.
+
+**Plymouth.** `plymouth`, its label plugin and fontconfig with DejaVu are
+packages of the EFI targets. Its theme `ironflockos`
+(`overlay/usr/share/plymouth/themes/ironflockos`, named in
+`/etc/plymouth/plymouthd.conf`) draws one picture centred at its own size in
+pixels on a background colour, never larger, made smaller only to fit a
+smaller screen, with no spinner and no progress; below it, one line for a
+message. The default picture is `docs/assets/ironflock-splash.png`,
+`docs/assets/ironflock-white.svg` rendered at 320x320 pixels, transparent
+around the logo (`rsvg-convert -w 320 -h 320` of Debian 13's librsvg 2.60, with
+its `bKGD` chunk dropped, so that it is a PNG the image itself would take); in
+the image it is the theme's `ironflock.png`. Animations are part of the theme:
+`fade` (the default) fades the picture in over a second while the system
+starts, `none` shows it at once; at shutdown it is shown at once. Plymouth's
+initramfs hook puts Plymouth, the theme, the fonts and the kernel's graphics
+drivers into the initramfs: `build/mkrootfs.sh` puts the theme into the tree
+before it makes the initramfs again, and the build log names the initramfs's
+size.
+
+**The kernel command line.** `grub.cfg` boots with the splash unless
+`IRONFLOCKOS_BOOT=text` is in `grubenv`, or `ironflockos.boot=text` in
+`IRONFLOCKOS_CMDLINE`:
+
+| | splash (default) | text |
+|---|---|---|
+| kernel parameters | `quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0 fbcon=map:9` | `plymouth.enable=0` |
+| GRUB | graphics mode, the splash's colour, kept for the kernel | the console, as before |
+| GRUB's menu | hidden; Esc during its two seconds shows it | shown, as before |
+| `/initrd.img` | and `splash.cpio`, when there is one | alone |
+| tty1 | the splash, then a screen app; no login prompt | the boot messages and a login prompt |
+
+`quiet` holds for the serial console too: the kernel has one log level for
+all consoles. Errors still go there, and the journal keeps every line.
+Plymouth draws nothing while a serial console is named unless told to ignore
+it. Plymouth draws through the graphics device (DRM) once its driver is
+there, and with `plymouth.force-frame-buffer-on-boot` also into the kernel's
+framebuffer device, which it takes once `DeviceTimeout` in `plymouthd.conf`
+has passed: a tenth of a second here, not Debian's eight (plymouthd asserts
+a timeout above 0 and aborts on 0).
+What it shows through the graphics device would go with it: the kernel
+removes a framebuffer when the program that made it ends, turns the screen
+off and shows the framebuffer device instead, black unless Plymouth drew into
+it too. So at the end of the boot `plymouth-quit.service` runs
+`/usr/lib/ironflockos/keep-splash`: Plymouth lets go of the screen
+(`plymouth deactivate`), the framebuffer device, which holds the same picture,
+is put on the screen in the same mode (a forced `FBIOPUT_VSCREENINFO`: no mode
+change, only the other picture), the first virtual terminal is handed back
+as Plymouth leaves it when it quits without letting go first, and then
+Plymouth quits keeping its splash (`plymouth quit --retain-splash`). That
+terminal stays in graphics mode, so nothing the kernel writes is drawn over
+it; its keyboard is on (`K_UNICODE`; Plymouth turns it off while it reads
+the keyboard itself, and the kernel then ignores Ctrl+Alt+F2 too); and it is
+switched by a process (`VT_PROCESS`) that is gone, so that Ctrl+Alt+F2 finds
+nobody to ask, resets it to text mode and switches.
+`plymouth deactivate` alone leaves it in graphics mode switched by nobody
+(`VT_AUTO`), where the kernel ignores every switch. keep-splash also writes
+to the journal when Plymouth started. Nothing of the
+image holds the graphics device after the boot; a screen app that opens it
+takes the screen, and when it closes it, the picture is back. A Plymouth
+that crashes leaves the device as it would be without a splash: a drop-in
+for `plymouth-start.service` counts its crash signals as an ending, so the
+system does not turn "degraded"; the journal keeps how it ended. With the
+splash `getty@tty1` does not start (a drop-in with
+`ConditionKernelCommandLine=!splash`); logind starts a login prompt on the
+terminals 2 to 6 when one is switched to.
+
+**The display setting.** `/etc/ironflockos/display.conf`, which links to
+`/data/ironflockos/display.conf`:
+
+```ini
+boot=text   # splash (default) or text
+```
+
+`ironflockos-display` (`/usr/lib/ironflockos/display`) writes it into `grubenv`
+as `IRONFLOCKOS_BOOT=text`, or takes `IRONFLOCKOS_BOOT` out for `splash`, at
+every boot and whenever the file changes (`ironflockos-display.path`). GRUB
+reads it on both slots, so it holds across updates; a change applies at the
+next boot. A file with another key or value is refused: `grubenv` stays as it
+is, the journal says why, the unit fails. The installer stick's `grubenv` has
+`IRONFLOCKOS_BOOT=text`; the QEMU tests set `ironflockos.boot=text` in
+`IRONFLOCKOS_CMDLINE`, except for the boots that test the splash.
+
+**The device's own picture.** A screen app, such as IronFlock's kiosk app,
+hands the device its splash in `/data/ironflockos/screen`, which
+`ironflockos-data-layout` makes at every boot, before Docker, owned by root:
+
+- `splash.png`: a PNG of at most 4 MiB and 3840x2160 pixels, with the chunks
+  `IHDR`, `PLTE`, `tRNS`, `IDAT` and `IEND` and no others;
+- `splash.conf`: `background=#RRGGBB` (default `#000000`) and
+  `animation=none|fade` (default `fade`); `#` starts a comment at the start of
+  a line or after a space.
+
+The app writes each under another name in that folder, syncs it and renames
+it. `ironflockos-splash` (`/usr/lib/ironflockos/splash`) takes them at every
+boot and whenever one of the two names changes (`ironflockos-splash.path`; a
+run that another name started reads the two names and changes nothing). It
+checks them, refuses what the list above does not allow (the journal says
+why, the unit fails, and the splash stays as it was), and packs the picture
+and the theme's settings into a cpio archive, written under another name and
+renamed to `splash.cpio` next to `grubenv`. GRUB loads it after the slot's
+`initrd.img`, so the kernel unpacks it over the initramfs's theme and Plymouth
+has the picture from the start: no initramfs is made on a device, and the
+archive outlives updates. The archive holds the picture as the theme's
+`splash.png` and the theme's script with the settings in its first lines;
+an update that brings a new theme script gets a new archive at its first boot,
+which applies from the boot after. A damaged archive stops no boot: the kernel
+unpacks what it can and says `Initramfs unpacking failed` in its log, and the
+theme shows IronFlock's logo when `splash.png` is missing or does not load.
+Without either file the archive goes, and IronFlock's logo is back from the
+next boot on. Plymouth at shutdown draws from the running system's theme:
+`ironflockos-splash` mounts a copy of it with the archive's files from
+`/run/ironflockos/splash-theme` over the theme's folder. A factory reset
+removes the archive and `IRONFLOCKOS_BOOT` with the old owner's data
+([Factory reset](#factory-reset)). `/usr/lib/ironflockos/splash check-png FILE`
+and `check-conf FILE` tell whether a file would be taken.
+
+**From the firmware's picture to the splash.** With the splash GRUB fills the
+screen with the splash's background colour, in graphics mode (`gfxterm`,
+with the font of Debian's GRUB for the menu), and the kernel keeps that mode
+and what GRUB drew (`gfxpayload=keep`). `splash.env` next to `grubenv` names
+the colour (`IRONFLOCKOS_SPLASH_BACKGROUND`, black from the build; GRUB reads
+only this from it); `ironflockos-splash` writes it with every `splash.conf`
+it takes. `gfxterm` fills its whole screen with the colour (the frames of the
+QEMU test show no border); its text has a black, that is transparent,
+background (`color_normal`, `color_highlight`), so what GRUB clears the
+screen to stays the colour, and a `clear` right after draws it at once, for
+the whole of the hidden menu's timeout (`gfxterm` draws a new background only
+with its next output). The menu (Esc) shows its chosen entry inverted, in
+its own colours (`menu_color_normal`, `menu_color_highlight`). GRUB draws no
+picture: the picture comes with Plymouth, on the same colour. The kernel's
+console stays off the screen while it starts (`fbcon=map:9`, a framebuffer
+that never comes), so it does not clear the colour GRUB left before Plymouth
+draws; once the running system finds a framebuffer, udev runs
+`/usr/lib/ironflockos/consoles` (`71-ironflockos-consoles.rules`), which
+gives the terminals their console back. By then Plymouth holds the first
+terminal in graphics mode, where the console draws nothing; the terminals 2
+to 6 have their text, and Esc shows the boot messages. In the initramfs, before
+that, Esc shows nothing, and a failure there is on the serial console only;
+"Start with messages" in the boot menu shows it on the screen.
+
+Whether the colour stays when the kernel's graphics driver takes the screen
+from the firmware's framebuffer is the driver's: Intel's keeps the mode and
+its content; QEMU's (`bochs`, `virtio-gpu`) set their own mode and start with
+an empty screen until Plymouth draws, which the QEMU test counts and does not
+fail on (QEMU's standard VGA also shows one frame of the screen before read
+with 24 bits a pixel while `bochs` sets its mode). The machine has the last
+word (WP-8.6). GRUB drawing the picture as well is a later work package
+(docs/kiosk-plan.md, WP-8.8): in QEMU GRUB put a picture at the screen's
+corner, the same pixels as Plymouth's otherwise, and it needs a picture of
+the whole screen taken after a boot, which only the panel can prove.
+
+**Messages on the splash.** What the image says on the console to a person at
+the device also goes to the line below the picture, through
+`/usr/lib/ironflockos/screen-message TEXT` (`plymouth display-message` while
+Plymouth runs; without Plymouth, as with `boot=text`, it does nothing and the
+console lines are as they were):
+
+| Script | Message |
+|--------|---------|
+| `ironflockos-enroll`, no `.flock` | Not enrolled: put this device's .flock file on its IRONFLOCKOS partition. |
+| `ironflockos-enroll`, none accepted | Not enrolled: the .flock file on the IRONFLOCKOS partition was not accepted. |
+| `ironflockos-data-missing` | The data partition could not be mounted: the apps do not run. |
+| `ironflockos-apps-check` | The apps' data is not on the data partition: it is lost at the next update. |
+| `ironflockos-network-profiles` | The network profile NAME was refused: it is not taken. |
+| `ironflockos-factory-reset` | Factory reset: this takes a few minutes. Do not turn the device off. / Factory reset done: the device restarts. / The factory reset failed this time: the next start tries again. / The factory reset gave up: see factory-reset.log on the IRONFLOCKOS partition. |
+| `ironflockos-nvidia-secure-boot` | Secure Boot is on: the NVIDIA GPU cannot be used. Turn Secure Boot off in the firmware setup. |
+
+The theme shows the last one, in white on a dark background and in black on a
+light one. Plymouth quits after `ironflockos-enroll` (the drop-in for
+`plymouth-quit.service`), so the message that is there then stays below the
+picture after the boot.
+
+**Keys at the screen.** A person with a keyboard at the device has the keys
+of any PC:
+
+| Key | When | What |
+|-----|------|------|
+| the firmware's setup key | power-on | the firmware's setup, as the PC's maker set it |
+| Esc | GRUB's two seconds | the boot menu: the slot GRUB chose, the other slot as its fallback (once it has been marked good), "Start with messages" (this boot on text, `boot=` stays as it is), "Firmware setup" (`fwsetup`; also for the `-rt` images, whose kernel turns the EFI runtime services off) |
+| Esc | while Plymouth shows the splash | the boot messages; Esc again, the splash |
+| Ctrl+Alt+F2 to F6 | after the boot | a login prompt (logind starts it on the first switch) |
+| Ctrl+Alt+F1 | | back to the first terminal: the splash or the screen app; without a screen app, what the other terminal left there |
+| Ctrl+Alt+Del | | restart, as before |
+
+**The console password.** Nobody logs in at the console unless the device
+has a console password (D8 of [kiosk-plan.md](kiosk-plan.md)):
+`/data/ironflockos/console-password`, owned by root with mode 0600, written by
+the device-agent from Studio, one line with a crypt(3) hash, yescrypt (`$y$`)
+or SHA-512 (`$6$`). `ironflockos-console-password`
+(`/usr/lib/ironflockos/console-password`) makes it the password of the device's
+enrolled user, the account `ironflock enroll` makes from the `.flock`'s owner
+for SSH, with its sudo rule; it finds that user in `ironflock`'s record of the
+enrollment, `/opt/ironflock/device-init/installed.json` (`.user.name`), which
+`ironflock status --json` does not show, and takes it only as an account of a
+person (uid 1000 to 59999) with the rule `/etc/sudoers.d/ironflock-<name>`. It
+runs at every boot after `ironflockos-enroll`, which makes the user anew in a
+slot an update brought, before the login prompts (a drop-in orders
+`getty@.service` after it), and whenever the file changes
+(`ironflockos-console-password.path`). Without the file the password is locked,
+as enroll leaves it. Root and every other account are never touched; root
+stays locked. A file of another owner or mode, of more than one line, or with
+anything but one such hash is refused: the journal says why, the password is
+locked, the unit fails. SSH stays key-only (`PasswordAuthentication no`,
+`KbdInteractiveAuthentication no`, `PermitRootLogin no`). A factory reset
+removes the file with the rest of `/data`.
+
+**What a keyboard can do.** GRUB's editor stays open in this release (D9): a
+person at the boot menu can press `e` and change the kernel command line, and
+so start a root shell. With Secure Boot off, a USB stick with any system does
+the same. Whoever stands at the device with a keyboard gets root, as on any PC
+that is not locked down; Secure Boot here is no tamper protection
+(ADR-0011). A GRUB password, a firmware password and disk encryption are
+hardening for later.
+
+The splash comes with a new installation only: `grub.cfg` is on the
+IRONFLOCKOS partition, which an update does not write. A device installed
+with 0.16.0 or earlier keeps booting on text after an update to a release
+with the splash; it gets `ironflockos-splash`, which writes an archive its
+`grub.cfg` never loads.
 
 ## The nvidia variant
 

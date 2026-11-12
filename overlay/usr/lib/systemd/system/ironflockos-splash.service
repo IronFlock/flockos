@@ -1,0 +1,16 @@
+[Unit]
+Description=IronFlockOS: the device's own splash picture from /data/ironflockos/screen
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/build.md
+# /data and the IRONFLOCKOS partition, without requiring them: a device
+# without either starts as it would otherwise (ADR-0015).
+After=local-fs.target ironflockos-data-layout.service boot-efi.mount data.mount
+ConditionPathIsDirectory=/boot/efi/EFI/BOOT
+
+[Service]
+# Not RemainAfterExit: ironflockos-splash.path starts it again after the boot.
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/splash
+
+[Install]
+WantedBy=multi-user.target
+Also=ironflockos-splash.path

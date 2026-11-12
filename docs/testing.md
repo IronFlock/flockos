@@ -42,7 +42,10 @@ shows that the boot goes on, that the attempt is counted (three, then the
 reset gives up), and what the record says.
 The network profiles (`network-profiles.bats`) run against folders that stand
 for the IRONFLOCKOS partition and `/data/network/connections`, with every rule a
-profile has to meet. They need bash and bats only:
+profile has to meet. The trusted CAs (`ca.bats`) run against folders that
+stand for the IRONFLOCKOS partition, `/data` and the trust store, with a fake
+`update-ca-certificates` and certificates that `openssl` makes. They need bash,
+bats and openssl only:
 
 ```sh
 just test
@@ -53,11 +56,14 @@ just test
 `test/qemu/run.py` takes the artefacts of `just build` from `out/`, copies the
 disk image, grows the copy to 20 GiB (32 GiB for `nvidia`) and boots it with UEFI firmware (OVMF). The
 image is the shipped one; the only change to the copy is one value in its
-`grubenv`, `IRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1`, which gives a root shell
-on the second serial port (on arm64 `hvc0`, a virtio console: QEMU's `virt`
-machine has one UART). The script drives that shell; the first serial port
-(kernel and systemd console) is written to `console.log`. Because `grubenv` is on
-the IRONFLOCKOS partition, the shell is there on both slots, also after an update.
+`grubenv`, `IRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1 ironflockos.boot=text`,
+which gives a root shell on the second serial port (on arm64 `hvc0`, a virtio
+console: QEMU's `virt` machine has one UART) and boots on text, so that the
+kernel's messages are on the serial console; the steps of the screen take
+`ironflockos.boot=text` out for their boots and put it back. The script drives
+that shell; the first serial port (kernel and systemd console) is written to
+`console.log`. Because `grubenv` is on the IRONFLOCKOS partition, the shell is
+there on both slots, also after an update.
 
 With `--secure-boot` the firmware is the build with Microsoft's keys enrolled
 and Secure Boot on (`OVMF_CODE_4M.secboot.fd` with `OVMF_VARS_4M.ms.fd` on q35
@@ -93,8 +99,9 @@ Sequence:
    `/usr/bin/ironflock`, nothing named `ironflock-init` is left, and
    `ironflock version` is the `ironflock_version` of `image.json`;
    `ironflock status --json` names the image, its version and the booted slot
-   and, enrolled, the agent with the `.flock`'s device; `agent install` and
-   `agent remove` refuse (exit code 3), as root and not; `ironflock enroll` does
+   and, enrolled, the agent with the `.flock`'s device; `agent install`,
+   `agent remove` and `self-update` (the OS update brings `ironflock`) refuse
+   (exit code 3), as root and not; `ironflock enroll` does
    not accept a `.flock` that is not JSON (exit code 4) and leaves it where it
    is; none of them changes anything. Enrolled, the same file as the newest
    `.flock` on the IRONFLOCKOS partition is kept as `.rejected` and the
@@ -134,6 +141,12 @@ Sequence:
    environment while it runs, and chrony (`ntp=`); `proxy.env` is readable by
    root only. Nothing listens on the proxy address: a real proxy is on the
    hardware checklist.
+   Then the trusted CAs ([ADR-0021](adr/0021-trusted-cas-come-with-the-boot-medium.md)):
+   `ironflockos-ca` and its path unit run and the device has no extra CA. The
+   test makes a corporate chain in the VM with `openssl`: a root CA, a sub CA,
+   and a server certificate for `localhost` from the sub CA. curl refuses
+   `openssl s_server` with that certificate (exit code 60), and the two CAs go
+   to the IRONFLOCKOS partition as `ca.crt`.
    Then a network profile ([ADR-0016](adr/0016-network-profiles-from-the-ironflockos-partition.md)):
    a profile for a static address, the address, gateway and DNS server the VM
    has from DHCP on its card matched by MAC address, as `ironflock os install`
@@ -146,20 +159,91 @@ Sequence:
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
    The `proxy.conf` put on the IRONFLOCKOS partition before the reboot has replaced
    the device's (mode 0600) and left the partition, and Docker uses it; the test
-   then removes the proxy. The network profile has left the partition for
-   `/data/network/connections` (mode 0600, root's), and NetworkManager runs the
-   card on it: the address without DHCP's `dynamic` flag, the default route
+   then removes the proxy. The `ca.crt` has left the partition for
+   `/data/ironflockos/ca.crt` (mode 0644, the two certificates), the trust store
+   holds both, one file each in `/usr/local/share/ca-certificates/ironflockos`,
+   the journal names the root CA, and curl accepts the test's server. The CAs
+   stay until slot B has shown it trusts them. The network profile has left the
+   partition for `/data/network/connections` (mode 0600, root's), and
+   NetworkManager runs the card on it: the address without DHCP's `dynamic` flag, the default route
    through the gateway, and the host still answers. The profile is on trial
    (`ironflockos-network-profiles-trial` runs); the test writes the agent's mark of
    a connection, which its own agent never earns, and the trial ends with the
    profile kept. It stays for the rest of the test (QEMU's DHCP would hand out
    the same address).
+   **The screen** ([build.md](build.md#the-screen)). Every boot so far was on
+   text (`ironflockos.boot=text` in `IRONFLOCKOS_CMDLINE`, as the checks read the
+   serial console): no Plymouth, a login prompt on tty1. The VM has a screen
+   (`VGA` on amd64, `virtio-gpu-pci` on arm64), a virtio keyboard and tablet,
+   and a QMP socket; the test reads the screen with `screendump` about once a
+   second while it restarts and compares each frame with the splash it should
+   show: the picture centred on its background colour, faded in by some
+   amount, and nothing else. The rule for a boot: once the picture shows
+   after the kernel started, nothing else is on the screen, and from the
+   first answer of the root filesystem's shell to the end of the boot (and
+   five seconds after) it is the splash only, never fading back; empty
+   screens and dips before that answer, after the picture showed, are
+   counted in the log, not failed: QEMU's graphics drivers start with an
+   empty framebuffer when they take the screen from the firmware's.
+   *Splash:* the initramfs carries Plymouth, the
+   theme and IronFlock's logo; with random bytes as `splash.cpio` the device
+   boots with the splash, the kernel says `Initramfs unpacking failed`, and
+   from before the root filesystem's system answered to the end of the boot
+   the screen shows IronFlock's logo on black, faded in and never back;
+   Plymouth started in the initramfs (its start, which keep-splash writes to
+   the journal when it ends Plymouth, before systemd's
+   `UserspaceTimestampMonotonic`) and is gone at the end;
+   `ironflockos-splash` removes the damaged archive; tty1 is in front, in
+   graphics mode, without a login prompt; an error written to the kernel's log
+   reaches the serial console and leaves the screen as it is, and so do 30
+   seconds; every input device has `ID_INPUT=1`, one is a keyboard. *Own
+   splash:* a temporary file in `/data/ironflockos/screen` changes nothing; a
+   picture and `splash.conf` (`#204060`, `animation=none`), written as an app
+   writes them, become `splash.cpio`; a file that is no PNG, one larger than 4
+   MiB, one with a `tEXt` chunk and a `splash.conf` with an unknown key are
+   refused, the journal says why, and the archive stays; the running system's
+   theme has the picture for the shutdown; the next boot shows the picture on
+   `#204060` from before the root filesystem on, and Plymouth's shutdown splash
+   ran at the restart. The update keeps the archive; the factory reset removes
+   it. *Keys* (QMP `send-key`): Esc to a Plymouth started by hand shows the
+   messages and Esc again the splash; Ctrl+Alt+F2 switches to tty2, which gets
+   a login prompt, and Ctrl+Alt+F1 back to tty1. Enrolled, a SHA-512 hash in
+   `/data/ironflockos/console-password` becomes the enrolled user's password
+   and no other account's (root stays `*`), `sshd -T` still says no to
+   passwords for that user and root, the user logs in on tty2 with it (the
+   user's shell on tty2 after PAM's session in the journal), and without the
+   file the password is locked again. The boot
+   menu and its "Firmware setup" are checked in the rendered `grub.cfg`
+   (`test/unit/screen.bats`), not in QEMU. *GRUB's colour* (WP-8.7): after
+   the own splash step `splash.env` names its colour, and the next boot
+   shows the whole screen in that colour before the kernel starts (by the
+   kernel's uptime at the shell's first answer, after the firmware's last
+   picture); from there to the end only that colour, empty screens of it or
+   black, and the splash, and the rule above. An empty screen of another
+   colour fails, and so does anything else; the one frame QEMU's standard VGA
+   shows while the kernel's `bochs` driver sets its mode, the screen before
+   read with 24 bits a pixel, counts as an empty one only when its bytes are
+   exactly that screen's; and QEMU's own "Display output is not active." on
+   arm64, which it draws while virtio-gpu has no mode, is no picture of the
+   guest's, allowed only before the root filesystem's system answers and
+   never taken for the firmware's. GRUB draws no picture (a later work package). The
+   kernel command line keeps the console off the screen
+   (`fbcon=map:9`), and after the boot the framebuffer console is bound
+   again. Not tested in QEMU: whether the colour survives the moment a real
+   graphics driver (Intel's) takes the screen from the firmware, the frames
+   before the root filesystem's system (the initramfs's are not read one by
+   one: the check there is that Plymouth started in it), and the shutdown
+   splash's frames (the journal says it started). Each new kind of frame is
+   saved as `screen-*.png` with the logs.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
    machine-id, host key, `/data` and the app's file of slot A in `/apps`, and is
    enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
-   the agent's place.
+   the agent's place. Slot B's first boot has put the device's CAs into its
+   own trust store, and curl accepts the test's server there too. Then the
+   test removes `/data/ironflockos/ca.crt`: the CAs leave the store at once and
+   curl refuses the server again.
    `rauc install` runs in the background. As soon as RAUC reports on D-Bus
    that it installs (its property `Operation` is `installing`), `rauc status`,
    `ironflock os rollback --yes` and `ironflock os update --yes` (each also
@@ -410,4 +494,10 @@ WP-4b.2, WP-5.4, WP-6.6):
     on the IRONFLOCKOS partition, with the wired network unplugged. The device
     joins that WiFi on its first boot and enrolls; the profile has left the
     partition.
-12. Target-specific items in `docs/targets/<target>.md`.
+12. Trusted CAs (`docs/build.md`, "Trusted CAs"), behind an appliance whose
+    certificate a corporate CA issued: install with `ironflock os install`
+    (or flash with `--ca-cert`) and the appliance's `.flock`; the device
+    enrolls, the agent reaches the appliance, an app's image pulls from its
+    registry, and an OS update downloads from its mirror. After the update the
+    device still reaches the appliance.
+13. Target-specific items in `docs/targets/<target>.md`.

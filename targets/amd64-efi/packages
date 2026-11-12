@@ -19,3 +19,10 @@ grub-efi-amd64-signed
 # fwupd's UEFI capsule helper, signed by Debian: capsule updates (lane 3)
 # also start with Secure Boot on.
 fwupd-amd64-signed
+# The splash (docs/build.md, "The screen"): Plymouth with its script plugin,
+# which draws IronFlockOS's theme; the label plugin and fontconfig with
+# DejaVu, for the message line below the picture; all of it also in the
+# initramfs, with the kernel's graphics drivers (Plymouth's initramfs hook).
+plymouth
+plymouth-label
+fontconfig

@@ -37,6 +37,11 @@ run=${IRONFLOCKOS_RUN:-/run/ironflockos}
 agent_dir=${IRONFLOCKOS_AGENT_DIR:-/opt/ironflock/device-agent}
 state=${IRONFLOCKOS_STATE:-/var/lib/ironflockos}
 ironflock=${IRONFLOCKOS_IRONFLOCK:-/usr/bin/ironflock}
+# IRONFLOCKOS_SCREEN_MESSAGE: for the unit tests only.
+screen_message=${IRONFLOCKOS_SCREEN_MESSAGE:-/usr/lib/ironflockos/screen-message}
+
+# on_screen TEXT: TEXT for a person at the device, on the splash.
+on_screen() { "$screen_message" "$1" 2>/dev/null || true; }
 conf=${IRONFLOCKOS_ENROLL_CONF:-/etc/ironflockos/enroll.conf}
 agent_flock=$agent_dir/device-config.flock
 
@@ -62,6 +67,7 @@ fi
 if [ -f "$agent_flock" ]; then candidates+=("$agent_flock"); fi
 if [ ${#candidates[@]} -eq 0 ]; then
   echo "enroll: no .flock on the IRONFLOCKOS partition and none on /data: the device stays unenrolled"
+  on_screen "Not enrolled: put this device's .flock file on its IRONFLOCKOS partition."
   exit 0
 fi
 
@@ -121,6 +127,7 @@ case $rc in
     ;;
   4)
     echo "enroll: no .flock was accepted: the device stays unenrolled" >&2
+    on_screen "Not enrolled: the .flock file on the IRONFLOCKOS partition was not accepted."
     ;;
   *)
     echo "enroll: ironflock enroll -c $flock ended with exit code $rc: this slot is enrolled again at the next boot" >&2

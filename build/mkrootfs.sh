@@ -166,6 +166,24 @@ if [ "$BOOTLOADER" = tegra ]; then
     --customize-hook='rm -f "$1'"$l4t_marker"'"'
   )
 fi
+if [ "$BOOTLOADER" = grub-efi ]; then
+  # The splash (docs/build.md, "The screen"): Plymouth's theme, IronFlock's
+  # logo and the configuration that names the theme go into the tree before
+  # the initramfs is made again, so that it carries them; Plymouth draws from
+  # the initramfs. customize.sh copies the overlay over them again, the same
+  # files. The logo is the one file of the contract with a screen app
+  # (docs/kiosk-plan.md).
+  theme=/usr/share/plymouth/themes/ironflockos
+  # shellcheck disable=SC2016 # "$1" is mmdebstrap's, the tree's path
+  hooks+=(
+    --customize-hook='mkdir -p "$1'"$theme"'" "$1/etc/plymouth"'
+    --customize-hook="upload $src/overlay$theme/ironflockos.plymouth $theme/ironflockos.plymouth"
+    --customize-hook="upload $src/overlay$theme/ironflockos.script $theme/ironflockos.script"
+    --customize-hook="upload $src/docs/assets/ironflock-splash.png $theme/ironflock.png"
+    --customize-hook="upload $src/overlay/etc/plymouth/plymouthd.conf /etc/plymouth/plymouthd.conf"
+    --chrooted-customize-hook='update-initramfs -u -k all'
+  )
+fi
 if [ "$VARIANT" = nvidia ]; then
   [ "$ARCH" = amd64 ] || die "the nvidia variant is built for amd64 only"
   [ "$DISTRO_ID" = debian ] || die "the nvidia variant is built on Debian only (NVIDIA's repositories in profiles/nvidia are Debian's)"

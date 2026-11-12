@@ -663,7 +663,7 @@ method=auto
   # profiles in use, the ones the request promised, are kept, and the trial
   # with its way back ends with the reset.
   grep -qx 'keep_always="rauc"' "$repo/overlay/usr/lib/ironflockos/factory-reset"
-  grep -qx 'keep_network_items="network/connections ironflockos/proxy.conf ironflockos/ptp.conf"' \
+  grep -qx 'keep_network_items="network/connections ironflockos/proxy.conf ironflockos/ptp.conf ironflockos/ca.crt"' \
     "$repo/overlay/usr/lib/ironflockos/factory-reset"
   # The trial lives beside the profiles, not in what a reset keeps.
   grep -q 'trial=$(dirname -- "$dest")/trial' "$script"
