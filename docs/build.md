@@ -334,6 +334,55 @@ NTP does not pass an HTTP proxy, and without the right time TLS through the
 proxy fails. chrony already uses the NTP servers DHCP hands out; `ntp=` adds
 servers for networks that hand out none (`chronyc sources` lists them).
 
+## Trusted CAs
+
+A device reaches an IronFlock appliance over TLS: the device-agent at
+`wss://ws.<domain>`, Docker and containerd at `registry.<domain>`, OS updates at
+the appliance's mirror. Where a corporate CA issued the appliance's certificate,
+the device has to trust that CA, from its first boot
+([ADR-0021](adr/0021-trusted-cas-come-with-the-boot-medium.md), from IronFlockOS
+0.17.0). Its CAs are a device setting: `/etc/ironflockos/ca.crt`, which links to
+`/data/ironflockos/ca.crt`, so they outlive updates. The file holds one or more
+PEM certificates; text outside them is a comment:
+
+```text
+# Example Corp: the root CA and the sub CA that issued the appliance's certificate
+-----BEGIN CERTIFICATE-----
+MIIBoTCCAUagAwIBAgIU...
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIBszCCAVmgAwIBAgIB...
+-----END CERTIFICATE-----
+```
+
+The CAs come with the boot medium, as the proxy does: a `ca.crt` on the
+IRONFLOCKOS partition, next to the `.flock`, replaces the device's set at the
+next boot and is removed from the partition. A file without a certificate
+clears the set. `ironflock os install` writes one with the machine's own extra
+CAs and the files of `--ca-cert`; `ironflock os flash --ca-cert` does too. The
+installer stick passes its `ca.crt` on to the disk it installs, and keeps it for
+the next device. During a factory reset it waits, or is taken and left there, as
+`proxy.conf` is ("Factory reset"). A file with a block that is not a
+certificate OpenSSL can read, or that is not text at all (a DER certificate),
+is refused as a whole: it stays on the partition, the device keeps its set, the
+journal says why and `ironflockos-ca` fails. On a device that runs, writing
+`/etc/ironflockos/ca.crt` applies within seconds.
+
+`ironflockos-ca` (`/usr/lib/ironflockos/ca`) puts the set into the system's
+trust store at every boot, before containerd, Docker, the device-agent, fwupd
+and RAUC start: one file per certificate, named by its SHA-256 fingerprint, in
+`/usr/local/share/ca-certificates/ironflockos`, then `update-ca-certificates`,
+only when the files changed. The store is in the root slot, which an update
+replaces, so the new slot gets the CAs on its first boot. Go programs (the
+agent, Docker, containerd), curl and OpenSSL read
+`/etc/ssl/certs/ca-certificates.crt`. A change of the file
+(`ironflockos-ca.path`) updates the store and restarts containerd, Docker and
+the agent if they run, as Go reads the store once, at a program's start.
+Removing the file removes the CAs. The journal names each CA the device
+trusts (`journalctl -u ironflockos-ca`): `ca: trusts <subject> (SHA-256
+<fingerprint>)`. Containers have their own trust stores; an app that talks to
+the appliance over TLS brings the CA itself.
+
 ## Network profiles
 
 NetworkManager keeps a device's network profiles in
@@ -402,7 +451,7 @@ It is requested by the file `factory-reset.conf` on the IRONFLOCKOS partition an
 runs at the next boot, before `/data` is mounted:
 
 ```ini
-keep-network=yes   # keep the network profiles, proxy.conf and ptp.conf (default no)
+keep-network=yes   # keep the network profiles, proxy.conf, ptp.conf and ca.crt (default no)
 ```
 
 `ironflockos-factory-reset` (`/usr/lib/ironflockos/factory-reset`) copies what is kept
@@ -411,8 +460,9 @@ enrollment, the agent, apps and users left in both root slots, makes a new
 filesystem on the data partition, puts the kept files back, writes
 `factory-reset.log`, removes the request and restarts. What is kept: RAUC's
 state (`/data/rauc`) always; with `keep-network=yes` also
-`/data/network/connections`, `/data/ironflockos/proxy.conf` and
-`/data/ironflockos/ptp.conf`. Everything else on `/data` goes. In the root slots
+`/data/network/connections`, `/data/ironflockos/proxy.conf`,
+`/data/ironflockos/ptp.conf` and `/data/ironflockos/ca.crt`. Everything else
+on `/data` goes. In the root slots
 the reset removes `/apps`, containerd's and NetworkManager's state, root's
 files, the sudo rule and the agent's unit, `/var/lib/ironflockos/enrolled` and the
 accounts the enrollment made, and sets the hostname back to `ironflockos` and the
@@ -421,8 +471,8 @@ machine-id to `uninitialized`; `slot-proven`, `ORDER` and the `_OK` flags of
 `IRONFLOCKOS_BOOT` out of `grubenv` and removes the device's own splash,
 `splash.cpio` and `splash.env` next to it
 ([The screen](#the-screen)). ADR-0015 lists every path. The boot after the reset is a first
-boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf` and a
-`.flock` on the IRONFLOCKOS partition taken in.
+boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf`, a
+`ca.crt` and a `.flock` on the IRONFLOCKOS partition taken in.
 
 No failure of the reset keeps a device offline. Each request has three
 attempts, counted in `/var/lib/ironflockos/factory-reset.state` of the booted slot
@@ -437,10 +487,10 @@ is never done twice. Where the count cannot be written there is no attempt.
 A request that ended never fires again: a given-up request is renamed to
 `factory-reset.conf.gave-up`, its outcome is marked on `/data`, and the state
 goes with every update into the new slot. After a give-up with the old data
-the device stays the device it was; the `.flock` and `proxy.conf` that came
-with the request are removed. `/run/ironflockos/factory-reset-hold` tells enroll
-and `ironflockos-proxy` what to do with the IRONFLOCKOS partition's `.flock` and
-`proxy.conf`: leave them (`wait`, a request is open and the old owner's data
+the device stays the device it was; the `.flock`, `proxy.conf` and `ca.crt`
+that came with the request are removed. `/run/ironflockos/factory-reset-hold`
+tells enroll, `ironflockos-proxy` and `ironflockos-ca` what to do with the
+IRONFLOCKOS partition's `.flock`, `proxy.conf` and `ca.crt`: leave them (`wait`, a request is open and the old owner's data
 may be on `/data`; `gave-up`, they could not be removed after a give-up), or
 take them and leave them there (`copy`, once the erase has begun). Network
 profiles there follow `wait` and `copy` the same way, and after a give-up they
@@ -487,13 +537,15 @@ from this section.
   which an update carries into the new slot. To try again, write a new
   request.
 - **The hold.** `/run/ironflockos/factory-reset-hold`, written at each boot the
-  reset runs: `wait` (a request is open; the IRONFLOCKOS partition's `.flock` and
-  `proxy.conf` stay unused while the old owner's data may be on `/data`),
+  reset runs: `wait` (a request is open; the IRONFLOCKOS partition's `.flock`,
+  `proxy.conf` and `ca.crt` stay unused while the old owner's data may be on
+  `/data`),
   `copy` (a request is open and has begun to erase; they are used and stay),
   `gave-up` (the reset gave up with the old data and could not remove them;
   they stay unused); no file: no request is open, they are used as on any
   device. After a give-up with the old data the device is the device it was,
-  and the `.flock` and `proxy.conf` that came with the request are removed.
+  and the `.flock`, `proxy.conf` and `ca.crt` that came with the request are
+  removed.
 - **Before writing.** The next start must run a system that has the reset: the
   running system must be the bootloader's next choice and marked good (`rauc
   status`: the booted slot is `boot_primary` and its `boot_status` is `good`),
@@ -514,7 +566,8 @@ from this section.
   `/boot/efi/<name>.flock`. Remove every other `*.flock` on the partition first:
   enroll takes the newest one by modification time, which FAT keeps to two
   seconds. If the `.flock` cannot be written, remove the request again. A
-  `proxy.conf` for the new site goes to `/boot/efi/proxy.conf` the same way.
+  `proxy.conf` for the new site goes to `/boot/efi/proxy.conf` the same way,
+  and its CAs to `/boot/efi/ca.crt` (IronFlockOS 0.17.0 and later).
   While the old owner's data may still be on `/data`, neither is taken: the
   new identity never runs on the old data. After a failed attempt that had
   begun to erase, both are taken and left on the partition, so the device
@@ -557,7 +610,7 @@ from this section.
   | `request` | the request's identity (checksum, size, time of change), as in the state; for `refused` too, `unreadable-<time>` when its content cannot be read |
   | `attempt`, `attempts-max` | all but `refused`: the attempt this is, of `3`, never `0`; with `reason=cannot count the attempt in <file>` the attempt that was due and not made |
   | `keep-network` | `done`, `incomplete`, `gave-up`: `yes` or `no` as the request said; `unknown` when it could not be read back from `factory-reset.keep` |
-  | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf`, space-separated |
+  | `kept` | `done`, `incomplete`: what was kept, of `rauc network/connections ironflockos/proxy.conf ironflockos/ptp.conf ironflockos/ca.crt`, space-separated |
   | `other-slot` | `done`, `incomplete`: `cleaned`, `none (...)` (no partition or filesystem), or `not cleaned (...)`: on another disk, no IronFlockOS, the booted slot is none of `system.conf`, cannot mount, error |
   | `note` | `done`, `incomplete`, when something could not be kept: why |
   | `failed-steps` | `incomplete`: the steps that failed, space-separated, of `restore`, `booted-slot`, `other-slot`, `grubenv`, `splash`, `keep-file` |

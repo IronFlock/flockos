@@ -42,7 +42,10 @@ shows that the boot goes on, that the attempt is counted (three, then the
 reset gives up), and what the record says.
 The network profiles (`network-profiles.bats`) run against folders that stand
 for the IRONFLOCKOS partition and `/data/network/connections`, with every rule a
-profile has to meet. They need bash and bats only:
+profile has to meet. The trusted CAs (`ca.bats`) run against folders that
+stand for the IRONFLOCKOS partition, `/data` and the trust store, with a fake
+`update-ca-certificates` and certificates that `openssl` makes. They need bash,
+bats and openssl only:
 
 ```sh
 just test
@@ -138,6 +141,12 @@ Sequence:
    environment while it runs, and chrony (`ntp=`); `proxy.env` is readable by
    root only. Nothing listens on the proxy address: a real proxy is on the
    hardware checklist.
+   Then the trusted CAs ([ADR-0021](adr/0021-trusted-cas-come-with-the-boot-medium.md)):
+   `ironflockos-ca` and its path unit run and the device has no extra CA. The
+   test makes a corporate chain in the VM with `openssl`: a root CA, a sub CA,
+   and a server certificate for `localhost` from the sub CA. curl refuses
+   `openssl s_server` with that certificate (exit code 60), and the two CAs go
+   to the IRONFLOCKOS partition as `ca.crt`.
    Then a network profile ([ADR-0016](adr/0016-network-profiles-from-the-ironflockos-partition.md)):
    a profile for a static address, the address, gateway and DNS server the VM
    has from DHCP on its card matched by MAC address, as `ironflock os install`
@@ -150,9 +159,13 @@ Sequence:
    `isolcpus`, `nohz_full` and `irqaffinity` are on the kernel command line.
    The `proxy.conf` put on the IRONFLOCKOS partition before the reboot has replaced
    the device's (mode 0600) and left the partition, and Docker uses it; the test
-   then removes the proxy. The network profile has left the partition for
-   `/data/network/connections` (mode 0600, root's), and NetworkManager runs the
-   card on it: the address without DHCP's `dynamic` flag, the default route
+   then removes the proxy. The `ca.crt` has left the partition for
+   `/data/ironflockos/ca.crt` (mode 0644, the two certificates), the trust store
+   holds both, one file each in `/usr/local/share/ca-certificates/ironflockos`,
+   the journal names the root CA, and curl accepts the test's server. The CAs
+   stay until slot B has shown it trusts them. The network profile has left the
+   partition for `/data/network/connections` (mode 0600, root's), and
+   NetworkManager runs the card on it: the address without DHCP's `dynamic` flag, the default route
    through the gateway, and the host still answers. The profile is on trial
    (`ironflockos-network-profiles-trial` runs); the test writes the agent's mark of
    a connection, which its own agent never earns, and the trial ends with the
@@ -224,7 +237,10 @@ Sequence:
    machine-id, host key, `/data` and the app's file of slot A in `/apps`, and is
    enrolled again from the agent's copy
    (SSH user and agent unit back in the new slot); the test marks B good, in
-   the agent's place.
+   the agent's place. Slot B's first boot has put the device's CAs into its
+   own trust store, and curl accepts the test's server there too. Then the
+   test removes `/data/ironflockos/ca.crt`: the CAs leave the store at once and
+   curl refuses the server again.
    `rauc install` runs in the background. As soon as RAUC reports on D-Bus
    that it installs (its property `Operation` is `installing`), `rauc status`,
    `ironflock os rollback --yes` and `ironflock os update --yes` (each also
@@ -475,4 +491,10 @@ WP-4b.2, WP-5.4, WP-6.6):
     on the IRONFLOCKOS partition, with the wired network unplugged. The device
     joins that WiFi on its first boot and enrolls; the profile has left the
     partition.
-12. Target-specific items in `docs/targets/<target>.md`.
+12. Trusted CAs (`docs/build.md`, "Trusted CAs"), behind an appliance whose
+    certificate a corporate CA issued: install with `ironflock os install`
+    (or flash with `--ca-cert`) and the appliance's `.flock`; the device
+    enrolls, the agent reaches the appliance, an app's image pulls from its
+    registry, and an OS update downloads from its mirror. After the update the
+    device still reaches the appliance.
+13. Target-specific items in `docs/targets/<target>.md`.
