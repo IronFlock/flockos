@@ -185,7 +185,8 @@ if [ "$VARIANT" = installer ]; then
   # The stick boots on text (its grubenv); a device's screen settings live on
   # its /data, which the stick has not.
   systemctl --root="$ROOT" mask ironflockos-splash.service ironflockos-splash.path \
-    ironflockos-display.service ironflockos-display.path
+    ironflockos-display.service ironflockos-display.path \
+    ironflockos-console-password.service ironflockos-console-password.path
 else
   # ironflockos-gce-flock: the .flock of a Compute Engine VM from its metadata
   # (ADR-0010); its firmware condition skips it on every other machine.
@@ -201,6 +202,9 @@ else
   systemctl --root="$ROOT" enable ironflockos-network-profiles.service ironflockos-network-profiles-trial.service
   # /apps is /data/apps (/etc/fstab); the check says when it is not.
   systemctl --root="$ROOT" enable ironflockos-apps-check.service
+  # The console password of the enrolled user, when the device has one
+  # (docs/build.md, "The screen").
+  systemctl --root="$ROOT" enable ironflockos-console-password.service
   # GRUB counts every boot as a try; the Pi's tryboot counts only the first
   # boot of an update, and Jetson has a backend of its own.
   if [ "$BOOTLOADER" = grub-efi ]; then

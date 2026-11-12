@@ -89,7 +89,8 @@ unpack() {
   grep -qx '// --- end of settings ---' "$s"
   grep -qx 'animation = "fade";' "$s"
   # The device's picture first, else IronFlock's logo.
-  grep -q 'Image("splash.png")' "$s" && grep -q 'Image("ironflock.png")' "$s"
+  grep -q 'Image("splash.png")' "$s"
+  grep -q 'Image("ironflock.png")' "$s"
   # Centred, scaled only when larger than the screen.
   grep -q 'Math.Int((Window.GetWidth() - shown.GetWidth()) / 2)' "$s"
   grep -q 'if (shown.GetWidth() > Window.GetWidth() || shown.GetHeight() > Window.GetHeight())' "$s"
@@ -109,7 +110,8 @@ unpack() {
 
 @test "splash: no files, no archive; a picture and its settings become splash.cpio for the next boot" {
   splash
-  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   [ ! -e "$tmp/esp/EFI/BOOT/splash.cpio" ]
   png "$tmp/screen/splash.png" 640 400
   printf 'background=#204060  # dark blue\r\nanimation=None\n' >"$tmp/screen/splash.conf"
@@ -141,7 +143,8 @@ unpack() {
   sleep 1
   touch "$tmp/screen/splash.png"
   splash
-  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   cmp "$tmp/first.cpio" "$tmp/esp/EFI/BOOT/splash.cpio"
   [ -z "$(find "$tmp/esp/EFI/BOOT/splash.cpio" -newer "$tmp/first.cpio")" ]
 }
@@ -252,7 +255,8 @@ unpack() {
   echo 'background=#ffffff' >"$tmp/screen/.splash.conf.partial"
   png "$tmp/screen/other.png" 64 48
   splash
-  [ "$status" -eq 0 ] && [ -z "$output" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   [ ! -e "$tmp/esp/EFI/BOOT/splash.cpio" ]
   # The rename makes it the splash.
   mv "$tmp/screen/.splash.png.partial" "$tmp/screen/splash.png"
@@ -304,7 +308,7 @@ unpack() {
   grep -qx '    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service' "$c"
   grep -qx '    ln -sfn /data/ironflockos/display.conf "$ROOT/etc/ironflockos/display.conf"' "$c"
   grep -q 'mask ironflockos-splash.service ironflockos-splash.path' "$c"
-  grep -q 'ironflockos-display.service ironflockos-display.path$' "$c"
+  grep -q '    ironflockos-display.service ironflockos-display.path' "$c"
 }
 
 # display: the display script on the temporary device.
@@ -315,22 +319,26 @@ display() {
 @test "display: boot=text goes into grubenv for GRUB, boot=splash or no file takes it out" {
   printf 'ORDER=A B\n' >"$tmp/grubenv"
   display
-  [ "$status" -eq 0 ] && [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
   printf '# the boot messages\nboot=text\n' >"$tmp/display.conf"
   display
   [ "$status" -eq 0 ]
   grep -qx IRONFLOCKOS_BOOT=text "$tmp/grubenv"
   [[ "$output" == *"the boot messages instead of the splash, from the next boot on"* ]]
   display
-  [ "$status" -eq 0 ] && [ "$output" = "display: boot=text" ]
+  [ "$status" -eq 0 ]
+  [ "$output" = "display: boot=text" ]
   printf 'boot=splash\r\n' >"$tmp/display.conf"
   display
-  [ "$status" -eq 0 ] && [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
   printf 'boot=text\n' >"$tmp/display.conf"
   display
   rm "$tmp/display.conf"
   display
-  [ "$status" -eq 0 ] && [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/grubenv")" = "ORDER=A B" ]
 }
 
 @test "display: a file it does not understand changes nothing and says why" {
@@ -387,4 +395,125 @@ display() {
   grep -qx 'ConditionKernelCommandLine=!splash' "$units/getty@tty1.service.d/ironflockos-splash.conf"
   q=$units/plymouth-quit.service.d/ironflockos.conf
   [ "$(grep '^ExecStart=' "$q" | tr '\n' '|')" = "ExecStart=|ExecStart=-/usr/bin/plymouth quit --retain-splash|" ]
+}
+
+# --- the usual keys (WP-8.2) -------------------------------------------------
+
+yescrypt='$y$j9T$abcdefghijklmnopqrstuv$ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq'
+sha512='$6$saltsalt$ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh'
+
+# device_with_user: a root with the enrolled user owner (uid 1001, sudo rule,
+# locked) beside root and a system account, and enroll's record of it.
+device_with_user() {
+  mkdir -p "$tmp/root/etc/sudoers.d" "$tmp/data"
+  printf 'root:x:0:0::/root:/bin/bash\nsshd:x:100:65534::/run/sshd:/usr/sbin/nologin\nowner:x:1001:1001::/home/owner:/bin/bash\n' >"$tmp/root/etc/passwd"
+  printf 'root:*:20000:0:99999:7:::\nsshd:!:20000::::::\nowner:!:20000:0:99999:7:::\n' >"$tmp/root/etc/shadow"
+  chmod 0640 "$tmp/root/etc/shadow"
+  echo 'owner ALL=(ALL) NOPASSWD:ALL' >"$tmp/root/etc/sudoers.d/ironflock-owner"
+  echo '{"user": {"name": "owner", "created": true}}' >"$tmp/installed.json"
+}
+
+console_password() {
+  IRONFLOCKOS_CONSOLE_PASSWORD=$tmp/data/console-password IRONFLOCKOS_INIT_RECORD=$tmp/installed.json \
+    IRONFLOCKOS_ROOT=$tmp/root run bash "$lib/console-password"
+}
+
+field() { awk -F: -v u="$1" '$1 == u { print $2 }' "$tmp/root/etc/shadow"; }
+
+@test "console-password: a yescrypt or SHA-512 hash becomes the enrolled user's password, nobody else's; removing it locks it again" {
+  device_with_user
+  console_password
+  [ "$status" -eq 0 ]
+  [ "$(field owner)" = '!' ]
+  (umask 077 && printf '%s\n' "$yescrypt" >"$tmp/data/console-password")
+  console_password
+  [ "$status" -eq 0 ]
+  [ "$output" = "console-password: the console password is owner's" ]
+  [ "$(field owner)" = "$yescrypt" ]
+  [ "$(field root)" = '*' ]
+  [ "$(field sshd)" = '!' ]
+  [ "$(ls -ln "$tmp/root/etc/shadow" | cut -c1-10)" = -rw-r----- ]
+  (umask 077 && printf '%s' "$sha512" >"$tmp/data/console-password")
+  console_password
+  [ "$status" -eq 0 ]
+  [ "$(field owner)" = "$sha512" ]
+  rm "$tmp/data/console-password"
+  console_password
+  [ "$status" -eq 0 ]
+  [ "$(field owner)" = '!' ]
+  [ "$(grep -c . "$tmp/root/etc/shadow")" -eq 3 ]
+}
+
+@test "console-password: what is not one hash of the two kinds, or not root's 0600 file, is refused and the password locked" {
+  device_with_user
+  for content in '' 'secret' '$1$salt$abcdefghijklmnopqrstuv' "\$y\$j9T\$x\$short" "$yescrypt
+$yescrypt" '!locked' "$yescrypt:0:0"; do
+    (umask 077 && printf '%s\n' "$sha512" >"$tmp/data/console-password")
+    console_password
+    [ "$(field owner)" = "$sha512" ]
+    (umask 077 && printf '%s\n' "$content" >"$tmp/data/console-password")
+    console_password
+    [ "$status" -eq 1 ]
+    [[ "$output" == "console-password: refused $tmp/data/console-password: "*"; owner's password is locked" ]]
+    [ "$(field owner)" = '!' ]
+    [ "$(field root)" = '*' ]
+  done
+  printf '%s\n' "$sha512" >"$tmp/data/console-password"
+  chmod 0644 "$tmp/data/console-password"
+  console_password
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"its mode is not 0600"* ]]
+}
+
+@test "console-password: only an account of a person with enroll's sudo rule, never root; none before the enrollment" {
+  device_with_user
+  (umask 077 && printf '%s\n' "$yescrypt" >"$tmp/data/console-password")
+  rm "$tmp/installed.json"
+  console_password
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"waits for the enrollment"* ]]
+  [ "$(field owner)" = '!' ]
+  for name in root sshd nobody; do
+    echo "{\"user\": {\"name\": \"$name\"}}" >"$tmp/installed.json"
+    console_password
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"is not an account the console password is for: nothing changes"* ]]
+  done
+  echo '{"user": {"name": "owner"}}' >"$tmp/installed.json"
+  rm "$tmp/root/etc/sudoers.d/ironflock-owner"
+  console_password
+  [ "$status" -eq 1 ]
+  [ "$(field owner)" = '!' ]
+  [ "$(field root)" = '*' ]
+}
+
+@test "console-password's units: after enroll, before the login prompts, again when the file changes; masked on the installer" {
+  grep -qx 'After=local-fs.target data.mount ironflockos-enroll.service' "$units/ironflockos-console-password.service"
+  grep -qx 'PathChanged=/data/ironflockos/console-password' "$units/ironflockos-console-password.path"
+  grep -qx 'After=ironflockos-console-password.service' "$units/getty@.service.d/ironflockos-console-password.conf"
+  ! grep -q RemainAfterExit "$units/ironflockos-console-password.service"
+  grep -qx '  systemctl --root="$ROOT" enable ironflockos-console-password.service' "$repo/build/customize.sh"
+  grep -q 'ironflockos-console-password.service ironflockos-console-password.path$' "$repo/build/customize.sh"
+  # SSH stays key-only and root's login refused.
+  grep -qx 'PasswordAuthentication no' "$repo/overlay/etc/ssh/sshd_config.d/10-ironflockos.conf"
+  grep -qx 'KbdInteractiveAuthentication no' "$repo/overlay/etc/ssh/sshd_config.d/10-ironflockos.conf"
+  grep -qx 'PermitRootLogin no' "$repo/overlay/etc/ssh/sshd_config.d/10-ironflockos.conf"
+}
+
+@test "GRUB's menu: the slot, its fallback, one start with messages, the firmware's setup" {
+  . "$repo/build/lib.sh"
+  load_conf "$repo/targets/amd64-efi/target.conf"
+  cfg=$(render "$repo/targets/amd64-efi/grub/grub.cfg" | grep -v '^ *#')
+  [ "$(echo "$cfg" | grep -o 'menuentry "[^"]*"' | tr '\n' '|')" = 'menuentry "IronFlockOS slot ${slot}"|menuentry "IronFlockOS slot ${other} (fallback)"|menuentry "Start with messages"|menuentry "Firmware setup"|' ]
+  echo "$cfg" | grep -qx 'set default=0'
+  echo "$cfg" | grep -qx '    set fallback=1'
+  # Messages for this boot: the text parameters, the setting untouched, no
+  # splash archive.
+  echo "$cfg" | grep -qx 'set TEXT_CMDLINE="${BASE_CMDLINE} plymouth.enable=0 ${IRONFLOCKOS_RT_CMDLINE} ${IRONFLOCKOS_CMDLINE}"'
+  entry=$(echo "$cfg" | sed -n '/^menuentry "Start with messages"/,/^}/p')
+  [[ "$entry" == *'rauc.slot=${slot} ${TEXT_CMDLINE}'* ]]
+  [[ "$entry" != *splash* ]]
+  ! echo "$cfg" | grep -q 'save_env.*BOOT'
+  echo "$cfg" | grep -qx 'if fwsetup --is-supported; then'
+  echo "$cfg" | grep -qx '        fwsetup'
 }
