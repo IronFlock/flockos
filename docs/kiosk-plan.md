@@ -288,7 +288,17 @@ next IronFlockOS release.
   it, to the same logo or to black.
 - Until WP-8.7 the screen is black between the firmware's picture and the splash, for
   GRUB's two seconds and the kernel's first one or two. A background colour other than
-  black shows that gap; black hides it.
+  black shows that gap; black hides it. With WP-8.7 GRUB fills it with the background
+  colour, and with `animation=none` also with the picture, from the second boot with a
+  new picture, setting or screen on (the first one takes the screen for GRUB).
+- With the splash the kernel's console is off the screen until the running system's
+  udev gives it back: Esc shows no messages in the initramfs, and a boot that fails
+  there says why on the serial console only. "Start with messages" in the boot menu,
+  or `boot=text`, shows all of it on the screen.
+- At shutdown with a screen app running, Plymouth's shutdown splash cannot draw while
+  the app holds the graphics device; the screen keeps the app's last frame until it
+  stops, and may be black from then to the restart. Not tried yet on the machine
+  (WP-8.6).
 - Without a kiosk app, the first virtual terminal does not get the logo back after a
   visit to another terminal: nothing is left that draws it. A screen app draws again.
 - The first boot of a device shows IronFlock's logo. Its own picture comes with the
