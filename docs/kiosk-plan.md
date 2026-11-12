@@ -40,7 +40,7 @@ Proposed by this plan, to be confirmed with it:
 | P1 | The first virtual terminal belongs to the screen: the splash, then the kiosk. Login prompts are on terminals 2 to 6. | One rule with and without a kiosk app, and no prompt that draws over the logo. |
 | P2 | D4 goes through the image: the app puts a PNG into one folder, and the image checks it and installs it for the next boot. The app never writes to the IRONFLOCKOS partition. | The splash is drawn before Docker runs, from a partition that also holds `grubenv`. A full or damaged partition must not be an app's doing. |
 | P3 | GRUB shows no picture and hides its menu. | Its two seconds are not worth GRUB's image decoders in the boot path. |
-| P4 | The kernel's `quiet` comes with the splash, also on the serial console. `boot=text` in `display.conf` turns both off for a device; the installer stick and the QEMU tests stay on text. | The kernel has one log level for all consoles. The journal keeps every line. |
+| P4 | The kernel's `quiet` comes with the splash, also on the serial console. `boot=text` in `display.conf` turns both off for a device; the installer stick and the QEMU tests stay on text. The level is not lowered further (`loglevel=3`): errors stay on the serial console, and the kept splash is safe from them because its terminal is in graphics mode, which WP-8.1 tests. | The kernel has one log level for all consoles. The journal keeps every line. |
 | P5 | The EFI targets first (`amd64-efi`, `arm64-efi`). The Raspberry Pi and Jetson follow in work packages of their own. | Their boot files and graphics drivers differ. |
 
 Open, Marko's to decide:
@@ -57,22 +57,41 @@ access its project granted.
 The image guarantees:
 
 - After the boot the splash stays on the screen. Nothing of the image holds the graphics
-  device, and no login prompt runs on the first virtual terminal.
+  device. The first virtual terminal is the one in front, in graphics mode, and nothing
+  runs on it: no login prompt, and no kernel or boot message is drawn over the splash.
 - The app may take `/dev/dri`, `/dev/input`, `/run/udev` (read-only) and the first
   virtual terminal.
+- udev's database in `/run/udev` names every input device as what it is (the
+  `ID_INPUT*` properties): the image keeps systemd's `60-input-id.rules` and
+  `60-evdev.rules` with the hardware database. An input library in a container ignores
+  a device without them.
+- A process that is not root can make a user namespace, as on Debian: a browser's
+  sandbox needs it. AppArmor in the image does not take that away.
+- The folder `/data/ironflockos/screen` is there at every boot before Docker starts, and
+  belongs to root. The image looks at `splash.png` in it and at no other name.
 - A PNG at `/data/ironflockos/screen/splash.png` becomes the splash of the next boot and
   of every boot after it, across updates. Removing the file brings IronFlock's logo
   back. A factory reset removes it.
 - The image takes a PNG of at most 4 MiB and 3840x2160 pixels with the chunks `IHDR`,
-  `PLTE`, `tRNS`, `IDAT` and `IEND`, and shows it centred on black. It refuses anything
-  else, says so in the journal, and keeps the splash it had.
+  `PLTE`, `tRNS`, `IDAT` and `IEND`. It refuses anything else, says so in the journal,
+  and keeps the splash it had.
+- The picture is drawn centred, at its own size in pixels, on black (`#000000`), and
+  nothing else is on the screen but a message below it when the image has one to give
+  (WP-8.3). It is never made larger; one larger than the screen is made smaller to fit.
+  The default picture is one file, `docs/assets/ironflock-splash.png` (WP-8.1 adds it:
+  `ironflock-white.svg` at 320x320 pixels, transparent around the logo). An app that
+  wants the hand-over from the splash to be invisible draws that file by the same rule.
+- Docker is 20.10 or later, and no rule of the image stands between a container and a
+  port that another app publishes on the device. Docker's own rules between its networks
+  apply; a firewall setting of the device-agent (ADR-0020) has to keep that way open.
 
 The app guarantees:
 
 - It leaves the switch to the other virtual terminals working (Ctrl+Alt+F1 to F6), and
   draws again when the first one comes back.
-- It writes `splash.png` only as a PNG it has decoded and encoded itself, in one
-  rename, and writes nothing else outside its own data.
+- It writes `splash.png` only as a PNG it has decoded and encoded itself: under another
+  name in the same folder first, then synced and renamed onto `splash.png`. It writes
+  nothing else outside its own data.
 - It needs nothing else from the image. A need that turns up is a change to this plan.
 
 ## Work packages
@@ -80,7 +99,8 @@ The app guarantees:
 ### WP-8.1 The splash by default on the EFI targets (3 days)
 
 - Scope: Plymouth in `profiles/base/packages` and in the initramfs; a theme
-  `ironflockos` with the logo of `docs/assets` on black and a spinner; `quiet splash
+  `ironflockos` that draws the default picture by the contract's rule, without a
+  spinner, so that an app's first frame can look the same; `quiet splash
   plymouth.ignore-serial-consoles vt.global_cursor_default=0` on the kernel command line
   of `grub.cfg` (Plymouth draws nothing while a serial console is named, unless told to
   ignore it); GRUB's menu hidden; no `getty@tty1` while the splash is on; Plymouth quits
@@ -91,7 +111,10 @@ The app guarantees:
 - Deliverables: the above; `docs/build.md`, "The screen"; the sizes of the initramfs and
   the slot before and after.
 - Acceptance: in QEMU the screen shows the logo in the initramfs, at the end of the
-  boot and 30 seconds later, and no text at any of the three; with `boot=text` the
+  boot and 30 seconds later, and no text at any of the three; after the boot the first
+  virtual terminal is in front, an error written to the kernel's log leaves the screen
+  as it is, every input device has its `ID_INPUT*` properties, and a user that is not
+  root makes a user namespace; with `boot=text` the
   screen and the serial console are as in 0.16.0; a device installed with 0.16.0 and
   updated boots as before, on text, as its `grub.cfg` is the old one (Known limits); the
   slot stays below the fill warning.
@@ -118,9 +141,11 @@ The app guarantees:
 
 ### WP-8.4 The device's own splash picture (2.5 days)
 
-- Scope: `ironflockos-splash` with a path unit on `/data/ironflockos/screen`: it checks
-  `splash.png` as the contract says, packs it as the theme's logo into a cpio archive and
-  renames that into place as `splash.cpio` next to `grubenv`; `grub.cfg` loads the
+- Scope: `ironflockos-data-layout` makes `/data/ironflockos/screen` at every boot,
+  before Docker; `ironflockos-splash` with a path unit on `splash.png` in it, which
+  other names in the folder do not start: it checks `splash.png` as the contract says,
+  packs it as the theme's logo into a cpio archive and renames that into place as
+  `splash.cpio` next to `grubenv`; `grub.cfg` loads the
   archive after the slot's `initrd.img` when the file is there, so the picture is in
   place before Plymouth starts and no initramfs is built on a device; the same picture
   for the shutdown splash; removal of the file; the factory reset (ADR-0015) removes the

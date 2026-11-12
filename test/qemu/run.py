@@ -827,6 +827,9 @@ class Runner:
         label = self.vm.run("cat /proc/$(pidof chronyd | awk '{print $1}')/attr/current").strip()
         if label != "/usr/sbin/chronyd (enforce)":
             raise TestFailure(f"chronyd does not run under its profile: {label!r}")
+        # A process that is not root still makes a user namespace: a browser's
+        # sandbox in an app needs it (docs/kiosk-plan.md, the contract).
+        self.vm.run("runuser -u nobody -- unshare --user true")
         if self.docker_tar:
             label = self.vm.run("cid=$(docker run -d hello-world) && "
                                 "docker inspect --format '{{.AppArmorProfile}}' \"$cid\"; docker rm -f \"$cid\" >/dev/null",
