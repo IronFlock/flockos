@@ -187,7 +187,17 @@ Sequence:
    passwords for that user and root, the user logs in on tty2 with it
    (`loginctl`), and without the file the password is locked again. The boot
    menu and its "Firmware setup" are checked in the rendered `grub.cfg`
-   (`test/unit/screen.bats`), not in QEMU. Not tested in QEMU: whether the picture survives the moment a real
+   (`test/unit/screen.bats`), not in QEMU. *GRUB draws the splash* (WP-8.7):
+   at the end of the boot with the device's picture (`animation=none`)
+   `ironflockos-splash-capture` has taken the screen into
+   `splash-screen.png`, which is what `screendump` shows, pixel for pixel,
+   and `splash.env` names its size and the colour; the next boot shows the
+   whole splash before the kernel starts (by the kernel's uptime at the
+   shell's first answer), and from there to the end nothing but the splash;
+   frames without the whole picture in between are counted in the log, not
+   failed. The kernel command line keeps the console off the screen
+   (`fbcon=map:9`), and after the boot the framebuffer console is bound
+   again. Not tested in QEMU: whether the picture survives the moment a real
    graphics driver (Intel's) takes the screen from the firmware, the frames
    before the root filesystem's system (the initramfs's are not read one by
    one: the check there is that Plymouth started in it), and the shutdown

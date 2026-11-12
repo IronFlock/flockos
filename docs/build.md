@@ -419,7 +419,8 @@ accounts the enrollment made, and sets the hostname back to `ironflockos` and th
 machine-id to `uninitialized`; `slot-proven`, `ORDER` and the `_OK` flags of
 `grubenv` stay. On the EFI targets it also takes `IRONFLOCKOS_RT_CMDLINE` and
 `IRONFLOCKOS_BOOT` out of `grubenv` and removes the device's own splash,
-`splash.cpio` next to it ([The screen](#the-screen)). ADR-0015 lists every path. The boot after the reset is a first
+`splash.cpio`, `splash.env` and `splash-screen.png` next to it
+([The screen](#the-screen)). ADR-0015 lists every path. The boot after the reset is a first
 boot: new machine-id and host keys, `/data` laid out anew, a `proxy.conf` and a
 `.flock` on the IRONFLOCKOS partition taken in.
 
@@ -623,7 +624,8 @@ size.
 
 | | splash (default) | text |
 |---|---|---|
-| kernel parameters | `quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0` | `plymouth.enable=0` |
+| kernel parameters | `quiet splash plymouth.ignore-serial-consoles plymouth.force-frame-buffer-on-boot vt.global_cursor_default=0 fbcon=map:9` | `plymouth.enable=0` |
+| GRUB | graphics mode, the splash's colour (and picture), kept for the kernel | the console, as before |
 | GRUB's menu | hidden; Esc during its two seconds shows it | shown, as before |
 | `/initrd.img` | and `splash.cpio`, when there is one | alone |
 | tty1 | the splash, then a screen app; no login prompt | the boot messages and a login prompt |
@@ -693,6 +695,43 @@ next boot on. Plymouth at shutdown draws from the running system's theme:
 removes the archive and `IRONFLOCKOS_BOOT` with the old owner's data
 ([Factory reset](#factory-reset)). `/usr/lib/ironflockos/splash check-png FILE`
 and `check-conf FILE` tell whether a file would be taken.
+
+**From the firmware's picture to the splash.** With the splash GRUB draws its
+start itself, in graphics mode (`gfxterm`, with the font of Debian's GRUB for
+the menu), and the kernel keeps that mode and what GRUB drew
+(`gfxpayload=keep`): `splash.env` next to `grubenv` names the background
+colour (`IRONFLOCKOS_SPLASH_BACKGROUND`, black from the build; GRUB reads only
+this and `IRONFLOCKOS_SPLASH_MODE` from it), and with `animation=none` GRUB
+also draws `splash-screen.png`, the whole screen as Plymouth left it, at the
+size it was taken at (`IRONFLOCKOS_SPLASH_MODE`, GRUB's graphics mode then).
+With `fade` GRUB shows the colour only, and the picture fades in on it. The
+kernel's console stays off the screen while it starts (`fbcon=map:9`, a
+framebuffer that never comes), so it does not clear what GRUB drew before
+Plymouth draws the same; once the running system finds a framebuffer, udev
+runs `/usr/lib/ironflockos/consoles` (`71-ironflockos-consoles.rules`), which
+gives the terminals their console back. By then Plymouth holds the first
+terminal in graphics mode, where the console draws nothing; the terminals 2
+to 6 have their text, and Esc shows the boot messages. In the initramfs, before
+that, Esc shows nothing, and a failure there is on the serial console only;
+"Start with messages" in the boot menu shows it on the screen.
+
+`ironflockos-splash` writes the colour into `splash.env` with every
+`splash.conf` it takes. The picture is taken from the screen:
+`ironflockos-splash-capture.service` runs `ironflockos-splash capture` at the
+end of a boot with the splash, after Plymouth quit, and turns the framebuffer
+Plymouth drew into (32 bits a pixel) into an 8-bit RGB PNG (gzip deflates
+it, perl counts the Adler-32). It takes it only with `animation=none`, only
+when the archive is the one the boot started with, only while the first
+terminal is in front and in graphics mode, and only when the screen's corner
+is the background colour; a new archive drops the picture, and the boot after
+it takes the screen anew. So the first boot after a new picture, setting or
+screen shows the colour in GRUB and the picture from Plymouth on; the boots
+after it show the picture from GRUB on. Whether the picture stays when the
+kernel's graphics driver takes the screen from the firmware's framebuffer is
+the driver's: Intel's keeps the mode and its content; QEMU's (`bochs`,
+`virtio-gpu`) start with an empty one until Plymouth draws again, which the
+QEMU test counts and does not fail on. The machine has the last word
+(WP-8.6).
 
 **Messages on the splash.** What the image says on the console to a person at
 the device also goes to the line below the picture, through

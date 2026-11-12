@@ -216,6 +216,18 @@ The app guarantees:
   and the keys of WP-8.2 work; on the first machine, a recording of the screen from
   power-on to the UI shows the firmware's picture, then the splash without a black
   frame, a text line or a picture that goes and comes back.
+- As built (branch `splash`, `docs/build.md` "From the firmware's picture to the
+  splash"): GRUB cannot centre a picture on a screen whose size it learns only at boot,
+  so the picture it draws is the whole screen, taken from the framebuffer Plymouth left
+  at the end of an earlier boot (`ironflockos-splash capture`), with the size as GRUB's
+  graphics mode. GRUB draws it only with `animation=none`: with `fade`, a picture from
+  GRUB that Plymouth then fades in from nothing would be one that goes and comes back;
+  GRUB shows the background colour then. The kernel's console stays off the screen with
+  `fbcon=map:9` until udev in the running system gives it back to the terminals; in the
+  initramfs Esc shows no messages. The QEMU test boots once more with the splash after
+  the screen was taken: GRUB's picture before the kernel, then nothing but the splash;
+  frames without the whole picture in between (QEMU's drivers start with an empty
+  framebuffer) are counted, not failed. What Intel's driver does is WP-8.6's.
 
 ### WP-8.5 The kiosk app (own repository, estimate from its own plan)
 
@@ -245,7 +257,7 @@ The app guarantees:
 | 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | built on `splash`, proof in CI |
 | 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | built on `splash`, proof in CI |
 | 8.5 | The kiosk app | its own | own plan | the contract | open |
-| 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | open |
+| 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | built on `splash`, proof in CI and on the machine (WP-8.6) |
 | 8.6 | Acceptance on the first machine | ironflockos, hardware | 1 | 8.1 to 8.5, 8.7 | open |
 
 WP-8.5 needs only the contract, so it starts at once and is tested against the image as
