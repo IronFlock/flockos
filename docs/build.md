@@ -649,8 +649,10 @@ change, only the other picture), the first virtual terminal is handed back
 as Plymouth leaves it when it quits without letting go first, and then
 Plymouth quits keeping its splash (`plymouth quit --retain-splash`). That
 terminal stays in graphics mode, so nothing the kernel writes is drawn over
-it; and it is switched by a process (`VT_PROCESS`) that is gone, so that
-Ctrl+Alt+F2 finds nobody to ask, resets it to text mode and switches.
+it; its keyboard is on (`K_UNICODE`; Plymouth turns it off while it reads
+the keyboard itself, and the kernel then ignores Ctrl+Alt+F2 too); and it is
+switched by a process (`VT_PROCESS`) that is gone, so that Ctrl+Alt+F2 finds
+nobody to ask, resets it to text mode and switches.
 `plymouth deactivate` alone leaves it in graphics mode switched by nobody
 (`VT_AUTO`), where the kernel ignores every switch. keep-splash also writes
 to the journal when Plymouth started. Nothing of the
