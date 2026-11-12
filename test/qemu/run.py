@@ -1265,13 +1265,6 @@ class Runner:
             self.vm.reboot(self.boot_timeout, quiet=True)
             t_shell = time.time()
             t_kernel = t_shell - float(self.vm.run("cut -d' ' -f1 /proc/uptime").strip())
-            # Plymouth started in the initramfs: before systemd, whose start
-            # in the root filesystem systemd keeps itself (microseconds since
-            # the kernel started), as the kernel keeps plymouthd's (clock
-            # ticks). Asked at once: Plymouth quits at the end of the boot.
-            early = self.vm.run("pid=$(cat /run/plymouth/pid 2>/dev/null) && echo plymouthd=$(cut -d' ' -f22 /proc/$pid/stat) "
-                                "hz=$(getconf CLK_TCK); "
-                                "echo systemd=$(systemctl show -p UserspaceTimestampMonotonic --value)", check=False)
             self.wait_running()
             # Plymouth quits at the end of the boot; the frames after it count.
             time.sleep(5)
@@ -1291,12 +1284,19 @@ class Runner:
                               "grep -E 'code=(killed|dumped)'", check=False).strip()
         if crashed:
             raise TestFailure(f"plymouthd crashed in the root filesystem: {crashed}")
-        got = dict(word.split("=", 1) for word in early.split() if "=" in word)
-        try:
-            started = int(got["plymouthd"]) / int(got["hz"])
-            systemd = int(got["systemd"]) / 1e6
-        except (KeyError, ValueError):
-            raise TestFailure(f"Plymouth did not run when the root filesystem's system answered:\n{early}") from None
+        # Plymouth started in the initramfs: before systemd. keep-splash,
+        # which ends Plymouth, writes when Plymouth started (the kernel's
+        # record of the process); systemd keeps its own start (microseconds
+        # after the kernel's). A probe from the shell would come too late on
+        # a fast boot: Plymouth may be gone before the shell first answers.
+        quit = self.vm.run("journalctl -b --no-pager -o cat -u plymouth-quit.service | "
+                           "grep -m 1 '^keep-splash: Plymouth (pid'", check=False).strip()
+        systemd = self.vm.run("systemctl show -p UserspaceTimestampMonotonic --value").strip()
+        m = re.search(r"started ([0-9.]+) s after the kernel", quit)
+        if not m or not systemd.isdigit():
+            raise TestFailure(f"no record of when Plymouth started (plymouth-quit.service): {quit!r}\n"
+                              f"{self.explain('plymouth-start.service', 'plymouth-quit.service')}")
+        started, systemd = float(m.group(1)), int(systemd) / 1e6
         if not 0 < started < systemd:
             raise TestFailure(f"Plymouth started at {started:.2f}s, not in the initramfs (systemd at {systemd:.2f}s)")
         cmdline = self.vm.run("cat /proc/cmdline").split()
@@ -1390,6 +1390,12 @@ class Runner:
         self.put_file(f"{screen}/splash.png", picture)
         taken = "the splash from the next boot on: the device's picture, background #204060, animation none"
         self.wait_for(f"{journal} | grep -qF \"{taken}\" && [ -s {self.ARCHIVE} ]", 60, "the picture to become splash.cpio")
+        # The journal line comes before the run ends (GRUB's files, the theme
+        # for the shutdown): each next file is written once it has ended, so
+        # that the test knows which run took which file.
+        settled = ("[ \"$(systemctl show -p ActiveState --value ironflockos-splash.service)\" != activating ] && "
+                   "! systemctl list-jobs --no-legend | grep -q ironflockos-splash")
+        self.wait_for(settled, 120, "ironflockos-splash to end")
         good = self.vm.run(f"cksum < {self.ARCHIVE}").strip()
         wrong = [
             (b"no picture\n", "splash.png is not a PNG"),
@@ -1404,15 +1410,18 @@ class Runner:
                 self.put_file(f"{screen}/splash.png", data)
             self.wait_for(f"{journal} | grep -qF 'refused: {reason}; the splash stays as it was'", 60,
                           f"the refusal of {reason!r}")
+            self.wait_for(settled, 120, "ironflockos-splash to end")
             if self.vm.run(f"cksum < {self.ARCHIVE}").strip() != good:
                 raise TestFailure(f"splash.cpio changed with {reason!r}")
         self.put_file(f"{screen}/splash.png", picture)
         self.put_file(f"{screen}/splash.conf", b"background=#204060\nfont=big\n")
         self.wait_for(f"{journal} | grep -qF 'refused: splash.conf: line 2: unknown key font'", 60,
                       "the refusal of an unknown key")
+        self.wait_for(settled, 120, "ironflockos-splash to end")
         self.put_file(f"{screen}/splash.conf", b"background=#204060\nanimation=none\n")
         self.wait_for(f"! systemctl -q is-failed ironflockos-splash.service && [ \"$(cksum < {self.ARCHIVE})\" = '{good}' ]",
                       60, "the splash to be taken again")
+        self.wait_for(settled, 120, "ironflockos-splash to end")
         # The running system's theme has the picture, for the shutdown.
         self.vm.run(f"findmnt -n {self.THEME} >/dev/null && cmp {self.THEME}/splash.png {screen}/splash.png"
                     f" && grep -qx 'animation = \"none\";' {self.THEME}/ironflockos.script")
