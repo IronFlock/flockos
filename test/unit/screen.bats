@@ -637,31 +637,35 @@ SH
 
 # --- no black between the firmware's picture and the splash (WP-8.7) --------
 
-@test "GRUB draws the splash's colour, and its picture from splash.env and splash-screen.png, in graphics mode kept for the kernel" {
+@test "GRUB fills the screen with the splash's colour from splash.env, draws no picture, and keeps the mode for the kernel" {
   . "$repo/build/lib.sh"
   for t in amd64-efi arm64-efi; do
     cfg=$(load_conf "$repo/targets/$t/target.conf" && render "$repo/targets/$t/grub/grub.cfg" | grep -v '^ *#')
     terminal=$(load_conf "$repo/targets/$t/target.conf" && echo "$GRUB_TERMINAL")
     block=$(echo "$cfg" | sed -n '/^if \[ "${splash}" = yes \]; then$/,/^else$/p')
-    [[ "$block" == *"load_env --file \${prefix}/splash.env --skip-sig IRONFLOCKOS_SPLASH_BACKGROUND IRONFLOCKOS_SPLASH_MODE"* ]]
+    [[ "$block" == *"load_env --file \${prefix}/splash.env --skip-sig IRONFLOCKOS_SPLASH_BACKGROUND"* ]]
     [[ "$block" == *"if loadfont (memdisk)/fonts/unicode.pf2; then"* ]]
     [[ "$block" == *"if terminal_output gfxterm $terminal; then"* ]]
     [[ "$block" == *'background_color "${splash_background}"'* ]]
+    [[ "$block" == *"set gfxmode=auto"* ]]
     # GRUB's script has no "!": every condition is a plain one.
     ! echo "$cfg" | grep -qE '^\s*(el)?if !'
-    [[ "$block" == *'background_image -m normal ${prefix}/splash-screen.png'* ]]
-    [[ "$block" == *'set gfxmode="${IRONFLOCKOS_SPLASH_MODE},auto"'* ]]
+    # No picture: only the colour.
+    ! echo "$cfg" | grep -qE 'background_image|splash-screen|SPLASH_MODE|insmod png'
     [[ "$block" == *"set gfxpayload=keep"* ]]
     # The text's background is transparent once the colours are set, after
-    # background_color (which makes it opaque), and gfxterm draws at once.
-    order=$(echo "$block" | grep -nE 'background_color|set color_normal=light-gray/black|set color_highlight=light-gray/black|echo -n$' | cut -d: -f2- | tr -s ' ' | tr '\n' '|')
-    [ "$order" = ' background_color "${splash_background}"| set color_normal=light-gray/black| set color_highlight=light-gray/black| echo -n|' ]
+    # background_color (which makes it opaque); the menu's chosen entry is
+    # inverted; the clear draws the colour at once.
+    order=$(echo "$block" | grep -nE 'background_color|set (menu_)?color_(normal|highlight)=|^ *clear$' | cut -d: -f2- | tr -s ' ' | tr '\n' '|')
+    [ "$order" = ' background_color "${splash_background}"| set color_normal=light-gray/black| set color_highlight=light-gray/black| set menu_color_normal=light-gray/black| set menu_color_highlight=black/light-gray| clear|' ]
     # Without the splash none of it: the console terminal, as before.
-    [ "$(echo "$cfg" | grep -c 'gfxpayload\|terminal_output gfxterm\|background_')" -eq 4 ]
+    [ "$(echo "$cfg" | grep -c 'gfxpayload\|terminal_output gfxterm\|background_')" -eq 3 ]
   done
   m=$repo/build/mkimage.sh
   grep -qF 'grub-editenv "$esp_dir/EFI/BOOT/splash.env" set "IRONFLOCKOS_SPLASH_BACKGROUND=#000000"' "$m"
   grep -qF '"$esp_dir/EFI/BOOT/grubenv" "$esp_dir/EFI/BOOT/splash.env" ::/EFI/BOOT/' "$m"
+  # Nothing takes the screen for GRUB.
+  [ ! -e "$units/ironflockos-splash-capture.service" ]
 }
 
 @test "consoles: the terminals get the console back only after a start with the console kept off the screen" {
