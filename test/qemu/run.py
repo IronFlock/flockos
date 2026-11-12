@@ -405,8 +405,11 @@ class ScreenWatch:
 
     # A frame's kind: the splash (with how far the picture has faded in), an
     # empty screen of another colour than the background (a graphics driver
-    # taking the screen over), or anything else.
-    SPLASH, BLANK, OTHER = "splash", "blank", "other"
+    # taking the screen over), the screen before it shown with 24 bits a
+    # pixel (QEMU's standard VGA for a moment while the kernel's driver sets
+    # its mode), or anything else. A frame is (time, kind, alpha, why,
+    # colour), colour the hex of an empty screen's, else None.
+    SPLASH, BLANK, DEPTH, OTHER = "splash", "blank", "depth", "other"
 
     def __init__(self, qmp, splash, workdir, name):
         self.qmp, self.splash, self.workdir, self.name = qmp, splash, workdir, name
@@ -416,9 +419,31 @@ class ScreenWatch:
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
+    @staticmethod
+    def at_24_bits(frame, before):
+        """Whether frame is the framebuffer of before (32 bits a pixel: blue,
+        green, red and an unused byte, the same in every pixel) shown with 24
+        bits a pixel, at the same size: the same bytes, three to a pixel."""
+        (w, h, px), (bw, bh, bpx) = frame, before
+        if (w, h) != (bw, bh):
+            return False
+        n = w * h * 3
+        mem = bytearray(n)
+        mem[0::3], mem[1::3], mem[2::3] = px[2::3], px[1::3], px[0::3]
+        pixels = (n + 3) // 4
+        ref = bytearray(pixels * 4)
+        ref[0::4], ref[1::4], ref[2::4] = bpx[2:pixels * 3:3], bpx[1:pixels * 3:3], bpx[0:pixels * 3:3]
+        ref = ref[:n]
+        unused = mem[3::4]
+        if len(set(unused)) != 1:
+            return False
+        ref[3::4] = unused
+        return mem == ref
+
     def _run(self):
         tmp = os.path.join(self.workdir, f"screendump-{self.name}.ppm")
         last = None
+        before = None
         while not self.stop_flag.is_set():
             t = time.time()
             try:
@@ -426,13 +451,18 @@ class ScreenWatch:
             except (TestFailure, OSError, ValueError, IndexError):
                 frame = None
             if frame is None:
-                self.frames.append((t, None, None, "no picture"))
+                self.frames.append((t, None, None, "no picture", None))
             else:
                 ok, alpha, why = self.splash.match(frame)
                 kind = self.SPLASH if ok else self.OTHER
-                if not ok and frame[2] == frame[2][:3] * (frame[0] * frame[1]):
-                    kind, why = self.BLANK, f"an empty screen #{frame[2][:3].hex()}"
-                self.frames.append((t, kind, alpha, why))
+                colour = frame[2][:3].hex() if frame[2] == frame[2][:3] * (frame[0] * frame[1]) else None
+                if not ok and colour is not None:
+                    kind, why = self.BLANK, f"an empty screen #{colour}"
+                elif not ok and before is not None and self.at_24_bits(frame, before):
+                    kind, why = self.DEPTH, "the screen before, shown with 24 bits a pixel (QEMU while a driver sets its mode)"
+                if kind in (self.SPLASH, self.BLANK):
+                    before = frame
+                self.frames.append((t, kind, alpha, why, colour))
                 # Each new kind of picture is saved, for CI's artifact.
                 key = (kind, round(alpha or 0, 1), why.split(" ")[:3] if kind == self.OTHER else None)
                 if key != last and self.saved < 40:
@@ -446,7 +476,7 @@ class ScreenWatch:
         self.thread.join(30)
 
     def timeline(self, t0):
-        return "\n".join(f"  {t - t0:6.1f}s  {why}" for t, _, _, why in self.frames)
+        return "\n".join(f"  {t - t0:6.1f}s  {why}" for t, _, _, why, _ in self.frames)
 
     def _after(self, frames, start, t0, t_shell):
         """The checks from frame start to the end: nothing but the splash and
@@ -464,7 +494,7 @@ class ScreenWatch:
                 raise TestFailure(f"no splash at {f[0] - t0:.1f}s, after the root filesystem's system answered "
                                   f"({t_shell - t0:.1f}s):\n{self.timeline(t0)}")
         top, gaps = 0.0, 0
-        for t, kind, alpha, _ in frames[start:]:
+        for t, kind, alpha, _, _ in frames[start:]:
             alpha = alpha if kind == self.SPLASH else 0.0
             if top >= 0.5 and alpha < top - 0.15:
                 if t >= t_shell:
@@ -500,15 +530,23 @@ class ScreenWatch:
 
     def check_grub(self, t0, t_kernel, t_shell):
         """WP-8.7: after the firmware's last picture, and before the kernel
-        started, the whole splash is on the screen (GRUB drew it); from there
-        to the end the checks of _after. Returns the dips it counted."""
+        started, the whole screen is the splash's background colour (GRUB
+        filled it); from there to the end only that colour, empty screens of
+        that colour or black, the frames of a driver setting its mode (see
+        DEPTH), and the splash, with the checks of _after. Returns the dips
+        it counted."""
         frames = [f for f in self.frames if f[1] is not None]
+        bg = bytes(self.splash.bg).hex()
         firmware = max((i for i, f in enumerate(frames) if f[1] == self.OTHER and f[0] < t_kernel), default=-1)
         first = next((i for i in range(firmware + 1, len(frames))
-                      if frames[i][1] == self.SPLASH and frames[i][2] >= 0.97 and frames[i][0] < t_kernel), None)
+                      if frames[i][4] == bg and frames[i][0] < t_kernel), None)
         if first is None:
-            raise TestFailure(f"GRUB did not draw the splash before the kernel started ({t_kernel - t0:.1f}s):\n"
-                              f"{self.timeline(t0)}")
+            raise TestFailure(f"GRUB did not fill the screen with the splash's colour #{bg} before the kernel started "
+                              f"({t_kernel - t0:.1f}s):\n{self.timeline(t0)}")
+        for t, kind, _, why, colour in frames[first:]:
+            if kind == self.BLANK and colour not in (bg, "000000"):
+                raise TestFailure(f"an empty screen of another colour than the splash's or black at {t - t0:.1f}s, "
+                                  f"after GRUB's colour:\n{self.timeline(t0)}")
         return self._after(frames, first, t0, t_shell)
 
 
@@ -1257,8 +1295,9 @@ class Runner:
         """Restart with the splash; the screen is watched from the restart to
         the end of the boot and must be the splash (expect) from before the
         root filesystem on, faded in and never back; Plymouth ran from the
-        initramfs and is gone at the end. grub: GRUB draws the splash
-        (WP-8.7), checked by ScreenWatch.check_grub instead."""
+        initramfs and is gone at the end. grub: GRUB fills the screen with
+        the splash's colour first (WP-8.7), checked by ScreenWatch.check_grub
+        instead."""
         watch = ScreenWatch(self.vm.screen_qmp(), expect, self.vm.workdir, name)
         t0 = time.time()
         try:
@@ -1430,34 +1469,19 @@ class Runner:
         if self.vm.run(f"cksum < {self.ARCHIVE}").strip() != good:
             raise TestFailure("the boot did not keep splash.cpio as it was")
         self.splash_archive = good
-        # WP-8.7: with animation=none the screen at the end of this boot,
-        # which started with the archive, becomes the picture GRUB draws; it
-        # is what the screen shows, pixel for pixel.
-        boot = "/boot/efi/EFI/BOOT"
-        self.wait_for(f"test -s {boot}/splash-screen.png && grub-editenv {boot}/splash.env list | "
-                      "grep -q '^IRONFLOCKOS_SPLASH_MODE='", 120, "ironflockos-splash-capture to take the screen")
-        self.vm.run(f"grub-editenv {boot}/splash.env list | grep -qx 'IRONFLOCKOS_SPLASH_BACKGROUND=#204060'")
-        taken = base64.b64decode(self.vm.run(f"base64 -w0 {boot}/splash-screen.png").strip())
-        width, height, rgba = png_decode(taken)
-        screen = self.vm.screen_qmp().screen(os.path.join(self.vm.workdir, "screendump.ppm"))
-        rgb = bytes(b for i, b in enumerate(rgba) if i % 4 != 3)
-        # The screen without gfxterm's 10-pixel border, where GRUB puts it.
-        sw, sh, spx = screen
-        inner = b"".join(spx[3 * (y * sw + 10):3 * (y * sw + sw - 10)] for y in range(10, sh - 10))
-        mode = self.vm.run(f"grub-editenv {boot}/splash.env list | sed -n 's/^IRONFLOCKOS_SPLASH_MODE=//p'").strip()
-        if (width, height) != (sw - 20, sh - 20) or rgb != inner or mode != f"{sw}x{sh}":
-            save_screen((width, height, rgb), os.path.join(self.vm.workdir, "screen-own-taken.png"))
-            raise TestFailure(f"the picture taken for GRUB ({width}x{height}, mode {mode}) is not what the screen "
-                              f"({sw}x{sh}) shows inside GRUB's border")
+        # WP-8.7: GRUB fills the screen with the splash's colour from the
+        # next boot on (grub_splash).
+        self.vm.run("grub-editenv /boot/efi/EFI/BOOT/splash.env list | grep -qx 'IRONFLOCKOS_SPLASH_BACKGROUND=#204060'")
 
     def grub_splash(self):
-        """WP-8.7: the boot after the screen was taken. GRUB draws the
-        splash before the kernel starts, the kernel keeps its framebuffer and
-        its console off the screen, and Plymouth draws the same picture; from
-        GRUB's picture to the end of the boot the screen is the splash and
-        nothing else, and the terminals have their console back. Then the
-        steps after this one boot on text again: they read the serial
-        console."""
+        """WP-8.7: GRUB fills the screen with the splash's background colour
+        before the kernel starts, the kernel keeps its framebuffer and its
+        console off the screen, and Plymouth draws the splash on the same
+        colour; from GRUB's colour to the end of the boot nothing but that
+        colour, empty screens of it or black, and the splash, and the
+        terminals have their console back. GRUB draws no picture (a later
+        work package, proven on the panel). Then the steps after this one boot
+        on text again: they read the serial console."""
         self.splash_boot(Splash(test_picture(), (0x20, 0x40, 0x60)), "grub", grub=True)
         self.set_boot_cmdline(splash=False)
 
@@ -2600,7 +2624,7 @@ class Runner:
         self.vm.run("test ! -e /apps/prod/ironflockos-reset-test && test ! -e /data/ironflockos-test-marker")
         # The device's own splash went with the old owner's data: IronFlock's
         # logo from the restart on, and an empty screen folder.
-        self.vm.run(f"test ! -e {self.ARCHIVE} && test ! -e /boot/efi/EFI/BOOT/splash-screen.png && test -d /data/ironflockos/screen"
+        self.vm.run(f"test ! -e {self.ARCHIVE} && test -d /data/ironflockos/screen"
                     " && test -z \"$(ls -A /data/ironflockos/screen)\"")
         boots = self.vm.run("journalctl --list-boots --no-pager | grep -cE '^ *-?[0-9]+ '").strip()
         if boots != "1":
@@ -2918,7 +2942,7 @@ def main():
                     runner.own_splash)
         runner.step("keys and messages: Esc for the boot messages, a message below the picture, Ctrl+Alt+F2 and back"
                     + (", the console password on tty2" if flock else ""), runner.usual_keys)
-        runner.step("GRUB draws the splash: from GRUB's picture to the end of the boot nothing but the splash",
+        runner.step("GRUB's colour: the splash's background before the kernel, then nothing but it and the splash",
                     runner.grub_splash)
         if args.only != "boot":
             runner.step("update into slot B; ironflock os refuses while RAUC installs and while the update waits",
