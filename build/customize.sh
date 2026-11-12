@@ -184,7 +184,7 @@ if [ "$VARIANT" = installer ]; then
   systemctl --root="$ROOT" mask ironflockos-factory-reset.service ironflockos-data-missing.service
   # The stick boots on text (its grubenv); a device's screen settings live on
   # its /data, which the stick has not.
-  systemctl --root="$ROOT" mask ironflockos-splash.service ironflockos-splash.path ironflockos-splash-capture.service \
+  systemctl --root="$ROOT" mask ironflockos-splash.service ironflockos-splash.path \
     ironflockos-display.service ironflockos-display.path \
     ironflockos-console-password.service ironflockos-console-password.path
 else
@@ -212,7 +212,7 @@ else
     # The screen (docs/build.md): the device's own splash picture and its
     # display setting, both for GRUB next to grubenv. The EFI targets only
     # (docs/kiosk-plan.md, P5).
-    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service ironflockos-splash-capture.service
+    systemctl --root="$ROOT" enable ironflockos-splash.service ironflockos-display.service
     mkdir -p "$ROOT/etc/ironflockos"
     ln -sfn /data/ironflockos/display.conf "$ROOT/etc/ironflockos/display.conf"
   fi
