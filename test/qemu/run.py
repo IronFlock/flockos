@@ -295,6 +295,22 @@ class Splash:
             return False, alpha, f"not the picture (alpha {alpha:.2f}, error {err:.1f}, {off:.1%} off, {clear_off:.1%} not clear)"
         return True, alpha, f"the splash, alpha {alpha:.2f}"
 
+    def match_message(self, frame):
+        """(True, why) when the frame is the whole splash with a line of text
+        in the band below the picture (WP-8.3), and nothing else."""
+        width, height, px = frame
+        top = (height - self.h) // 2 + self.h + 8
+        bottom = min(height, top + 120)
+        bg_row = bytes(self.bg) * width
+        band = px[top * width * 3:bottom * width * 3]
+        if band == bg_row * (bottom - top):
+            return False, "no text below the picture"
+        cleared = px[:top * width * 3] + bg_row * (bottom - top) + px[bottom * width * 3:]
+        ok, alpha, why = self.match((width, height, cleared))
+        if not ok or alpha < 0.97:
+            return False, f"besides the text below the picture: {why}"
+        return True, "the splash with a message below the picture"
+
     @staticmethod
     def _good(fit):
         _, err, off, clear_off = fit
@@ -1376,9 +1392,24 @@ class Runner:
             ok, _, why = expect.match(qmp.screen(shot))
             if not ok:
                 raise TestFailure(f"Esc again did not bring the splash back: {why}")
+            # WP-8.3: what the image says to a person at the device, below
+            # the picture; it stays when Plymouth quits.
+            self.vm.run("/usr/lib/ironflockos/screen-message 'IronFlockOS: a message for the screen'")
+            time.sleep(3)
+            frame = qmp.screen(shot)
+            save_screen(frame, os.path.join(self.vm.workdir, "screen-keys-message.png"))
+            ok, why = expect.match_message(frame)
+            if not ok:
+                raise TestFailure(f"the message is not on the splash: {why}")
         finally:
             self.vm.run("plymouth quit --retain-splash", check=False)
         self.vm.run("! pidof plymouthd")
+        time.sleep(2)
+        ok, why = expect.match_message(qmp.screen(shot))
+        if not ok:
+            raise TestFailure(f"the message did not stay when Plymouth quit: {why}")
+        # Without Plymouth (boot=text) a message changes nothing and fails nothing.
+        self.vm.run("/usr/lib/ironflockos/screen-message 'not shown'")
         # The other terminals have a login prompt.
         self.keys("ctrl", "alt", "f2")
         self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty2 ]", 30, "Ctrl+Alt+F2 to switch to tty2")
@@ -2702,7 +2733,7 @@ def main():
                     "a damaged splash.cpio, tty1 in graphics mode, input devices", runner.splash)
         runner.step("own splash: a screen app's picture and splash.conf, refusals, the next boot shows it",
                     runner.own_splash)
-        runner.step("keys: Esc for the messages, Ctrl+Alt+F2 and back"
+        runner.step("keys and messages: Esc for the boot messages, a message below the picture, Ctrl+Alt+F2 and back"
                     + (", the console password on tty2" if flock else ""), runner.usual_keys)
         if args.only != "boot":
             runner.step("update into slot B; ironflock os refuses while RAUC installs and while the update waits",
