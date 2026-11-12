@@ -1441,10 +1441,14 @@ class Runner:
         width, height, rgba = png_decode(taken)
         screen = self.vm.screen_qmp().screen(os.path.join(self.vm.workdir, "screendump.ppm"))
         rgb = bytes(b for i, b in enumerate(rgba) if i % 4 != 3)
-        if (width, height) != screen[:2] or rgb != screen[2]:
+        # The screen without gfxterm's 10-pixel border, where GRUB puts it.
+        sw, sh, spx = screen
+        inner = b"".join(spx[3 * (y * sw + 10):3 * (y * sw + sw - 10)] for y in range(10, sh - 10))
+        mode = self.vm.run(f"grub-editenv {boot}/splash.env list | sed -n 's/^IRONFLOCKOS_SPLASH_MODE=//p'").strip()
+        if (width, height) != (sw - 20, sh - 20) or rgb != inner or mode != f"{sw}x{sh}":
             save_screen((width, height, rgb), os.path.join(self.vm.workdir, "screen-own-taken.png"))
-            raise TestFailure(f"the picture taken for GRUB ({width}x{height}) is not what the screen shows "
-                              f"({screen[0]}x{screen[1]})")
+            raise TestFailure(f"the picture taken for GRUB ({width}x{height}, mode {mode}) is not what the screen "
+                              f"({sw}x{sh}) shows inside GRUB's border")
 
     def grub_splash(self):
         """WP-8.7: the boot after the screen was taken. GRUB draws the
