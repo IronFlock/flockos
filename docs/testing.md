@@ -164,12 +164,20 @@ Sequence:
    and a QMP socket; the test reads the screen with `screendump` about once a
    second while it restarts and compares each frame with the splash it should
    show: the picture centred on its background colour, faded in by some
-   amount, and nothing else. *Splash:* the initramfs carries Plymouth, the
+   amount, and nothing else. The rule for a boot: once the picture shows
+   after the kernel started, nothing else is on the screen, and from the
+   first answer of the root filesystem's shell to the end of the boot (and
+   five seconds after) it is the splash only, never fading back; empty
+   screens and dips before that answer, after the picture showed, are
+   counted in the log, not failed: QEMU's graphics drivers start with an
+   empty framebuffer when they take the screen from the firmware's.
+   *Splash:* the initramfs carries Plymouth, the
    theme and IronFlock's logo; with random bytes as `splash.cpio` the device
    boots with the splash, the kernel says `Initramfs unpacking failed`, and
    from before the root filesystem's system answered to the end of the boot
    the screen shows IronFlock's logo on black, faded in and never back;
-   Plymouth started in the initramfs (before systemd) and is gone at the end;
+   Plymouth started in the initramfs (its start before systemd's
+   `UserspaceTimestampMonotonic`) and is gone at the end;
    `ironflockos-splash` removes the damaged archive; tty1 is in front, in
    graphics mode, without a login prompt; an error written to the kernel's log
    reaches the serial console and leaves the screen as it is, and so do 30
@@ -196,16 +204,15 @@ Sequence:
    `splash-screen.png`, which is what `screendump` shows, pixel for pixel,
    and `splash.env` names its size and the colour; the next boot shows the
    whole splash before the kernel starts (by the kernel's uptime at the
-   shell's first answer), and from there to the end nothing but the splash;
-   frames without the whole picture in between are counted in the log, not
-   failed. The kernel command line keeps the console off the screen
+   shell's first answer), and from there to the end the rule above. The
+   kernel command line keeps the console off the screen
    (`fbcon=map:9`), and after the boot the framebuffer console is bound
    again. Not tested in QEMU: whether the picture survives the moment a real
    graphics driver (Intel's) takes the screen from the firmware, the frames
    before the root filesystem's system (the initramfs's are not read one by
    one: the check there is that Plymouth started in it), and the shutdown
-   splash's frames (the journal says it started). Frames that are not the
-   splash are saved as `screen-*.png` with the logs.
+   splash's frames (the journal says it started). Each new kind of frame is
+   saved as `screen-*.png` with the logs.
 3. **Update into slot B** with the bundle of the same build, downloaded over
    HTTP from the host as the agent will: RAUC makes B primary, B boots, keeps
    machine-id, host key, `/data` and the app's file of slot A in `/apps`, and is

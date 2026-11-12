@@ -633,15 +633,21 @@ size.
 `quiet` holds for the serial console too: the kernel has one log level for
 all consoles. Errors still go there, and the journal keeps every line.
 Plymouth draws nothing while a serial console is named unless told to ignore
-it. It draws into the kernel's framebuffer device rather than taking the
-graphics device itself (`plymouth.force-frame-buffer-on-boot`): when Plymouth
-quits at the end of the boot (`plymouth quit --retain-splash`, a drop-in for
-`plymouth-quit.service`), the framebuffer keeps the picture, and the first
-virtual terminal stays in graphics mode, so nothing the kernel writes is drawn
-over it. Through the graphics device the picture would go with Plymouth: the
-kernel removes a framebuffer when the program that made it ends. Nothing of
-the image holds the graphics device after the boot; a screen app that opens
-it takes the screen, and when it closes it, the picture is back. With the
+it. Plymouth draws through the graphics device (DRM) once its driver is
+there, and with `plymouth.force-frame-buffer-on-boot` and `DeviceTimeout=0`
+in `plymouthd.conf` also into the kernel's framebuffer device, from its start.
+What it shows through the graphics device would go with it: the kernel
+removes a framebuffer when the program that made it ends, turns the screen
+off and shows the framebuffer device instead, black unless Plymouth drew into
+it too. So at the end of the boot `plymouth-quit.service` runs
+`/usr/lib/ironflockos/keep-splash`: Plymouth lets go of the screen
+(`plymouth deactivate`), the framebuffer device, which holds the same picture,
+is put on the screen in the same mode (a forced `FBIOPUT_VSCREENINFO`: no mode
+change, only the other picture), and then Plymouth quits keeping its splash
+(`plymouth quit --retain-splash`). The first virtual terminal stays in
+graphics mode, so nothing the kernel writes is drawn over it. Nothing of the
+image holds the graphics device after the boot; a screen app that opens it
+takes the screen, and when it closes it, the picture is back. With the
 splash `getty@tty1` does not start (a drop-in with
 `ConditionKernelCommandLine=!splash`); logind starts a login prompt on the
 terminals 2 to 6 when one is switched to.

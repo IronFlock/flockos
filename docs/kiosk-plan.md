@@ -131,14 +131,16 @@ The app guarantees:
 - As built (branch `splash`, `docs/build.md` "The screen"): the setting is `boot=` in
   `/etc/ironflockos/display.conf`, written into `grubenv` as `IRONFLOCKOS_BOOT=text` by
   `ironflockos-display`; `ironflockos.boot=text` in `IRONFLOCKOS_CMDLINE` is the tests'
-  way. One parameter more than this plan named: `plymouth.force-frame-buffer-on-boot`.
-  Plymouth draws into the kernel's framebuffer device instead of taking the graphics
-  device: the kernel removes a framebuffer when the program that made it ends, so a
-  splash drawn through the graphics device would turn black when Plymouth quits, and
-  the framebuffer device keeps it. The packages are the EFI targets' (`plymouth`,
-  `plymouth-label`, `fontconfig`), not `profiles/base`'s, which the Raspberry Pi and
-  Jetson share (P5). The sizes of the initramfs and the slot are in the CI log of the
-  first build (`initramfs:` in the build log, `sizes:` in the QEMU test's).
+  way. "Plymouth quits with the splash kept" takes more than `plymouth quit
+  --retain-splash`: the kernel removes a framebuffer when the program that made it
+  ends, and a splash Plymouth drew through the graphics device turns black then (the
+  first CI run showed it on amd64). Plymouth also draws into the kernel's framebuffer
+  device (`plymouth.force-frame-buffer-on-boot`, `DeviceTimeout=0`), and
+  `/usr/lib/ironflockos/keep-splash` puts that device on the screen in Plymouth's place before
+  Plymouth quits. The packages are the EFI targets' (`plymouth`, `plymouth-label`,
+  `fontconfig`), not `profiles/base`'s, which the Raspberry Pi and Jetson share (P5).
+  The initramfs is 70 MB on amd64-efi (first CI run; all of the kernel's graphics
+  drivers, Debian's default); the slot is 1.4 GB of 3.9 GB used.
 
 ### WP-8.2 The usual keys (2 days, after O1)
 
