@@ -96,8 +96,9 @@ Sequence:
    `/usr/bin/ironflock`, nothing named `ironflock-init` is left, and
    `ironflock version` is the `ironflock_version` of `image.json`;
    `ironflock status --json` names the image, its version and the booted slot
-   and, enrolled, the agent with the `.flock`'s device; `agent install` and
-   `agent remove` refuse (exit code 3), as root and not; `ironflock enroll` does
+   and, enrolled, the agent with the `.flock`'s device; `agent install`,
+   `agent remove` and `self-update` (the OS update brings `ironflock`) refuse
+   (exit code 3), as root and not; `ironflock enroll` does
    not accept a `.flock` that is not JSON (exit code 4) and leaves it where it
    is; none of them changes anything. Enrolled, the same file as the newest
    `.flock` on the IRONFLOCKOS partition is kept as `.rejected` and the

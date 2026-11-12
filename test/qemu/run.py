@@ -1770,8 +1770,9 @@ class Runner:
         """WP-5.1 of the CLI's plan: the image carries ironflock (IronFlock/ironflock-cli) as
         /usr/bin/ironflock, nothing named ironflock-init, and image.json names
         its version. `ironflock status --json` describes this device. The agent
-        commands IronFlockOS has no use for refuse (exit code 3) and change
-        nothing, as root and not. `ironflock enroll` does not accept a .flock
+        commands IronFlockOS has no use for, and `self-update` (the OS update
+        brings ironflock), refuse (exit code 3) and change nothing, as root
+        and not. `ironflock enroll` does not accept a .flock
         that is not JSON (exit code 4) and leaves it where it is. Enrolled: such
         a .flock, the newest on the IRONFLOCKOS partition, is kept as .rejected
         and the enrolment takes the agent's copy; agent configure -c refuses
@@ -1809,7 +1810,9 @@ class Runner:
         self.vm.run(f"echo {data} | base64 -d > {other} && chmod 644 {other}")
         before = self.device_state()
         for user in ("", "runuser -u nobody -- "):
-            for command in (f"/usr/bin/ironflock agent install -c {other} --yes", "/usr/bin/ironflock agent remove --yes"):
+            # self-update (ironflock 2.1.0): the OS update brings ironflock.
+            for command in (f"/usr/bin/ironflock agent install -c {other} --yes", "/usr/bin/ironflock agent remove --yes",
+                            "/usr/bin/ironflock self-update --yes"):
                 rc, out = self.exit_code(f"{user}{command} </dev/null")
                 if rc != 3 or f"this device runs IronFlockOS {image_version} ({self.image_id})" not in out:
                     raise TestFailure(f"`{user}{command}` ended with {rc}, expected 3 and IronFlockOS named:\n{out}")
