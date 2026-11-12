@@ -24,8 +24,8 @@ is not accepted); `ironflock os` on the device as written (WP-5.2, WP-5.3:
 IronFlock did not sign); enrolled, the device changes hands with `sudo ironflock
 agent configure -c` run by its owner over SSH, and back; for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
-(state persists, a proxy.conf and a static network profile on the IRONFLOCKOS
-partition are taken); the splash (docs/build.md, "The screen"; every other
+(state persists, a proxy.conf, a corporate CA chain as ca.crt and a static
+network profile on the IRONFLOCKOS partition are taken); the splash (docs/build.md, "The screen"; every other
 boot is on text, ironflockos.boot=text, as the checks read the serial
 console): Plymouth from the initramfs, the screen read through QMP's
 screendump through the boot and after, a damaged splash.cpio, then the
@@ -560,6 +560,31 @@ OTHER_OWNER = "ironflockosother"
 OTHER_FLOCK_NAME = "ironflockos-ci-other"
 # The static network profile the IRONFLOCKOS partition hands over (ADR-0016).
 STATIC_PROFILE = "ironflockos-ci-static"
+# The test's corporate CA chain (ADR-0021): made in the VM, on its own clock,
+# kept on /data for the boots after; openssl's sections for each certificate.
+TEST_CA_DIR = "/data/ironflockos-test-ca"
+TEST_CA_CNF = """[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = unused
+[root]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+[sub]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+[leaf]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:localhost
+authorityKeyIdentifier = keyid
+"""
+CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 
 def test_picture():
@@ -1758,6 +1783,82 @@ class Runner:
         self.vm.run("printf 'http_proxy=http://10.0.2.2:3129\\n' > /boot/efi/proxy.conf")
         self.proxy_seeded = True
 
+    def tls_rc(self):
+        """curl's exit code and output for https://localhost:8443/, which
+        openssl s_server serves with the test chain's certificate: 0 when the
+        trust store holds the test's CAs, 60 when it does not."""
+        d = TEST_CA_DIR
+        self.vm.run("systemd-run --quiet --collect --unit=ironflockos-ci-tls -p RuntimeMaxSec=120 /usr/bin/openssl "
+                    f"s_server -quiet -www -accept 127.0.0.1:8443 -cert {d}/leaf.pem -key {d}/leaf.key")
+        try:
+            self.wait_for("ss -ltn | grep -q '127.0.0.1:8443 '", 30, "openssl s_server to listen")
+            return self.exit_code("curl -sS --max-time 10 -o /dev/null --resolve localhost:8443:127.0.0.1 "
+                                  "https://localhost:8443/")
+        finally:
+            self.vm.run("systemctl stop ironflockos-ci-tls.service", check=False)
+
+    def trusted_ca(self):
+        """Trusted CAs (docs/build.md, "Trusted CAs"; ADR-0021): the units run
+        and the device has no extra CA. The test makes a corporate chain in the
+        VM: a root CA, a sub CA, and a server certificate for localhost from
+        the sub CA. curl refuses a TLS server with that certificate. Both CAs
+        go onto the IRONFLOCKOS partition as ca.crt, as `ironflock os install`
+        writes it; the next boot takes them (checked in reboot_persists)."""
+        for unit in ("ironflockos-ca.service", "ironflockos-ca.path"):
+            self.vm.run(f"systemctl is-active {unit}")
+        self.vm.run("test -L /etc/ironflockos/ca.crt && test ! -e /data/ironflockos/ca.crt")
+        self.vm.run("journalctl -b --no-pager -o cat -u ironflockos-ca | grep -qx 'ca: no extra CA'")
+        d = TEST_CA_DIR
+        self.vm.run(f"mkdir -p {d}")
+        self.put_file(f"{d}/ca.cnf", TEST_CA_CNF.encode())
+        key = "-newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes"
+        self.vm.run(f"cd {d} && openssl req -x509 -config ca.cnf -extensions root {key} -days 30"
+                    " -subj '/O=Example Corp/CN=Example Corp Test Root CA' -keyout root.key -out root.pem")
+        for name, issuer, subject, serial in (("sub", "root", "/O=Example Corp/CN=Example Corp Test Sub CA", 2),
+                                              ("leaf", "sub", "/CN=localhost", 3)):
+            self.vm.run(f"cd {d} && openssl req -new -config ca.cnf {key} -subj '{subject}'"
+                        f" -keyout {name}.key -out {name}.csr")
+            self.vm.run(f"cd {d} && openssl x509 -req -in {name}.csr -CA {issuer}.pem -CAkey {issuer}.key"
+                        f" -set_serial {serial} -days 30 -extfile ca.cnf -extensions {name} -out {name}.pem")
+        self.vm.run(f"openssl verify -CAfile {d}/root.pem -untrusted {d}/sub.pem {d}/leaf.pem")
+        rc, out = self.tls_rc()
+        if rc != 60:
+            raise TestFailure(f"curl to the test chain's server ended with {rc} before the device trusts its CAs,"
+                              f" expected 60:\n{out}")
+        self.vm.run(f"{{ echo '# Example Corp, the corporate CAs'; cat {d}/root.pem; echo; cat {d}/sub.pem; }}"
+                    " > /boot/efi/ca.crt && sync")
+        self.ca_seeded = True
+
+    def ca_trusted(self, where):
+        """The test chain's CAs are the device's set and in the trust store of
+        the slot that runs, one file each: curl accepts the TLS server with
+        the chain's certificate."""
+        d = TEST_CA_DIR
+        self.vm.run(f"cat {d}/root.pem {d}/sub.pem | cmp - /data/ironflockos/ca.crt")
+        for name in ("root", "sub"):
+            self.vm.run(f"grep -qxF \"$(sed -n 2p {d}/{name}.pem)\" {CA_BUNDLE}")
+        self.vm.run("test \"$(ls /usr/local/share/ca-certificates/ironflockos/*.crt | wc -l)\" = 2")
+        self.vm.run("journalctl -b --no-pager -o cat -u ironflockos-ca"
+                    " | grep -q '^ca: trusts CN=Example Corp Test Root CA,O=Example Corp (SHA-256 '")
+        rc, out = self.tls_rc()
+        if rc != 0:
+            raise TestFailure(f"{where}: curl to the test chain's server ended with {rc}, expected 0:\n{out}")
+
+    def ca_removed(self):
+        """Without the device's set the CAs leave the store at once
+        (ironflockos-ca.path), and curl refuses the test chain's server again."""
+        d = TEST_CA_DIR
+        self.vm.run("rm /data/ironflockos/ca.crt")
+        self.wait_for(f"! grep -qxF \"$(sed -n 2p {d}/root.pem)\" {CA_BUNDLE}"
+                      " && [ \"$(systemctl is-active ironflockos-ca-reload.service)\" = inactive ]", 120,
+                      "the trust store to drop the test's CAs")
+        self.vm.run("test ! -e /usr/local/share/ca-certificates/ironflockos")
+        rc, out = self.tls_rc()
+        if rc != 60:
+            raise TestFailure(f"curl to the test chain's server ended with {rc} after the CAs went, expected 60:\n{out}")
+        self.vm.run(f"rm -rf {d}")
+        self.ca_seeded = False
+
     def network_profile(self):
         """Network profiles from the IRONFLOCKOS partition (ADR-0016, docs/build.md
         "Network profiles"): a profile for a static address goes to the
@@ -2026,6 +2127,13 @@ class Runner:
             # No proxy for the rest of the test: the update downloads directly.
             self.vm.run("rm /data/ironflockos/proxy.conf")
             self.wait_for("[ -z \"$(docker info --format '{{.HTTPSProxy}}')\" ]", 120, "Docker to drop the proxy")
+        if getattr(self, "ca_seeded", False):
+            # The CAs stay until slot B has shown it trusts them (update_to_b).
+            self.vm.run("test ! -e /boot/efi/ca.crt")
+            self.vm.run("journalctl -b --no-pager -o cat -u ironflockos-ca"
+                        " | grep -qx 'ca: took ca.crt from the IRONFLOCKOS partition'")
+            self.vm.run("test \"$(stat -c %a /data/ironflockos/ca.crt)\" = 644")
+            self.ca_trusted("after the boot that took ca.crt")
         # The app's data of the first boot: /apps is on /data.
         self.apps_on_data()
         self.vm.run("grep -qx ironflockos-test /apps/prod/ironflockos-test/data.txt")
@@ -2110,6 +2218,11 @@ class Runner:
             raise TestFailure("the SSH host key changed with the update")
         self.mark_good("B", "rootfs.1")
         self.wait_for("test -e /var/lib/ironflockos/slot-proven", 60, "slot B to remember it was marked good")
+        # The new slot's store gets the device's CAs on its first boot; then
+        # they go, for the rest of the test.
+        if getattr(self, "ca_seeded", False):
+            self.ca_trusted("slot B")
+            self.ca_removed()
         # The device's own splash outlives the update: splash.cpio is on the
         # IRONFLOCKOS partition, and slot B's ironflockos-splash makes the same.
         if getattr(self, "splash_archive", None):
@@ -2932,9 +3045,12 @@ def main():
         runner.step("filesystem check: the boot repairs what a preen refuses", runner.fsck_repair)
         runner.step("time: chrony, PTP from ptp.conf as chrony's source", runner.time_sync)
         runner.step("proxy: proxy.conf to Docker, the agent and chrony", runner.proxy)
+        runner.step("trusted CAs: a corporate chain refused, its CAs as ca.crt on IRONFLOCKOS for the next boot",
+                    runner.trusted_ca)
         runner.step("network profile: a static profile on the IRONFLOCKOS partition, for the next boot",
                     runner.network_profile)
-        runner.step("reboot: machine-id, host key, journal persist, proxy.conf and the static profile from IRONFLOCKOS",
+        runner.step("reboot: machine-id, host key, journal persist, proxy.conf, ca.crt and the static profile"
+                    " from IRONFLOCKOS",
                     runner.reboot_persists)
         runner.step("splash: Plymouth from the initramfs, IronFlock's logo to the end of the boot and after, "
                     "a damaged splash.cpio, tty1 in graphics mode, input devices", runner.splash)
