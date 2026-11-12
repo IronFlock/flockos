@@ -1,0 +1,38 @@
+#!/bin/sh
+# keep-splash: Plymouth quits at the end of the boot and the splash stays on
+# the screen (docs/build.md, "The screen"; plymouth-quit.service runs this).
+#
+# Plymouth draws through the graphics device (DRM) once its driver is there,
+# and into the kernel's framebuffer device as well
+# (plymouth.force-frame-buffer-on-boot, DeviceTimeout=0). What it shows
+# through the graphics device would go when it quits: the kernel removes a
+# framebuffer with the program that made it, turns the screen off and shows
+# the framebuffer device instead, which takes a moment of black, longer on a
+# panel. So first Plymouth lets go of the screen (deactivate), then the
+# framebuffer device, which holds the same picture, is put on the screen (a
+# forced FBIOPUT_VSCREENINFO in the same mode: no mode change, only another
+# picture to show, the same), and only then Plymouth quits, keeping its
+# splash. The first virtual terminal stays in graphics mode, so the kernel's
+# console draws nothing over it. Each step that fails is passed over: the
+# boot goes on, at worst with a black screen.
+# IRONFLOCKOS_DEV: for the unit tests only.
+dev=${IRONFLOCKOS_DEV:-/dev}
+plymouth --ping 2>/dev/null || exit 0
+plymouth deactivate 2>/dev/null || true
+for fb in "$dev"/fb[0-9]*; do
+  [ -e "$fb" ] || continue
+  # struct fb_var_screeninfo is 40 32-bit fields; activate is the 22nd.
+  # FBIOGET_VSCREENINFO 0x4600, FBIOPUT_VSCREENINFO 0x4601,
+  # FB_ACTIVATE_NOW 0 | FB_ACTIVATE_FORCE 128.
+  # shellcheck disable=SC2016 # a perl program
+  perl -e '
+    open(my $fb, "+<", $ARGV[0]) or die "$ARGV[0]: $!\n";
+    my $var = "\0" x 160;
+    ioctl($fb, 0x4600, $var) or die "$ARGV[0]: FBIOGET_VSCREENINFO: $!\n";
+    my @f = unpack("L40", $var);
+    $f[21] = 128;
+    $var = pack("L40", @f);
+    ioctl($fb, 0x4601, $var) or die "$ARGV[0]: FBIOPUT_VSCREENINFO: $!\n";
+  ' "$fb" || echo "keep-splash: $fb could not be put on the screen" >&2
+done
+plymouth quit --retain-splash 2>/dev/null || true

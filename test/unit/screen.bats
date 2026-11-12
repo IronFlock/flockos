@@ -397,7 +397,31 @@ display() {
 @test "with the splash, tty1 belongs to the screen and Plymouth leaves the picture on it" {
   grep -qx 'ConditionKernelCommandLine=!splash' "$units/getty@tty1.service.d/ironflockos-splash.conf"
   q=$units/plymouth-quit.service.d/ironflockos.conf
-  [ "$(grep '^ExecStart=' "$q" | tr '\n' '|')" = "ExecStart=|ExecStart=-/usr/bin/plymouth quit --retain-splash|" ]
+  [ "$(grep '^ExecStart=' "$q" | tr '\n' '|')" = "ExecStart=|ExecStart=-/usr/lib/ironflockos/keep-splash|" ]
+  # Plymouth draws into the framebuffer devices from the start, not only
+  # after its device timeout: they keep the splash when it quits.
+  grep -qx 'DeviceTimeout=0' "$repo/overlay/etc/plymouth/plymouthd.conf"
+}
+
+@test "keep-splash: Plymouth lets go, the framebuffer device goes on the screen, then Plymouth quits keeping its splash" {
+  cat >"$tmp/bin/plymouth" <<SH
+#!/bin/sh
+echo "plymouth \$*" >>"$tmp/calls"
+SH
+  chmod +x "$tmp/bin/plymouth"
+  mkdir -p "$tmp/dev"
+  echo 'no framebuffer' >"$tmp/dev/fb0"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_DEV=$tmp/dev run sh "$lib/keep-splash"
+  [ "$status" -eq 0 ]
+  # A file that is no framebuffer refuses the ioctl: said, and passed over.
+  [[ "$output" == *"keep-splash: $tmp/dev/fb0 could not be put on the screen"* ]]
+  [ "$(tr '\n' '|' <"$tmp/calls")" = "plymouth --ping|plymouth deactivate|plymouth quit --retain-splash|" ]
+  # Without Plymouth nothing happens.
+  rm "$tmp/calls"
+  printf '#!/bin/sh\necho "plymouth $*" >>"%s"\nexit 1\n' "$tmp/calls" >"$tmp/bin/plymouth"
+  PATH="$tmp/bin:$PATH" IRONFLOCKOS_DEV=$tmp/dev run sh "$lib/keep-splash"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$tmp/calls")" = "plymouth --ping" ]
 }
 
 # --- the usual keys (WP-8.2) -------------------------------------------------
