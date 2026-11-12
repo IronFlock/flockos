@@ -380,11 +380,13 @@ class QMP:
         with open(path, "rb") as fh:
             data = fh.read()
         os.remove(path)
-        parts = data.split(maxsplit=4)
-        if parts[0] != b"P6" or parts[3] != b"255":
+        # One whitespace byte after the maximum value, then the pixels, whose
+        # first bytes may well be whitespace themselves (0x20 is a colour).
+        m = re.match(rb"P6\s+(\d+)\s+(\d+)\s+255\s", data)
+        if not m:
             raise TestFailure("screendump wrote no PPM")
-        width, height = int(parts[1]), int(parts[2])
-        return width, height, parts[4][:width * height * 3]
+        width, height = int(m.group(1)), int(m.group(2))
+        return width, height, data[m.end():m.end() + width * height * 3]
 
     def close(self):
         self.sock.close()
@@ -401,16 +403,22 @@ class ScreenWatch:
     """screendump about once a second in a thread, each frame matched against
     a splash: what the screen showed through a reboot."""
 
+    # A frame's kind: the splash (with how far the picture has faded in), an
+    # empty screen of another colour than the background (a graphics driver
+    # taking the screen over), or anything else.
+    SPLASH, BLANK, OTHER = "splash", "blank", "other"
+
     def __init__(self, qmp, splash, workdir, name):
         self.qmp, self.splash, self.workdir, self.name = qmp, splash, workdir, name
         self.frames = []
-        self.saved = set()
+        self.saved = 0
         self.stop_flag = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def _run(self):
         tmp = os.path.join(self.workdir, f"screendump-{self.name}.ppm")
+        last = None
         while not self.stop_flag.is_set():
             t = time.time()
             try:
@@ -421,12 +429,16 @@ class ScreenWatch:
                 self.frames.append((t, None, None, "no picture"))
             else:
                 ok, alpha, why = self.splash.match(frame)
-                self.frames.append((t, ok, alpha, why))
-                kind = "splash" if ok else "other"
-                if kind not in self.saved or not ok:
-                    if len(self.saved) < 12:
-                        save_screen(frame, os.path.join(self.workdir, f"screen-{self.name}-{len(self.frames):03d}-{kind}.png"))
-                        self.saved.add(kind if ok else len(self.frames))
+                kind = self.SPLASH if ok else self.OTHER
+                if not ok and frame[2] == frame[2][:3] * (frame[0] * frame[1]):
+                    kind, why = self.BLANK, f"an empty screen #{frame[2][:3].hex()}"
+                self.frames.append((t, kind, alpha, why))
+                # Each new kind of picture is saved, for CI's artifact.
+                key = (kind, round(alpha or 0, 1), why.split(" ")[:3] if kind == self.OTHER else None)
+                if key != last and self.saved < 40:
+                    self.saved += 1
+                    save_screen(frame, os.path.join(self.workdir, f"screen-{self.name}-{len(self.frames):03d}-{kind}.png"))
+                last = key
             self.stop_flag.wait(max(0.0, 1.0 - (time.time() - t)))
 
     def stop(self):
@@ -436,50 +448,68 @@ class ScreenWatch:
     def timeline(self, t0):
         return "\n".join(f"  {t - t0:6.1f}s  {why}" for t, _, _, why in self.frames)
 
-    def check(self, t0, t_shell):
-        """From some frame on to the end the screen is the splash and
-        nothing else; that run began before the shell of the new system
-        answered; once the picture showed, it never faded back (nothing that
-        appears, goes and comes back); and it ends with the whole picture."""
+    def _after(self, frames, start, t0, t_shell):
+        """The checks from frame start to the end: nothing but the splash and
+        empty screens; from the shell's first answer (the root filesystem's
+        system runs) only the splash, never fading back, whole at the end.
+        Returns the frames before that answer without the whole picture after
+        it first showed: empty screens and dips while a graphics driver takes
+        the screen over, which QEMU's drivers show and the machine's need
+        not."""
+        for f in frames[start:]:
+            if f[1] == self.OTHER:
+                raise TestFailure(f"something besides the splash at {f[0] - t0:.1f}s, after it showed:\n"
+                                  f"{self.timeline(t0)}")
+            if f[0] >= t_shell and f[1] != self.SPLASH:
+                raise TestFailure(f"no splash at {f[0] - t0:.1f}s, after the root filesystem's system answered "
+                                  f"({t_shell - t0:.1f}s):\n{self.timeline(t0)}")
+        top, gaps = 0.0, 0
+        for t, kind, alpha, _ in frames[start:]:
+            alpha = alpha if kind == self.SPLASH else 0.0
+            if top >= 0.5 and alpha < top - 0.15:
+                if t >= t_shell:
+                    raise TestFailure(f"the picture faded back at {t - t0:.1f}s, after it showed:\n{self.timeline(t0)}")
+                # A dip before the answer: the picture is to come back.
+                gaps += 1
+                continue
+            top = max(top, alpha)
+        if frames[-1][1] != self.SPLASH or frames[-1][2] < 0.97:
+            raise TestFailure(f"the picture is not whole at the end:\n{self.timeline(t0)}")
+        return gaps
+
+    def check(self, t0, t_kernel, t_shell):
+        """The picture shows after the kernel started; from the first frame
+        after anything else before it (the system before the restart, the
+        firmware's picture, which may stay until a graphics driver takes the
+        screen) to the end, the splash and nothing else (and empty screens
+        before the root filesystem's system answered); from that answer on,
+        the splash only, never fading back once the picture showed (nothing
+        that appears, goes and comes back), whole at the end. Returns the
+        number of dips before the answer (see _after)."""
         frames = [f for f in self.frames if f[1] is not None]
         if not frames:
             raise TestFailure("no picture from the screen")
-        start = len(frames)
-        while start > 0 and frames[start - 1][1]:
-            start -= 1
-        if start == len(frames):
-            raise TestFailure(f"the screen does not show the splash at the end:\n{self.timeline(t0)}")
+        shown = next((i for i, f in enumerate(frames) if f[0] >= t_kernel and f[1] == self.SPLASH and f[2] >= 0.5), None)
+        if shown is None:
+            raise TestFailure(f"the picture never showed after the kernel started:\n{self.timeline(t0)}")
+        start = max((i for i in range(shown) if frames[i][1] == self.OTHER), default=-1) + 1
         if frames[start][0] > t_shell:
             raise TestFailure(f"something besides the splash on the screen after the root filesystem was "
                               f"there ({t_shell - t0:.1f}s):\n{self.timeline(t0)}")
-        top = 0.0
-        for _, _, alpha, _ in frames[start:]:
-            if top >= 0.5 and alpha < top - 0.15:
-                raise TestFailure(f"the picture faded back after it showed:\n{self.timeline(t0)}")
-            top = max(top, alpha)
-        if frames[-1][2] < 0.97:
-            raise TestFailure(f"the picture is not whole at the end (alpha {frames[-1][2]:.2f}):\n{self.timeline(t0)}")
+        return self._after(frames, start, t0, t_shell)
 
-    def check_grub(self, t0, t_kernel):
+    def check_grub(self, t0, t_kernel, t_shell):
         """WP-8.7: after the firmware's last picture, and before the kernel
-        started, the whole splash is on the screen (GRUB drew it), and from
-        there to the end nothing but the splash. Frames without the whole
-        picture in between (black: the graphics driver taking the screen
-        from the firmware's framebuffer, before Plymouth draws again) are
-        counted, not failed: QEMU's drivers are not the machine's. Returns
-        their number."""
+        started, the whole splash is on the screen (GRUB drew it); from there
+        to the end the checks of _after. Returns the dips it counted."""
         frames = [f for f in self.frames if f[1] is not None]
-        firmware = max((i for i, f in enumerate(frames) if not f[1] and f[0] < t_kernel), default=-1)
+        firmware = max((i for i, f in enumerate(frames) if f[1] == self.OTHER and f[0] < t_kernel), default=-1)
         first = next((i for i in range(firmware + 1, len(frames))
-                      if frames[i][1] and frames[i][2] >= 0.97 and frames[i][0] < t_kernel), None)
+                      if frames[i][1] == self.SPLASH and frames[i][2] >= 0.97 and frames[i][0] < t_kernel), None)
         if first is None:
             raise TestFailure(f"GRUB did not draw the splash before the kernel started ({t_kernel - t0:.1f}s):\n"
                               f"{self.timeline(t0)}")
-        if not all(f[1] for f in frames[first:]):
-            raise TestFailure(f"something besides the splash after GRUB drew it:\n{self.timeline(t0)}")
-        if frames[-1][2] < 0.97:
-            raise TestFailure(f"the picture is not whole at the end:\n{self.timeline(t0)}")
-        return sum(1 for f in frames[first:] if f[2] < 0.97)
+        return self._after(frames, first, t0, t_shell)
 
 
 TEST_OWNER = "ironflockostest"
@@ -1235,27 +1265,33 @@ class Runner:
             self.vm.reboot(self.boot_timeout, quiet=True)
             t_shell = time.time()
             t_kernel = t_shell - float(self.vm.run("cut -d' ' -f1 /proc/uptime").strip())
+            # Plymouth started in the initramfs: before systemd, whose start
+            # in the root filesystem systemd keeps itself (microseconds since
+            # the kernel started), as the kernel keeps plymouthd's (clock
+            # ticks). Asked at once: Plymouth quits at the end of the boot.
             early = self.vm.run("pid=$(cat /run/plymouth/pid 2>/dev/null) && echo plymouthd=$(cut -d' ' -f22 /proc/$pid/stat) "
-                                "hz=$(getconf CLK_TCK); journalctl -b -o short-monotonic --no-pager _PID=1 | "
-                                "sed -n '1s/^\\[ *\\([0-9]*\\)\\.\\([0-9]*\\)\\].*/systemd=\\1.\\2/p'", check=False)
+                                "hz=$(getconf CLK_TCK); "
+                                "echo systemd=$(systemctl show -p UserspaceTimestampMonotonic --value)", check=False)
             self.wait_running()
             # Plymouth quits at the end of the boot; the frames after it count.
             time.sleep(5)
         finally:
             watch.stop()
-        log(f"the screen from the restart ({name}; the kernel started at {t_kernel - t0:.1f}s):\n{watch.timeline(t0)}")
+        log(f"the screen from the restart ({name}; the kernel started at {t_kernel - t0:.1f}s, "
+            f"the root filesystem's shell answered at {t_shell - t0:.1f}s):\n{watch.timeline(t0)}")
         if grub:
-            gaps = watch.check_grub(t0, t_kernel)
-            log(f"frames without the whole picture after GRUB drew it: {gaps} (the graphics driver's hand-over in QEMU)")
+            gaps = watch.check_grub(t0, t_kernel, t_shell)
         else:
-            watch.check(t0, t_shell)
+            gaps = watch.check(t0, t_kernel, t_shell)
+        log(f"frames without the whole picture before the root filesystem's system answered, after the picture "
+            f"showed: {gaps} (a graphics driver taking the screen over; QEMU's start with an empty one)")
         got = dict(word.split("=", 1) for word in early.split() if "=" in word)
         try:
             started = int(got["plymouthd"]) / int(got["hz"])
-            systemd = float(got["systemd"])
+            systemd = int(got["systemd"]) / 1e6
         except (KeyError, ValueError):
-            raise TestFailure(f"Plymouth did not run when the root filesystem's system started:\n{early}") from None
-        if started >= systemd:
+            raise TestFailure(f"Plymouth did not run when the root filesystem's system answered:\n{early}") from None
+        if not 0 < started < systemd:
             raise TestFailure(f"Plymouth started at {started:.2f}s, not in the initramfs (systemd at {systemd:.2f}s)")
         cmdline = self.vm.run("cat /proc/cmdline").split()
         for want in ("quiet", "splash", "plymouth.ignore-serial-consoles", "plymouth.force-frame-buffer-on-boot",
@@ -1457,7 +1493,8 @@ class Runner:
             if not ok:
                 raise TestFailure(f"the message is not on the splash: {why}")
         finally:
-            self.vm.run("plymouth quit --retain-splash", check=False)
+            # As at the end of the boot (plymouth-quit.service).
+            self.vm.run("/usr/lib/ironflockos/keep-splash", check=False)
         self.vm.run("! pidof plymouthd")
         time.sleep(2)
         ok, why = expect.match_message(qmp.screen(shot))
