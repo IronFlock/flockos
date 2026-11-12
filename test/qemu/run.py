@@ -407,9 +407,15 @@ class ScreenWatch:
     # empty screen of another colour than the background (a graphics driver
     # taking the screen over), the screen before it shown with 24 bits a
     # pixel (QEMU's standard VGA for a moment while the kernel's driver sets
-    # its mode), or anything else. A frame is (time, kind, alpha, why,
-    # colour), colour the hex of an empty screen's, else None.
-    SPLASH, BLANK, DEPTH, OTHER = "splash", "blank", "depth", "other"
+    # its mode), QEMU's own "Display output is not active." (no picture from
+    # the guest: virtio-gpu before the firmware or GRUB set a mode, and while
+    # the kernel's driver takes the device over), or anything else. A frame
+    # is (time, kind, alpha, why, colour), colour the hex of an empty
+    # screen's, else None.
+    SPLASH, BLANK, DEPTH, INACTIVE, OTHER = "splash", "blank", "depth", "inactive", "other"
+    # The pixels of QEMU's line "Display output is not active." (229x13,
+    # #aaaaaa on black, in the middle of an otherwise black screen).
+    INACTIVE_TEXT = "9b9f9f2607e7b69950a7b4d359040edb107153a3abf4da33f82f6c339683b358"
 
     def __init__(self, qmp, splash, workdir, name):
         self.qmp, self.splash, self.workdir, self.name = qmp, splash, workdir, name
@@ -440,6 +446,24 @@ class ScreenWatch:
         ref[3::4] = unused
         return mem == ref
 
+    @classmethod
+    def qemu_inactive(cls, frame):
+        """Whether frame is QEMU's "Display output is not active.": black but
+        for that line, pixel for pixel."""
+        w, h, px = frame
+        if px[:3] != b"\0\0\0":
+            return False
+        rows = [y for y in range(h) if px[y * w * 3:(y + 1) * w * 3].strip(b"\0")]
+        if not rows or rows[-1] - rows[0] + 1 != 13:
+            return False
+        lines = [px[y * w * 3:(y + 1) * w * 3] for y in rows]
+        x0 = min((len(line) - len(line.lstrip(b"\0"))) // 3 for line in lines)
+        x1 = max((len(line.rstrip(b"\0")) - 1) // 3 for line in lines)
+        if x1 - x0 + 1 != 229:
+            return False
+        text = b"".join(px[(y * w + x0) * 3:(y * w + x1 + 1) * 3] for y in range(rows[0], rows[-1] + 1))
+        return hashlib.sha256(text).hexdigest() == cls.INACTIVE_TEXT
+
     def _run(self):
         tmp = os.path.join(self.workdir, f"screendump-{self.name}.ppm")
         last = None
@@ -456,7 +480,9 @@ class ScreenWatch:
                 ok, alpha, why = self.splash.match(frame)
                 kind = self.SPLASH if ok else self.OTHER
                 colour = frame[2][:3].hex() if frame[2] == frame[2][:3] * (frame[0] * frame[1]) else None
-                if not ok and colour is not None:
+                if self.qemu_inactive(frame):
+                    kind, alpha, why = self.INACTIVE, None, "QEMU: \"Display output is not active.\" (no picture from the guest)"
+                elif not ok and colour is not None:
                     kind, why = self.BLANK, f"an empty screen #{colour}"
                 elif not ok and before is not None and self.at_24_bits(frame, before):
                     kind, why = self.DEPTH, "the screen before, shown with 24 bits a pixel (QEMU while a driver sets its mode)"
@@ -532,9 +558,12 @@ class ScreenWatch:
         """WP-8.7: after the firmware's last picture, and before the kernel
         started, the whole screen is the splash's background colour (GRUB
         filled it); from there to the end only that colour, empty screens of
-        that colour or black, the frames of a driver setting its mode (see
-        DEPTH), and the splash, with the checks of _after. Returns the dips
-        it counted."""
+        that colour or black, the frames of a driver setting its mode (DEPTH,
+        INACTIVE), and the splash, with the checks of _after. The firmware's
+        last picture is the last frame of anything else before the kernel:
+        QEMU's frame for no picture is none (it also comes when the kernel's
+        driver takes the device over, which can be a moment before the start
+        the kernel's uptime gives). Returns the dips it counted."""
         frames = [f for f in self.frames if f[1] is not None]
         bg = bytes(self.splash.bg).hex()
         firmware = max((i for i, f in enumerate(frames) if f[1] == self.OTHER and f[0] < t_kernel), default=-1)
