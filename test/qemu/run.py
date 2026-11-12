@@ -1335,6 +1335,93 @@ class Runner:
         # The steps after this one read the boot on the serial console.
         self.set_boot_cmdline(splash=False)
 
+    def keys(self, *names):
+        """Keys pressed together on the VM's keyboard (QMP send-key, QEMU's
+        key names)."""
+        self.vm.screen_qmp().command("send-key", keys=[{"type": "qcode", "data": n} for n in names])
+        time.sleep(0.3)
+
+    def type_line(self, text):
+        for ch in text:
+            self.keys(ch)
+        self.keys("ret")
+
+    def usual_keys(self):
+        """WP-8.2 on the system booted with its own splash: Esc while Plymouth
+        shows the splash shows the messages and Esc again the splash;
+        Ctrl+Alt+F2 gives a login prompt, Ctrl+Alt+F1 leads back to tty1.
+        With an enrolled device, the console password (D8): a hash in
+        /data/ironflockos/console-password becomes the enrolled user's password
+        and no one else's, the user logs in with it on tty2, SSH still refuses
+        passwords, and without the file the password is locked again."""
+        qmp = self.vm.screen_qmp()
+        shot = os.path.join(self.vm.workdir, "screendump.ppm")
+        expect = Splash(test_picture(), (0x20, 0x40, 0x60))
+        # Plymouth as at boot, on the running system: Esc toggles the messages.
+        self.vm.run("plymouthd --mode=boot --attach-to-session --pid-file=/run/plymouth/pid && plymouth show-splash")
+        try:
+            self.wait_for("plymouth --ping", 30, "Plymouth to answer")
+            time.sleep(3)
+            ok, _, why = expect.match(qmp.screen(shot))
+            if not ok:
+                raise TestFailure(f"Plymouth started by hand does not show the splash: {why}")
+            self.keys("esc")
+            time.sleep(3)
+            frame = qmp.screen(shot)
+            if expect.match(frame)[0]:
+                raise TestFailure("Esc did not show the boot messages")
+            save_screen(frame, os.path.join(self.vm.workdir, "screen-keys-esc.png"))
+            self.keys("esc")
+            time.sleep(3)
+            ok, _, why = expect.match(qmp.screen(shot))
+            if not ok:
+                raise TestFailure(f"Esc again did not bring the splash back: {why}")
+        finally:
+            self.vm.run("plymouth quit --retain-splash", check=False)
+        self.vm.run("! pidof plymouthd")
+        # The other terminals have a login prompt.
+        self.keys("ctrl", "alt", "f2")
+        self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty2 ]", 30, "Ctrl+Alt+F2 to switch to tty2")
+        self.wait_for("systemctl -q is-active autovt@tty2.service || systemctl -q is-active getty@tty2.service", 60,
+                      "a login prompt on tty2")
+        frame = qmp.screen(shot)
+        save_screen(frame, os.path.join(self.vm.workdir, "screen-keys-tty2.png"))
+        if expect.match(frame)[0]:
+            raise TestFailure("tty2 shows the splash, not its login prompt")
+        if self.flock:
+            self.console_password()
+        self.keys("ctrl", "alt", "f1")
+        self.wait_for("[ \"$(cat /sys/class/tty/tty0/active)\" = tty1 ]", 30, "Ctrl+Alt+F1 to lead back to tty1")
+
+    def console_password(self):
+        password = "ironflock" + uuid.uuid4().hex[:6]
+        hashed = subprocess.run(["openssl", "passwd", "-6", password], check=True, capture_output=True,
+                                text=True).stdout.strip()
+        others = "awk -F: -v u=%s '$1 != u && $2 !~ /^[!*]/' /etc/shadow" % TEST_OWNER
+        locked = f"getent shadow {TEST_OWNER} | cut -d: -f2 | grep -q '^!'"
+        self.vm.run(locked)
+        self.vm.run(f"umask 077 && printf '%s\\n' '{hashed}' > /data/ironflockos/.console-password.partial"
+                    " && mv /data/ironflockos/.console-password.partial /data/ironflockos/console-password")
+        self.wait_for(f"[ \"$(getent shadow {TEST_OWNER} | cut -d: -f2)\" = '{hashed}' ]", 60,
+                      "the console password to be applied")
+        if self.vm.run(others).strip():
+            raise TestFailure(f"another account has a password: {self.vm.run(others)}")
+        self.vm.run("test \"$(getent shadow root | cut -d: -f2)\" = '*'")
+        for user in (TEST_OWNER, "root"):
+            conf = self.vm.run(f"sshd -T -C user={user},host=localhost,addr=127.0.0.1")
+            for want in ("passwordauthentication no", "kbdinteractiveauthentication no"):
+                if want not in conf.splitlines():
+                    raise TestFailure(f"sshd does not say {want!r} for {user}")
+        # A person at the screen logs in on tty2.
+        self.type_line(TEST_OWNER)
+        time.sleep(2)
+        self.type_line(password)
+        self.wait_for(f"loginctl list-sessions --no-legend | grep -E ' {TEST_OWNER} .*tty2'", 60,
+                      f"{TEST_OWNER} to log in on tty2 with the console password")
+        self.vm.run(f"loginctl terminate-user {TEST_OWNER}")
+        self.vm.run("rm /data/ironflockos/console-password")
+        self.wait_for(locked, 60, "the password to be locked again")
+
     def fsck_repair(self):
         """A filesystem that a preen gives up on is repaired at boot
         (ADR-0020): fsck.repair=yes is on the kernel command line, and
@@ -2615,6 +2702,8 @@ def main():
                     "a damaged splash.cpio, tty1 in graphics mode, input devices", runner.splash)
         runner.step("own splash: a screen app's picture and splash.conf, refusals, the next boot shows it",
                     runner.own_splash)
+        runner.step("keys: Esc for the messages, Ctrl+Alt+F2 and back"
+                    + (", the console password on tty2" if flock else ""), runner.usual_keys)
         if args.only != "boot":
             runner.step("update into slot B; ironflock os refuses while RAUC installs and while the update waits",
                         runner.update_to_b)
