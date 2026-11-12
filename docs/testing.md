@@ -53,11 +53,14 @@ just test
 `test/qemu/run.py` takes the artefacts of `just build` from `out/`, copies the
 disk image, grows the copy to 20 GiB (32 GiB for `nvidia`) and boots it with UEFI firmware (OVMF). The
 image is the shipped one; the only change to the copy is one value in its
-`grubenv`, `IRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1`, which gives a root shell
-on the second serial port (on arm64 `hvc0`, a virtio console: QEMU's `virt`
-machine has one UART). The script drives that shell; the first serial port
-(kernel and systemd console) is written to `console.log`. Because `grubenv` is on
-the IRONFLOCKOS partition, the shell is there on both slots, also after an update.
+`grubenv`, `IRONFLOCKOS_CMDLINE=systemd.debug_shell=ttyS1 ironflockos.boot=text`,
+which gives a root shell on the second serial port (on arm64 `hvc0`, a virtio
+console: QEMU's `virt` machine has one UART) and boots on text, so that the
+kernel's messages are on the serial console; the steps of the screen take
+`ironflockos.boot=text` out for their boots and put it back. The script drives
+that shell; the first serial port (kernel and systemd console) is written to
+`console.log`. Because `grubenv` is on the IRONFLOCKOS partition, the shell is
+there on both slots, also after an update.
 
 With `--secure-boot` the firmware is the build with Microsoft's keys enrolled
 and Secure Boot on (`OVMF_CODE_4M.secboot.fd` with `OVMF_VARS_4M.ms.fd` on q35
