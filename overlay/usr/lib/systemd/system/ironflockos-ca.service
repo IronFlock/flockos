@@ -1,0 +1,20 @@
+[Unit]
+Description=IronFlockOS: trusted CAs from /etc/ironflockos/ca.crt
+Documentation=https://github.com/IronFlock/ironflockos/blob/main/docs/adr/0021-trusted-cas-come-with-the-boot-medium.md
+# /data and the IRONFLOCKOS partition, after them but not requiring them:
+# without /data (ADR-0015) the store still gets the partition's set.
+After=local-fs.target ironflockos-data-layout.service boot-efi.mount data.mount
+# Everything that checks TLS certificates against the system's trust store and
+# reads it once, at its start: containerd, Docker, the agent; fwupd and RAUC,
+# which download through curl. The enrollment needs no network and comes
+# after Docker.
+Before=containerd.service docker.service ironflock-device-agent.service fwupd.service rauc.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ironflockos/ca
+
+[Install]
+WantedBy=multi-user.target
+Also=ironflockos-ca.path

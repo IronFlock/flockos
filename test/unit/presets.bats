@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # First-boot presets (systemd applies them on every slot's first boot and
-# enables what none names): the units of the proxy, the network profiles and
+# enables what none names): the units of the proxy, the trusted CAs, the network profiles and
 # the apps' data are named on purpose, enabled in the image, and masked on the
 # installer stick.
 
@@ -9,7 +9,7 @@ preset="$repo/overlay/usr/lib/systemd/system-preset/10-ironflockos-device.preset
 units="$repo/overlay/usr/lib/systemd/system"
 customize="$repo/build/customize.sh"
 
-device_units="ironflockos-proxy.service ironflockos-proxy.path ironflockos-network-profiles.service
+device_units="ironflockos-proxy.service ironflockos-proxy.path ironflockos-ca.service ironflockos-ca.path ironflockos-network-profiles.service
   ironflockos-network-profiles-trial.service ironflockos-apps-check.service"
 
 @test "each of these units has its preset line, and each preset line its unit" {
@@ -22,8 +22,10 @@ device_units="ironflockos-proxy.service ironflockos-proxy.path ironflockos-netwo
     [ -f "$units/$unit" ] || { echo "$unit is not a unit of the image"; return 1; }
   done <"$preset"
   # A unit without [Install] needs no line: a path unit starts it.
-  ! grep -q '^\[Install\]' "$units/ironflockos-proxy-reload.service"
-  grep -qx 'Unit=ironflockos-proxy-reload.service' "$units/ironflockos-proxy.path"
+  for s in proxy ca; do
+    ! grep -q '^\[Install\]' "$units/ironflockos-$s-reload.service"
+    grep -qx "Unit=ironflockos-$s-reload.service" "$units/ironflockos-$s.path"
+  done
 }
 
 @test "the image enables what the presets enable; the installer masks all of it" {
@@ -33,11 +35,13 @@ device_units="ironflockos-proxy.service ironflockos-proxy.path ironflockos-netwo
   masked=$(sed -n '/^if \[ "$VARIANT" = installer \]; then/,/^else/p' <<<"$joined" |
     sed -n 's/^ *systemctl --root="$ROOT" mask //p' | tr -s ' ' '\n')
   for u in $device_units; do
-    [ "$u" = ironflockos-proxy.path ] && continue
+    # A path unit comes with its service (Also=).
+    [[ "$u" == *.path ]] && continue
     grep -qx "$u" <<<"$enabled" || { echo "the image does not enable $u"; return 1; }
     grep -qx "$u" <<<"$masked" || { echo "the installer does not mask $u"; return 1; }
   done
-  grep -qx ironflockos-proxy.path <<<"$masked"
+  grep -qx ironflockos-proxy.path <<<"$masked" && grep -qx ironflockos-ca.path <<<"$masked"
+  grep -qx ironflockos-ca-reload.service <<<"$masked"
 }
 
 @test "the presets sort before the distribution's, as the time preset does" {

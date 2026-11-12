@@ -24,6 +24,9 @@ tzdata
 # Phase 2 on; listed here so the image is complete before that)
 jq
 ca-certificates
+# the site's trusted CAs (docs/build.md, "Trusted CAs"): ca-certificates
+# depends on it; listed, as the image's own script checks certificates with it
+openssl
 curl
 gnupg
 lsb-release

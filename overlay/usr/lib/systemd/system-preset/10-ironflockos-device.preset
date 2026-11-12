@@ -2,13 +2,18 @@
 # "uninitialized") and enables what no preset names. build/customize.sh
 # enables these in the image already; they are named here on purpose, so a
 # slot's first boot keeps them on. On the installer stick they are masked,
-# which no preset undoes. ironflockos-proxy-reload.service has no [Install]
-# section: ironflockos-proxy.path starts it.
+# which no preset undoes. ironflockos-proxy-reload.service and
+# ironflockos-ca-reload.service have no [Install] section: their path units
+# start them.
 #
 # The site's proxy and NTP servers, from /etc/ironflockos/proxy.conf and the
 # IRONFLOCKOS partition (docs/build.md, "Proxy").
 enable ironflockos-proxy.service
 enable ironflockos-proxy.path
+# The site's trusted CAs, from /etc/ironflockos/ca.crt and the IRONFLOCKOS
+# partition (docs/build.md, "Trusted CAs").
+enable ironflockos-ca.service
+enable ironflockos-ca.path
 # Network profiles from the IRONFLOCKOS partition, and their trial (docs/build.md,
 # "Network profiles").
 enable ironflockos-network-profiles.service

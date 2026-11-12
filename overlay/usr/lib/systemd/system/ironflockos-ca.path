@@ -1,0 +1,10 @@
+# Applies a new set of trusted CAs as soon as it is written.
+[Unit]
+Description=IronFlockOS: watch /data/ironflockos/ca.crt
+
+[Path]
+PathChanged=/data/ironflockos/ca.crt
+Unit=ironflockos-ca-reload.service
+
+[Install]
+WantedBy=multi-user.target

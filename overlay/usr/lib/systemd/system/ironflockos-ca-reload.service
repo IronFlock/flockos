@@ -1,0 +1,9 @@
+[Unit]
+Description=IronFlockOS: apply a changed /etc/ironflockos/ca.crt
+# The boot's own run writes the file too: the change waits for that run and
+# then finds the store done.
+After=ironflockos-ca.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/ironflockos/ca apply

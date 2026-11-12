@@ -1,0 +1,184 @@
+#!/bin/bash
+# The site's trusted CAs (docs/build.md, "Trusted CAs"; ADR-0021).
+#
+# /etc/ironflockos/ca.crt (-> /data/ironflockos/ca.crt, a device setting): the
+# certificates of the CAs the device trusts besides the system's own, one or
+# more PEM blocks (-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----).
+# Text outside the blocks is a comment. An appliance whose TLS certificate a
+# corporate CA issued is reached only with that CA's chain: the device-agent
+# (its wss:// connection), Docker and containerd (the appliance's registry)
+# and curl (the OS mirror) check it against the system's trust store,
+# /etc/ssl/certs/ca-certificates.crt.
+#
+# Without an argument (ironflockos-ca.service, at boot before containerd,
+# Docker and the agent) it first takes a ca.crt from the IRONFLOCKOS
+# partition, where `ironflock os install`, `ironflock os flash` or the
+# installer put it: its certificates replace the device's set, a file without
+# any clears it, and the file leaves the partition. A file with a block that
+# is no certificate is refused as a whole: the device keeps its set. Then, at
+# every boot, the device's set goes into the trust store: one file per
+# certificate in /usr/local/share/ca-certificates/ironflockos, and
+# update-ca-certificates when they changed. The store is the root slot's,
+# which an update replaces: the new slot gets the set on its first boot.
+# "apply" (ironflockos-ca-reload.service, when the file changes) does the same
+# and restarts what read the store when it started.
+set -euo pipefail
+
+# IRONFLOCKOS_CA_CONF, IRONFLOCKOS_ESP, IRONFLOCKOS_RUN, IRONFLOCKOS_CA_DIR,
+# IRONFLOCKOS_UPDATE_CA: for the unit tests only.
+conf=${IRONFLOCKOS_CA_CONF:-/data/ironflockos/ca.crt}
+esp=${IRONFLOCKOS_ESP:-/boot/efi}
+run=${IRONFLOCKOS_RUN:-/run/ironflockos}
+store=${IRONFLOCKOS_CA_DIR:-/usr/local/share/ca-certificates/ironflockos}
+update_ca=${IRONFLOCKOS_UPDATE_CA:-update-ca-certificates}
+
+# Set while the store is being changed, removed once update-ca-certificates
+# has ended well: a run that failed or lost its power is done again.
+pending=$store/.pending
+
+# check BLOCK: a certificate as openssl writes it (its own PEM, which every
+# reader takes) in pem, its subject and SHA-256 fingerprint in subject and
+# fingerprint; fails when BLOCK is none.
+check() {
+  local out
+  out=$(printf '%s\n' "$1" | openssl x509 -subject -fingerprint -sha256 -nameopt RFC2253 2>/dev/null) || return 1
+  subject=$(sed -n 's/^subject=[[:space:]]*//p' <<<"$out" | head -n 1)
+  fingerprint=$(sed -n 's/^[A-Za-z0-9-]* Fingerprint=//p' <<<"$out" | head -n 1)
+  pem=$(sed -n '/^-----BEGIN CERTIFICATE-----$/,/^-----END CERTIFICATE-----$/p' <<<"$out")
+  [ -n "$fingerprint" ] && [ -n "$pem" ]
+}
+
+# parse FILE: the certificates of FILE, each once, in pems, names (its file
+# in the store, by fingerprint) and shown (subject and fingerprint), their
+# number in count and the names in wanted; or says what is wrong and fails.
+parse() {
+  pems=() names=() shown=() count=0 wanted=" "
+  local n=0 line block="" start=0 name
+  # read drops NUL bytes: a binary file (a DER certificate) is no text.
+  if [ "$(tr -d '\000' <"$1" | wc -c)" -ne "$(wc -c <"$1")" ]; then
+    echo "ca: $1 is not text: ca.crt takes PEM certificates (-----BEGIN CERTIFICATE-----)" >&2
+    return 1
+  fi
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line=${line%$'\r'}
+    # The byte order mark some editors write.
+    [ "$n" -gt 1 ] || line=${line#$'\xef\xbb\xbf'}
+    if [[ "$line" =~ ^[[:space:]]*-----BEGIN\ CERTIFICATE-----[[:space:]]*$ ]]; then
+      if [ "$start" -gt 0 ]; then
+        echo "ca: $1:$start: a certificate without its END line" >&2
+        return 1
+      fi
+      start=$n block="-----BEGIN CERTIFICATE-----"
+    elif [ "$start" -eq 0 ]; then
+      continue
+    elif [[ "$line" =~ ^[[:space:]]*-----END\ CERTIFICATE-----[[:space:]]*$ ]]; then
+      if ! check "$block"$'\n'"-----END CERTIFICATE-----"; then
+        echo "ca: $1:$start: the block is not a certificate openssl can read" >&2
+        return 1
+      fi
+      name=ironflockos-$(printf '%s' "$fingerprint" | tr -d ':' | tr '[:upper:]' '[:lower:]').crt
+      case "$wanted" in
+        *" $name "*) ;;
+        *)
+          pems[count]=$pem names[count]=$name shown[count]="$subject (SHA-256 $fingerprint)"
+          count=$((count + 1)) wanted+="$name "
+          ;;
+      esac
+      start=0
+    else
+      block+=$'\n'${line//[[:space:]]/}
+    fi
+  done <"$1"
+  if [ "$start" -gt 0 ]; then
+    echo "ca: $1:$start: a certificate without its END line" >&2
+    return 1
+  fi
+}
+
+rc=0
+# A factory reset (ADR-0015) says in factory-reset-hold what to do with the
+# IRONFLOCKOS partition's ca.crt meanwhile, as with proxy.conf: "wait" (it is
+# for the device after the reset), or "copy" (take it, and leave it there for
+# the reset still to come); "gave-up" as "wait" (a reset gave up with the old
+# data and could not remove it). Without /data (ironflockos-data-missing) it is
+# copied.
+reset_hold=$(cat "$run/factory-reset-hold" 2>/dev/null || true)
+if [ "$reset_hold" = gave-up ]; then reset_hold="wait"; fi
+if [ "$reset_hold" != wait ] && [ -e "$run/data-missing" ]; then reset_hold=copy; fi
+if [ "${1:-}" != apply ] && [ "$reset_hold" != wait ] && [ -f "$esp/ca.crt" ]; then
+  if parse "$esp/ca.crt"; then
+    # The device keeps the certificates alone; without any it has no set.
+    if [ "$count" -eq 0 ]; then
+      rm -f "$conf"
+    elif [ ! -f "$conf" ] || [ "$(cat "$conf")" != "$(printf '%s\n' "${pems[@]}")" ]; then
+      mkdir -p "$(dirname "$conf")"
+      printf '%s\n' "${pems[@]}" >"$conf.new"
+      # Certificates are public; a file on the FAT partition would show the
+      # execute bits, so the mode is set, not taken.
+      chmod 0644 "$conf.new"
+      mv "$conf.new" "$conf"
+    fi
+    if [ "$reset_hold" = copy ]; then
+      echo "ca: took ca.crt from the IRONFLOCKOS partition and left it there, as what the device keeps now does not last"
+    else
+      rm -f "$esp/ca.crt"
+      echo "ca: took ca.crt from the IRONFLOCKOS partition"
+    fi
+  else
+    echo "ca: ignored the IRONFLOCKOS partition's ca.crt, which has an error; the device keeps its own" >&2
+    rc=1
+  fi
+elif [ "${1:-}" != apply ] && [ -f "$esp/ca.crt" ]; then
+  echo "ca: a factory reset waits: the IRONFLOCKOS partition's ca.crt waits for it"
+fi
+
+pems=() names=() shown=() count=0 wanted=" "
+if [ -f "$conf" ]; then
+  # A set with an error changes nothing: the store keeps what it has.
+  parse "$conf" || exit 1
+fi
+
+changed=no
+[ ! -e "$pending" ] || changed=yes
+for ((i = 0; i < count; i++)); do
+  if [ ! -f "$store/${names[i]}" ] || [ "$(cat "$store/${names[i]}")" != "${pems[i]}" ]; then changed=yes; fi
+done
+for f in "$store"/*.crt; do
+  [ -e "$f" ] || continue
+  case "$wanted" in *" ${f##*/} "*) ;; *) changed=yes ;; esac
+done
+
+if [ "$changed" = yes ]; then
+  mkdir -p "$store"
+  : >"$pending"
+  for ((i = 0; i < count; i++)); do
+    printf '%s\n' "${pems[i]}" >"$store/${names[i]}.new"
+    chmod 0644 "$store/${names[i]}.new"
+    mv "$store/${names[i]}.new" "$store/${names[i]}"
+  done
+  for f in "$store"/*.crt; do
+    [ -e "$f" ] || continue
+    case "$wanted" in *" ${f##*/} "*) ;; *) rm -f "$f" ;; esac
+  done
+  # --fresh: the links of certificates that went go too.
+  if ! "$update_ca" --fresh; then
+    echo "ca: update-ca-certificates failed; the next run tries again" >&2
+    exit 1
+  fi
+  rm -f "$pending"
+  [ "$count" -gt 0 ] || rmdir "$store" 2>/dev/null || true
+fi
+
+if [ "$count" -gt 0 ]; then
+  for ((i = 0; i < count; i++)); do echo "ca: trusts ${shown[i]}"; done
+else
+  echo "ca: no extra CA"
+fi
+
+if [ "${1:-}" = apply ] && [ "$changed" = yes ]; then
+  # Units that do not run stay as they are; Go programs read the store once,
+  # so running ones restart to use the new one.
+  systemctl try-restart containerd.service docker.service ironflock-device-agent.service
+fi
+exit "$rc"

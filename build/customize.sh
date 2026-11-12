@@ -165,14 +165,16 @@ chmod 0700 "$ROOT/etc/NetworkManager/system-connections"
 # --- units -----------------------------------------------------------------
 if [ "$VARIANT" = installer ]; then
   # The installer runs on the console and nothing else: no device services,
-  # no /data, no slots, no SSH. ironflockos-proxy would take the stick's
-  # proxy.conf, which the installer copies to the installed disk.
+  # no /data, no slots, no SSH. ironflockos-proxy and ironflockos-ca would take
+  # the stick's proxy.conf and ca.crt, which the installer copies to the
+  # installed disk.
   systemctl --root="$ROOT" enable ironflockos-installer.service NetworkManager.service
   systemctl --root="$ROOT" disable ironflockos-ssh-hostkeys.service \
     ironflockos-enroll.service ssh.service docker.service containerd.service 2>/dev/null || true
   systemctl --root="$ROOT" mask ironflockos-enroll.service \
     ironflockos-ssh-hostkeys.service docker.service docker.socket containerd.service ssh.service \
-    systemd-repart.service ironflockos-proxy.service ironflockos-proxy.path ironflockos-proxy-reload.service
+    systemd-repart.service ironflockos-proxy.service ironflockos-proxy.path ironflockos-proxy-reload.service \
+    ironflockos-ca.service ironflockos-ca.path ironflockos-ca-reload.service
   # The installer has no /data to put the stick's network profiles on.
   systemctl --root="$ROOT" mask ironflockos-network-profiles.service ironflockos-network-profiles-trial.service
   # Its own fstab has no /apps on /data either: the check would only fail.
@@ -192,11 +194,12 @@ else
   # (ADR-0010); its firmware condition skips it on every other machine.
   # chrony keeps the time; the PTP units run only when ptp.conf names an
   # interface (docs/build.md, "Time"). ironflockos-proxy hands the site's proxy
-  # to the agent and Docker (docs/build.md, "Proxy").
+  # to the agent and Docker (docs/build.md, "Proxy"); ironflockos-ca puts the
+  # site's CAs into the trust store (docs/build.md, "Trusted CAs").
   systemctl --root="$ROOT" enable ironflockos-ssh-hostkeys.service \
     ironflockos-enroll.service ironflockos-gce-flock.service ssh.service ironflockos-fwupd-shim.service docker.service \
     NetworkManager.service chrony.service ironflockos-ptp.service ironflockos-ptp4l.service ironflockos-phc2sys.service \
-    ironflockos-proxy.service
+    ironflockos-proxy.service ironflockos-ca.service
   # NetworkManager profiles from the IRONFLOCKOS partition (docs/build.md,
   # "Network profiles"), on trial until the agent has connected with them.
   systemctl --root="$ROOT" enable ironflockos-network-profiles.service ironflockos-network-profiles-trial.service
@@ -216,12 +219,13 @@ else
     mkdir -p "$ROOT/etc/ironflockos"
     ln -sfn /data/ironflockos/display.conf "$ROOT/etc/ironflockos/display.conf"
   fi
-  # The device's own enroll, PTP and proxy settings live on /data, so they
+  # The device's own enroll, PTP, proxy and CA settings live on /data, so they
   # outlive updates.
   mkdir -p "$ROOT/etc/ironflockos"
   ln -sfn /data/ironflockos/enroll.conf "$ROOT/etc/ironflockos/enroll.conf"
   ln -sfn /data/ironflockos/ptp.conf "$ROOT/etc/ironflockos/ptp.conf"
   ln -sfn /data/ironflockos/proxy.conf "$ROOT/etc/ironflockos/proxy.conf"
+  ln -sfn /data/ironflockos/ca.crt "$ROOT/etc/ironflockos/ca.crt"
 fi
 if [ "$KERNEL" = rt ]; then
   systemctl --root="$ROOT" enable ironflockos-rt-tuning.service
