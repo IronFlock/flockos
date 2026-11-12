@@ -652,6 +652,10 @@ SH
     [[ "$block" == *'background_image -m normal ${prefix}/splash-screen.png'* ]]
     [[ "$block" == *'set gfxmode="${IRONFLOCKOS_SPLASH_MODE},auto"'* ]]
     [[ "$block" == *"set gfxpayload=keep"* ]]
+    # The text's background is transparent once the colours are set, after
+    # background_color (which makes it opaque), and gfxterm draws at once.
+    order=$(echo "$block" | grep -nE 'background_color|set color_normal=light-gray/black|set color_highlight=light-gray/black|echo -n$' | cut -d: -f2- | tr -s ' ' | tr '\n' '|')
+    [ "$order" = ' background_color "${splash_background}"| set color_normal=light-gray/black| set color_highlight=light-gray/black| echo -n|' ]
     # Without the splash none of it: the console terminal, as before.
     [ "$(echo "$cfg" | grep -c 'gfxpayload\|terminal_output gfxterm\|background_')" -eq 4 ]
   done
@@ -701,7 +705,7 @@ framebuffer() {
 capture() {
   PATH="$tmp/bin:$PATH" IRONFLOCKOS_SCREEN=$tmp/screen IRONFLOCKOS_EFI_BOOT=$tmp/esp/EFI/BOOT IRONFLOCKOS_THEME=$tmp/theme \
     IRONFLOCKOS_RUN=$tmp/run IRONFLOCKOS_SPLASH_BIND=no IRONFLOCKOS_PROC_CMDLINE=$tmp/cmdline IRONFLOCKOS_SYS_FB=$tmp/sys \
-    IRONFLOCKOS_FB=$tmp/fb IRONFLOCKOS_SYS_TTY_ACTIVE=$tmp/active IRONFLOCKOS_TTY1_MODE=${mode:-graphics} \
+    IRONFLOCKOS_FB=$tmp/fb IRONFLOCKOS_SYS_TTY_ACTIVE=$tmp/active IRONFLOCKOS_TTY1_MODE=${mode:-graphics} IRONFLOCKOS_GRUB_BORDER=1 \
     run bash "$lib/splash" capture
 }
 
@@ -737,10 +741,11 @@ while pos < len(d):
     if kind == b"IDAT": idat += body
     pos += 12 + n
 rows = zlib.decompress(idat)
-print(" ".join(rows[y * 25 + 1:(y + 1) * 25].hex() for y in range(4)))' "$tmp/esp/EFI/BOOT/splash-screen.png"
+print(" ".join(rows[y * 19 + 1:(y + 1) * 19].hex() for y in range(2)))' "$tmp/esp/EFI/BOOT/splash-screen.png"
     [ "$status" -eq 0 ]
     bg=204060 fg=f08010
-    [ "$output" = "$bg$bg$bg$bg$bg$bg$bg$bg $bg$bg$fg$fg$fg$fg$bg$bg $bg$bg$fg$fg$fg$fg$bg$bg $bg$bg$bg$bg$bg$bg$bg$bg" ]
+    # The screen without GRUB's border (1 pixel here, 10 on a device).
+    [ "$output" = "$bg$fg$fg$fg$fg$bg $bg$fg$fg$fg$fg$bg" ]
   fi
   # The same again: nothing to do.
   capture

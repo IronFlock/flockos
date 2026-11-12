@@ -478,18 +478,19 @@ png_chunk() {
   be32 $((16#${crc:6:2}${crc:4:2}${crc:2:2}${crc:0:2}))
 }
 
-# png_from_fb RAW WIDTH HEIGHT STRIDE OUT: an 8-bit RGB PNG of a framebuffer
-# of 32 bits a pixel, blue, green, red and one unused byte in memory (the
-# kernel's XRGB8888). gzip does the deflate; the zlib stream around it needs
-# the Adler-32 of the rows, which perl counts.
+# png_from_fb RAW WIDTH HEIGHT STRIDE OUT [LEFT TOP]: an 8-bit RGB PNG of
+# WIDTH x HEIGHT pixels from LEFT, TOP (default 0) of a framebuffer of 32
+# bits a pixel, blue, green, red and one unused byte in memory (the kernel's
+# XRGB8888). gzip does the deflate; the zlib stream around it needs the
+# Adler-32 of the rows, which perl counts.
 png_from_fb() {
-  local raw=$1 w=$2 h=$3 stride=$4 out=$5 dir n adler
+  local raw=$1 w=$2 h=$3 stride=$4 out=$5 left=${6:-0} top=${7:-0} dir n adler
   dir=$(mktemp -d "$run/splash-png.XXXXXX")
   # shellcheck disable=SC2016 # perl programs
-  if ! perl -e 'my ($w, $h, $stride) = @ARGV; binmode STDIN; binmode STDOUT; local $/; my $raw = <STDIN>;
-      length($raw) >= $stride * ($h - 1) + $w * 4 or die "the framebuffer is shorter than its size\n";
-      for my $y (0 .. $h - 1) { my $l = substr($raw, $y * $stride, $w * 4); $l =~ s/(.)(.)(.)./$3$2$1/gs; print "\0", $l; }' \
-    "$w" "$h" "$stride" <"$raw" >"$dir/rows" ||
+  if ! perl -e 'my ($w, $h, $stride, $left, $top) = @ARGV; binmode STDIN; binmode STDOUT; local $/; my $raw = <STDIN>;
+      length($raw) >= $stride * ($top + $h - 1) + ($left + $w) * 4 or die "the framebuffer is shorter than its size\n";
+      for my $y (0 .. $h - 1) { my $l = substr($raw, ($top + $y) * $stride + $left * 4, $w * 4); $l =~ s/(.)(.)(.)./$3$2$1/gs; print "\0", $l; }' \
+    "$w" "$h" "$stride" "$left" "$top" <"$raw" >"$dir/rows" ||
     ! adler=$(perl -e 'binmode STDIN; my ($a, $b) = (1, 0); my $buf;
       while (read(STDIN, $buf, 4096)) { for my $c (unpack("C*", $buf)) { $a += $c; $b += $a } $a %= 65521; $b %= 65521 }
       printf "%d\n", $b * 65536 + $a' <"$dir/rows") ||
@@ -531,15 +532,19 @@ tty1_graphics() {
 
 # capture: the picture GRUB draws (WP-8.7), taken from the screen at the end
 # of a boot with the splash, after Plymouth quit: the framebuffer Plymouth
-# drew into holds the whole splash at the screen's size, as GRUB draws it
-# from the top left corner. Only with animation=none, only when the archive
+# drew into holds the whole splash at the screen's size. GRUB's gfxterm draws
+# a picture into its window, 10 pixels inside the screen (the border takes
+# the background colour), so the picture is the screen without those 10
+# pixels all round, and lands where Plymouth draws. Only with
+# animation=none, only when the archive
 # is the one this boot started with, only while the first terminal is in
 # front and in graphics mode (nothing has drawn on it since), and only from
 # a framebuffer of 32 bits a pixel whose corner is the background colour.
 # Changes nothing otherwise.
 capture() {
   local fbsys=${IRONFLOCKOS_SYS_FB:-/sys/class/graphics/fb0} fbdev=${IRONFLOCKOS_FB:-/dev/fb0}
-  local size w h stride raw tmp
+  # IRONFLOCKOS_GRUB_BORDER: for the unit tests only; gfxterm's is 10.
+  local border=${IRONFLOCKOS_GRUB_BORDER:-10} size w h stride raw tmp
   case " $(cat "${IRONFLOCKOS_PROC_CMDLINE:-/proc/cmdline}" 2>/dev/null) " in *" splash "*) ;; *) return 0 ;; esac
   [ -f "$archive" ] || return 0
   if [ "$(cat "$booted" 2>/dev/null)" != "$(cksum <"$archive")" ]; then
@@ -564,7 +569,8 @@ capture() {
   stride=$(cat "$fbsys/stride" 2>/dev/null || true)
   w=${size%,*} h=${size#*,}
   if [ "$(cat "$fbsys/bits_per_pixel" 2>/dev/null)" != 32 ] || [[ ! "$w" =~ ^[0-9]+$ ]] || [[ ! "$h" =~ ^[0-9]+$ ]] ||
-    [[ ! "$stride" =~ ^[0-9]+$ ]] || [ "$w" -gt "$max_width" ] || [ "$h" -gt "$max_height" ]; then
+    [[ ! "$stride" =~ ^[0-9]+$ ]] || [ "$w" -gt "$max_width" ] || [ "$h" -gt "$max_height" ] ||
+    [ "$w" -le $((2 * border)) ] || [ "$h" -le $((2 * border)) ]; then
     say "the framebuffer is not one of 32 bits a pixel up to ${max_width}x$max_height: the screen is not taken"
     return 0
   fi
@@ -579,7 +585,8 @@ capture() {
     say "the screen does not show the splash's background: it is not taken"
     return 0
   fi
-  if ! png_from_fb "$raw" "$w" "$h" "$stride" "$screen_png.part" || ! sync || ! mv -f "$screen_png.part" "$screen_png"; then
+  if ! png_from_fb "$raw" $((w - 2 * border)) $((h - 2 * border)) "$stride" "$screen_png.part" "$border" "$border" ||
+    ! sync || ! mv -f "$screen_png.part" "$screen_png"; then
     rm -f "$raw" "$screen_png.part"
     say "could not write $screen_png"
     return 1
