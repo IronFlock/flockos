@@ -176,9 +176,11 @@ Sequence:
    KVM only: under emulation, on the arm64 runners, its two restarts would
    take many minutes, and only the refusals run there. On slot B, good, with
    slot A good since the first boot, `ironflock os rollback --yes` restarts
-   the device into slot A. Its output and exit code go to `/data` and are
-   read after the restart: exit code 0 (when the shell could write it before
-   the restart; otherwise the log says so and the result decides) and
+   the device into slot A. Its output and exit code go to files on `/data`,
+   synced before the restart, and are read once the device runs again (the
+   test's shell answers early in the boot, before `/data` is mounted): exit
+   code 0 (from the file, else as the shell printed it before the restart;
+   when neither got out, the log says so and the result decides) and
    "Rolled back to IronFlockOS <version> in slot A". The device is up on slot
    A and answers the test host; machine-id, host key, `/data`, the app's file
    in `/apps` and the enrolment are those of before; RAUC's record of the

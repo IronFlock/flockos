@@ -1455,10 +1455,13 @@ class Runner:
     def reboot_by(self, state, name, argv):
         """Runs argv, an ironflock command that restarts the device when it
         succeeds, and waits for the restart. What it prints and its exit code
-        go to /data, which outlives the restart; they are kept and returned
-        once the device is back, the exit code None when the restart came
-        before the shell had written it. A command that ends without the
-        restart fails the step at once."""
+        go to files on /data, synced before the shell says the command ended;
+        /data outlives the restart. They are read once the device runs again:
+        the debug shell answers early in the boot, before /data is mounted,
+        and a read right after the restart finds the root slot's empty folder
+        under it. The exit code is the file's, else the one the shell printed
+        before the restart, else None (the restart came first). A command
+        that ends without the restart fails the step at once."""
         prefix = f"{REBOOT_OUT}/{name}"
         line = " ".join(argv)
         self.vm.run(f"mkdir -p {REBOOT_OUT} && rm -f {prefix}.*")
@@ -1468,19 +1471,26 @@ class Runner:
         self.vm.buf = b""
         self.vm._send(f"{self.capture_snippet(argv, prefix)}; sync; echo __EN''D_{tag}=$(cat {prefix}.rc)\r")
         deadline = time.time() + self.boot_timeout
+        said = None
         while self.vm.kernel_starts() <= starts:
             m = self.vm._read_until(rb"__END_" + tag.encode() + rb"=(\d+)", 2)
-            if m and m.group(1) != b"0":
+            if m:
+                said = int(m.group(1))
+            if said not in (None, 0):
                 rc, out, err = self.collect(state, name, argv, prefix)
-                raise TestFailure(f"`{line}` ended with {rc} and did not restart the device:\n{out}{err}")
+                raise TestFailure(f"`{line}` ended with {said} and did not restart the device:\n{out}{err}")
             if time.time() > deadline:
                 raise TestFailure(f"`{line}` did not restart the device within {self.boot_timeout}s")
             if m:
                 time.sleep(1)
         if self.vm.wait_shell(max(10, deadline - time.time()), starts) == old:
             raise TestFailure(f"`{line}`: the same boot answers after the restart")
+        self.wait_running()
+        self.vm.run("mountpoint -q /data")
         rc, out, err = self.collect(state, name, argv, prefix)
         self.vm.run(f"rm -rf {REBOOT_OUT}")
+        if rc is None:
+            rc = said
         if rc is None:
             log(f"note: `{line}` restarted the device before its exit code was written; judged by its result")
         elif rc != 0:
