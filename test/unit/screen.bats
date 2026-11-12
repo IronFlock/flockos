@@ -400,7 +400,11 @@ display() {
   [ "$(grep '^ExecStart=' "$q" | tr '\n' '|')" = "ExecStart=|ExecStart=-/usr/lib/ironflockos/keep-splash|" ]
   # Plymouth draws into the framebuffer devices from the start, not only
   # after its device timeout: they keep the splash when it quits.
-  grep -qx 'DeviceTimeout=0' "$repo/overlay/etc/plymouth/plymouthd.conf"
+  # Above 0: plymouthd asserts it and aborts on 0 (CI run 43260632381).
+  timeout=$(sed -n 's/^DeviceTimeout=//p' "$repo/overlay/etc/plymouth/plymouthd.conf")
+  [ "$timeout" = 0.1 ]
+  # A crashed plymouthd does not make the system degraded.
+  grep -qx 'SuccessExitStatus=SIGABRT SIGSEGV SIGBUS SIGILL SIGFPE' "$units/plymouth-start.service.d/ironflockos.conf"
 }
 
 @test "keep-splash: Plymouth lets go, the framebuffer device goes on the screen, then Plymouth quits keeping its splash" {

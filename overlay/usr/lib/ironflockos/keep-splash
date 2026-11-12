@@ -4,7 +4,7 @@
 #
 # Plymouth draws through the graphics device (DRM) once its driver is there,
 # and into the kernel's framebuffer device as well
-# (plymouth.force-frame-buffer-on-boot, DeviceTimeout=0). What it shows
+# (plymouth.force-frame-buffer-on-boot, DeviceTimeout in plymouthd.conf). What it shows
 # through the graphics device would go when it quits: the kernel removes a
 # framebuffer with the program that made it, turns the screen off and shows
 # the framebuffer device instead, which takes a moment of black, longer on a
