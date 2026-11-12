@@ -721,8 +721,14 @@ the menu), and the kernel keeps that mode and what GRUB drew
 (`gfxpayload=keep`): `splash.env` next to `grubenv` names the background
 colour (`IRONFLOCKOS_SPLASH_BACKGROUND`, black from the build; GRUB reads only
 this and `IRONFLOCKOS_SPLASH_MODE` from it), and with `animation=none` GRUB
-also draws `splash-screen.png`, the whole screen as Plymouth left it, at the
-size it was taken at (`IRONFLOCKOS_SPLASH_MODE`, GRUB's graphics mode then).
+also draws `splash-screen.png`, the screen as Plymouth left it, taken at the
+size that becomes GRUB's graphics mode (`IRONFLOCKOS_SPLASH_MODE`). `gfxterm`
+draws a picture into its window, 10 pixels inside the screen, and its border
+in the background colour, so the picture is the screen without those 10
+pixels all round. Its text has a black, that is transparent, background
+(`color_normal`, `color_highlight`), so the screen GRUB clears before it
+boots stays the splash, and an `echo` draws the new background at once
+instead of at GRUB's next output.
 With `fade` GRUB shows the colour only, and the picture fades in on it. The
 kernel's console stays off the screen while it starts (`fbcon=map:9`, a
 framebuffer that never comes), so it does not clear what GRUB drew before
