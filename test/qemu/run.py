@@ -1524,29 +1524,41 @@ class Runner:
         if env.get("ORDER", "").split()[:1] != [slot] or env.get(f"{other}_OK") != "1" or env.get(f"{other}_TRY") != "0":
             raise TestFailure(f"after the rollback to {slot}, slot {other} is not kept good behind it: {env}")
 
-    def keep_good(self, slot):
+    def keep_good(self, slot, proven):
         """In the agent's place, the slot the device rolled back to is marked
-        good (ironflockos-slot-keep may have been first: the slot had proven
-        itself before). It is still that proven system: its slot-proven mark
-        is there."""
+        good (ironflockos-slot-keep may have been first, on a slot that had
+        proven itself before). It is still the system it was: its slot-proven
+        mark is there exactly when it was there before the rollback."""
         self.vm.run("rauc status mark-good")
         env = self.grubenv()
         if env.get(f"{slot}_OK") != "1" or env.get(f"{slot}_TRY") != "0":
             raise TestFailure(f"slot {slot} is not good after rauc status mark-good: {env}")
-        self.vm.run("test -e /var/lib/ironflockos/slot-proven")
+        if (self.exit_code("test -e /var/lib/ironflockos/slot-proven")[0] == 0) != proven:
+            raise TestFailure(f"slot {slot}'s slot-proven mark {'went' if proven else 'came'} with the rollback")
+
+    def slot_a_proven(self):
+        """Whether slot A, which does not run, has the slot-proven mark,
+        read with debugfs."""
+        out = self.vm.run("debugfs -c -R 'stat /var/lib/ironflockos/slot-proven' /dev/disk/by-partlabel/rootfs-a 2>&1",
+                          check=False)
+        return "Inode:" in out
 
     def rollback(self):
         """`ironflock os rollback` (WP-5.3 of the CLI's plan) on the device
         that runs the update in slot B, good, with slot A holding the system it
-        was written with, good since the first boot. The command restarts the
-        device into slot A, which runs again (back_on, `ironflock status`
-        reports slot A and its version); marked good, the device goes forward
-        to slot B the same way, with --json. Both slots hold this build: the
-        versions the command and `ironflock status` report are the same on
-        both, the slot tells the systems apart. Whether the agent reaches
-        IronFlock again QEMU cannot show (no platform answers)."""
+        was written with: nothing was installed into it, so the command takes
+        it whether or not it was tried since it was last marked good (the CLI
+        contract's rule for the image's slot; in CI it usually was, at the
+        reboot before the update). The command restarts the device into slot
+        A, which runs again (back_on, `ironflock status` reports slot A and its
+        version); marked good, the device goes forward to slot B the same
+        way, with --json. Both slots hold this build: the versions the command
+        and `ironflock status` report are the same on both, the slot tells
+        the systems apart. Whether the agent reaches IronFlock again QEMU
+        cannot show (no platform answers)."""
         version = self.image_version()
         installed_b = self.slot_installed("rootfs.1")
+        proven_a = self.slot_a_proven()
         argv = ["ironflock", "os", "rollback", "--yes"]
         out = self.reboot_by("updated", "ironflock-os-rollback", argv)
         if f"Rolled back to IronFlockOS {version} in slot A" not in out:
@@ -1555,7 +1567,7 @@ class Runner:
         system = self.snapshot("rolled-back").get("os") or {}
         if system.get("booted_slot") != "A" or system.get("version") != version:
             raise TestFailure(f"ironflock status after the rollback: {system}, expected slot A and {version}")
-        self.keep_good("A")
+        self.keep_good("A", proven_a)
 
         argv = ["ironflock", "os", "rollback", "--yes", "--json"]
         result = self.json_result(self.reboot_by("rolled-back", "ironflock-os-rollback-json", argv), " ".join(argv))
@@ -1563,7 +1575,8 @@ class Runner:
         if {key: result.get(key) for key in want} != want:
             raise TestFailure(f"`{' '.join(argv)}` reported {result}, expected {want}")
         self.back_on("B", "A", installed_b)
-        self.keep_good("B")
+        # update_to_b waited for B's mark.
+        self.keep_good("B", True)
         system = self.snapshot("rolled-forward").get("os") or {}
         if system.get("booted_slot") != "B" or system.get("primary_slot") != "B":
             raise TestFailure(f"ironflock status after the rollback to slot B: {system}")

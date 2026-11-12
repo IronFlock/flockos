@@ -175,8 +175,10 @@ Sequence:
 4. **Rollback** (`ironflock os rollback`, WP-5.3 of the CLI's plan), under
    KVM only: under emulation, on the arm64 runners, its two restarts would
    take many minutes, and only the refusals run there. On slot B, good, with
-   slot A good since the first boot, `ironflock os rollback --yes` restarts
-   the device into slot A. Its output and exit code go to files on `/data`,
+   slot A holding the system the image was written with (nothing installed
+   into it, so the command takes it even when it was tried since it was
+   last marked good, as it usually is here), `ironflock os rollback --yes`
+   restarts the device into slot A. Its output and exit code go to files on `/data`,
    synced before the restart, and are read once the device runs again (the
    test's shell answers early in the boot, before `/data` is mounted): exit
    code 0 (from the file, else as the shell printed it before the restart;
@@ -187,8 +189,9 @@ Sequence:
    update in slot B is unchanged; grubenv has A first in `ORDER` and B still
    good behind it; `ironflock status --json` reports slot A and the image's
    version. The test marks A good in the agent's place
-   (`ironflockos-slot-keep` may have been first) and A still has its
-   `slot-proven` mark. Then `ironflock os rollback --yes --json` takes the
+   (`ironflockos-slot-keep` may have been first), and A's `slot-proven`
+   mark is there exactly when it was before the rollback (read with
+   `debugfs` from slot B). Then `ironflock os rollback --yes --json` takes the
    device forward to slot B the same way: its result is `action`
    `rolled_back`, `slot` B, `from_slot` A and the build's version as
    `version` and `from_version`; the same checks hold with the slots
