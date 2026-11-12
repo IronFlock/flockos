@@ -596,7 +596,9 @@ SH
     [[ "$block" == *"load_env --file \${prefix}/splash.env --skip-sig IRONFLOCKOS_SPLASH_BACKGROUND IRONFLOCKOS_SPLASH_MODE"* ]]
     [[ "$block" == *"if loadfont (memdisk)/fonts/unicode.pf2; then"* ]]
     [[ "$block" == *"if terminal_output gfxterm $terminal; then"* ]]
-    [[ "$block" == *'background_color "${IRONFLOCKOS_SPLASH_BACKGROUND}"'* ]]
+    [[ "$block" == *'background_color "${splash_background}"'* ]]
+    # GRUB's script has no "!": every condition is a plain one.
+    ! echo "$cfg" | grep -qE '^\s*(el)?if !'
     [[ "$block" == *'background_image -m normal ${prefix}/splash-screen.png'* ]]
     [[ "$block" == *'set gfxmode="${IRONFLOCKOS_SPLASH_MODE},auto"'* ]]
     [[ "$block" == *"set gfxpayload=keep"* ]]
