@@ -168,6 +168,12 @@ The app guarantees:
   the last message stays on the kept splash.
 - Acceptance: in QEMU a device without a `.flock` shows the logo and the sentence that
   it is not enrolled; with `boot=text` the console lines are unchanged.
+- As built (branch `splash`): `/usr/lib/ironflockos/screen-message`, called by the
+  scripts besides their console lines (`docs/build.md`, "Messages on the splash"). The
+  QEMU test puts a message on a Plymouth started by hand and reads it below the picture
+  on the screen, also after Plymouth quit; the run with a `.flock` does not boot an
+  unenrolled device, so the enrollment's own sentence is checked by the unit tests and
+  shows on the screen only in a run with `--no-flock`.
 
 ### WP-8.4 The device's own splash picture (2.5 days)
 
@@ -236,7 +242,7 @@ The app guarantees:
 |----|-------|------|------|------------|--------|
 | 8.1 | The splash by default on the EFI targets | ironflockos | 3 | | built on `splash`, proof in CI |
 | 8.2 | The usual keys | ironflockos | 2 | 8.1, O1 | built on `splash`, proof in CI |
-| 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | open |
+| 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | built on `splash`, proof in CI |
 | 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | built on `splash`, proof in CI |
 | 8.5 | The kiosk app | its own | own plan | the contract | open |
 | 8.7 | No black between the firmware's picture and the splash | ironflockos, hardware | 3 | 8.1, 8.2, 8.4 | open |

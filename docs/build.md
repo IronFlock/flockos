@@ -694,6 +694,27 @@ removes the archive and `IRONFLOCKOS_BOOT` with the old owner's data
 ([Factory reset](#factory-reset)). `/usr/lib/ironflockos/splash check-png FILE`
 and `check-conf FILE` tell whether a file would be taken.
 
+**Messages on the splash.** What the image says on the console to a person at
+the device also goes to the line below the picture, through
+`/usr/lib/ironflockos/screen-message TEXT` (`plymouth display-message` while
+Plymouth runs; without Plymouth, as with `boot=text`, it does nothing and the
+console lines are as they were):
+
+| Script | Message |
+|--------|---------|
+| `ironflockos-enroll`, no `.flock` | Not enrolled: put this device's .flock file on its IRONFLOCKOS partition. |
+| `ironflockos-enroll`, none accepted | Not enrolled: the .flock file on the IRONFLOCKOS partition was not accepted. |
+| `ironflockos-data-missing` | The data partition could not be mounted: the apps do not run. |
+| `ironflockos-apps-check` | The apps' data is not on the data partition: it is lost at the next update. |
+| `ironflockos-network-profiles` | The network profile NAME was refused: it is not taken. |
+| `ironflockos-factory-reset` | Factory reset: this takes a few minutes. Do not turn the device off. / Factory reset done: the device restarts. / The factory reset failed this time: the next start tries again. / The factory reset gave up: see factory-reset.log on the IRONFLOCKOS partition. |
+| `ironflockos-nvidia-secure-boot` | Secure Boot is on: the NVIDIA GPU cannot be used. Turn Secure Boot off in the firmware setup. |
+
+The theme shows the last one, in white on a dark background and in black on a
+light one. Plymouth quits after `ironflockos-enroll` (the drop-in for
+`plymouth-quit.service`), so the message that is there then stays below the
+picture after the boot.
+
 **Keys at the screen.** A person with a keyboard at the device has the keys
 of any PC:
 
