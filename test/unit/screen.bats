@@ -131,10 +131,9 @@ unpack() {
   diff <(sed '1,/^\/\/ --- end of settings ---$/d' "$d/ironflockos.script") <(sed '1,/^\/\/ --- end of settings ---$/d' "$theme_src/ironflockos.script")
   # No temporary file left on the partition or in /run.
   [ "$(ls -A "$tmp/esp/EFI/BOOT" | tr '\n' ' ')" = "splash.cpio splash.env " ]
-  # GRUB's colour (WP-8.7); with animation=none no picture until the screen
-  # is taken after a boot.
+  # GRUB's colour (WP-8.7).
   grep -qx 'IRONFLOCKOS_SPLASH_BACKGROUND=#204060' "$tmp/esp/EFI/BOOT/splash.env"
-  [ -z "$(ls -A "$tmp/run" | grep -vE '^splash-(theme|booted)$')" ]
+  [ -z "$(ls -A "$tmp/run" | grep -vE '^splash-theme$')" ]
 }
 
 @test "splash: the same files make the same archive, which is not written again" {

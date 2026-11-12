@@ -2,8 +2,8 @@
 # consoles [fbN]: the virtual terminals get the kernel's console on the screen
 # back (docs/build.md, "The screen"). With the splash the kernel starts with
 # its console off the screen (fbcon=map:9 names a framebuffer that is never
-# there), so that it does not clear the picture GRUB left there before
-# Plymouth draws the same. udev runs this for every framebuffer the running
+# there), so that it does not clear the colour GRUB left there before
+# Plymouth draws on it. udev runs this for every framebuffer the running
 # system finds (71-ironflockos-consoles.rules), by then Plymouth has drawn
 # and holds the first terminal in graphics mode, where the console draws
 # nothing: the terminals 2 to 6 get their text, the login prompts and the
