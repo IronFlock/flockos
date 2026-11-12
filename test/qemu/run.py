@@ -25,7 +25,11 @@ IronFlock did not sign); enrolled, the device changes hands with `sudo ironflock
 agent configure -c` run by its owner over SSH, and back; for nvidia
 the driver, its modules and the container runtime without a GPU; reboot
 (state persists, a proxy.conf and a static network profile on the IRONFLOCKOS
-partition are taken); update into slot B with the bundle of the same build
+partition are taken); the splash (docs/build.md, "The screen"; every other
+boot is on text, ironflockos.boot=text, as the checks read the serial
+console): Plymouth from the initramfs, the screen read through QMP's
+screendump through the boot and after, a damaged splash.cpio, then the
+device's own picture with its refusals; update into slot B with the bundle of the same build
 (while RAUC installs, `os update` and `os rollback` refuse; installed, `os
 rollback` refuses the update that waits for its restart);
 under KVM, `ironflock os rollback` back to slot A and forward to slot B;
@@ -65,6 +69,7 @@ import tempfile
 import threading
 import time
 import uuid
+import zlib
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # The guest device of the debug shell per architecture (see the docstring).
@@ -74,10 +79,14 @@ DEBUG_SHELL = {"amd64": "ttyS1", "arm64": "hvc0"}
 HOST_ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(os.uname().machine)
 
 
-def debug_cmdline(arch):
+def debug_cmdline(arch, splash=False):
+    """The test's kernel parameters. The tests read the boot on the serial
+    console, so they boot on text (ironflockos.boot=text, docs/build.md "The
+    screen"); the splash step boots with the splash (splash=True)."""
     tty = DEBUG_SHELL[arch]
     extra = f" systemd.mask=serial-getty@{tty}.service" if tty.startswith("hvc") else ""
-    return f"systemd.debug_shell={tty}{extra}"
+    text = "" if splash else " ironflockos.boot=text"
+    return f"systemd.debug_shell={tty}{extra}{text}"
 
 
 def pick_accel(arch):
@@ -169,6 +178,273 @@ def esp_offset(disk):
         return first_lba * 512
 
 
+# --- the screen ----------------------------------------------------------------
+# The VM has a graphics device; QEMU's QMP command screendump reads what it
+# shows (with -display none too). A frame is compared with the splash it
+# should show: the picture centred at its own size on the background colour
+# (docs/kiosk-plan.md, the contract), faded in by some amount.
+
+
+def png_chunk(kind, data):
+    return len(data).to_bytes(4, "big") + kind + data + zlib.crc32(kind + data).to_bytes(4, "big")
+
+
+def png_encode(width, height, rgb, chunks=()):
+    """An 8-bit RGB PNG of rgb (width * height * 3 bytes); chunks: extra
+    (type, data) pairs before the image data."""
+    rows = b"".join(b"\0" + rgb[y * width * 3:(y + 1) * width * 3] for y in range(height))
+    out = b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\0\0\0")
+    for kind, data in chunks:
+        out += png_chunk(kind, data)
+    return out + png_chunk(b"IDAT", zlib.compress(rows, 9)) + png_chunk(b"IEND", b"")
+
+
+def png_decode(data):
+    """(width, height, RGBA bytes) of an 8-bit, not interlaced RGB or RGBA
+    PNG: the default picture and the test's."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise TestFailure("not a PNG")
+    pos, idat, width = 8, b"", 0
+    while pos < len(data):
+        n = int.from_bytes(data[pos:pos + 4], "big")
+        kind, body = data[pos + 4:pos + 8], data[pos + 8:pos + 8 + n]
+        pos += 12 + n
+        if kind == b"IHDR":
+            width, height = int.from_bytes(body[0:4], "big"), int.from_bytes(body[4:8], "big")
+            depth, ctype, interlace = body[8], body[9], body[12]
+            if depth != 8 or ctype not in (2, 6) or interlace:
+                raise TestFailure(f"png_decode: colour type {ctype}, {depth} bits, interlace {interlace}")
+        elif kind == b"IDAT":
+            idat += body
+    bpp = 3 if ctype == 2 else 4
+    raw, stride = zlib.decompress(idat), width * bpp
+    out, prev = bytearray(), bytearray(stride)
+    for y in range(height):
+        f, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b, c = prev[i], prev[i - bpp] if i >= bpp else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        prev = line
+        if bpp == 4:
+            out += line
+        else:
+            for i in range(0, stride, 3):
+                out += line[i:i + 3] + b"\xff"
+    return width, height, bytes(out)
+
+
+class Splash:
+    """What the screen should show: picture (PNG bytes) centred on bg (r, g,
+    b). match(frame) says whether a frame is that splash, faded in by alpha
+    (0: the background alone, 1: the whole picture), with nothing else on it."""
+
+    def __init__(self, picture, bg):
+        self.w, self.h, rgba = png_decode(picture)
+        self.bg = bg
+        # The pixels of the picture that differ from the background, as their
+        # difference; the others must be the background.
+        self.ink, self.clear = [], []
+        for i in range(self.w * self.h):
+            r, g, b, a = rgba[4 * i:4 * i + 4]
+            d = tuple((c - k) * a / 255 for c, k in zip((r, g, b), bg))
+            if max(abs(x) for x in d) > 24:
+                self.ink.append((i % self.w, i // self.w, d))
+            elif a == 0:
+                self.clear.append((i % self.w, i // self.w))
+        self.clear = self.clear[::7]
+
+    def match(self, frame):
+        """(True, alpha, why) for the splash, (False, alpha or None, why) for
+        anything else."""
+        width, height, px = frame
+        if width < self.w or height < self.h:
+            return False, None, f"a screen of {width}x{height}"
+        bg = px[0:3]
+        if max(abs(a - b) for a, b in zip(bg, self.bg)) > 1:
+            return False, None, f"the corner is #{bg.hex()}, not the background"
+        x0, y0 = (width - self.w) // 2, (height - self.h) // 2
+        row = bg * width
+        # Outside the picture (and a pixel around it) only the background.
+        for y in range(height):
+            line = px[y * width * 3:(y + 1) * width * 3]
+            if y < y0 - 1 or y > y0 + self.h:
+                if line != row:
+                    return False, None, f"something besides the background in row {y}"
+            elif line[:(x0 - 1) * 3] != row[:(x0 - 1) * 3] or line[(x0 + self.w + 1) * 3:] != row[(x0 + self.w + 1) * 3:]:
+                return False, None, f"something besides the background beside the picture, row {y}"
+        # Where the contract puts it; a pixel off is looked for only when it
+        # is not there.
+        best = self._fit(px, width, x0, y0, bg)
+        if not self._good(best):
+            for dx, dy in ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)):
+                fit = self._fit(px, width, x0 + dx, y0 + dy, bg)
+                if fit[1] < best[1]:
+                    best = fit
+        alpha, err, off, clear_off = best
+        if not self._good(best):
+            return False, alpha, f"not the picture (alpha {alpha:.2f}, error {err:.1f}, {off:.1%} off, {clear_off:.1%} not clear)"
+        return True, alpha, f"the splash, alpha {alpha:.2f}"
+
+    @staticmethod
+    def _good(fit):
+        _, err, off, clear_off = fit
+        return err <= 6 and off <= 0.01 and clear_off <= 0.01
+
+    def _fit(self, px, width, x0, y0, bg):
+        obs = []
+        for x, y, d in self.ink:
+            p = 3 * ((y0 + y) * width + x0 + x)
+            obs.append((tuple(px[p + c] - bg[c] for c in range(3)), d))
+        num = sum(o[c] * d[c] for o, d in obs for c in range(3))
+        den = sum(d[c] * d[c] for _, d in obs for c in range(3)) or 1
+        alpha = max(0.0, min(1.0, num / den))
+        errs = [max(abs(o[c] - alpha * d[c]) for c in range(3)) for o, d in obs]
+        err = sum(errs) / max(1, len(errs))
+        off = sum(1 for e in errs if e > 40) / max(1, len(errs))
+        clear_off = sum(1 for x, y in self.clear
+                        if max(abs(px[3 * ((y0 + y) * width + x0 + x) + c] - bg[c]) for c in range(3)) > 8)
+        return alpha, err, off, clear_off / max(1, len(self.clear))
+
+
+class QMP:
+    """QEMU's machine protocol on a unix socket: screendump."""
+
+    def __init__(self, path):
+        deadline = time.time() + 30
+        while True:
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                self.sock.connect(path)
+                break
+            except (ConnectionRefusedError, FileNotFoundError):
+                self.sock.close()
+                if time.time() > deadline:
+                    raise TestFailure("QEMU's QMP socket does not answer") from None
+                time.sleep(0.2)
+        self.sock.settimeout(60)
+        self.file = self.sock.makefile("rwb")
+        self.lock = threading.Lock()
+        self._read()
+        self.command("qmp_capabilities")
+
+    def _read(self):
+        line = self.file.readline()
+        if not line:
+            raise TestFailure("QEMU closed the QMP socket")
+        return json.loads(line)
+
+    def command(self, name, **arguments):
+        with self.lock:
+            self.file.write(json.dumps({"execute": name, "arguments": arguments}).encode() + b"\r\n")
+            self.file.flush()
+            while True:
+                msg = self._read()
+                if "return" in msg:
+                    return msg["return"]
+                if "error" in msg:
+                    raise TestFailure(f"QMP {name}: {msg['error'].get('desc')}")
+
+    def screen(self, path):
+        """(width, height, RGB bytes) of what the screen shows, by screendump
+        (PPM), or None when there is no picture yet."""
+        try:
+            self.command("screendump", filename=path)
+        except TestFailure:
+            return None
+        with open(path, "rb") as fh:
+            data = fh.read()
+        os.remove(path)
+        parts = data.split(maxsplit=4)
+        if parts[0] != b"P6" or parts[3] != b"255":
+            raise TestFailure("screendump wrote no PPM")
+        width, height = int(parts[1]), int(parts[2])
+        return width, height, parts[4][:width * height * 3]
+
+    def close(self):
+        self.sock.close()
+
+
+def save_screen(frame, path):
+    """A frame as a PNG, for CI's artifact."""
+    width, height, px = frame
+    with open(path, "wb") as fh:
+        fh.write(png_encode(width, height, px))
+
+
+class ScreenWatch:
+    """screendump about once a second in a thread, each frame matched against
+    a splash: what the screen showed through a reboot."""
+
+    def __init__(self, qmp, splash, workdir, name):
+        self.qmp, self.splash, self.workdir, self.name = qmp, splash, workdir, name
+        self.frames = []
+        self.saved = set()
+        self.stop_flag = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        tmp = os.path.join(self.workdir, f"screendump-{self.name}.ppm")
+        while not self.stop_flag.is_set():
+            t = time.time()
+            try:
+                frame = self.qmp.screen(tmp)
+            except (TestFailure, OSError, ValueError, IndexError):
+                frame = None
+            if frame is None:
+                self.frames.append((t, None, None, "no picture"))
+            else:
+                ok, alpha, why = self.splash.match(frame)
+                self.frames.append((t, ok, alpha, why))
+                kind = "splash" if ok else "other"
+                if kind not in self.saved or not ok:
+                    if len(self.saved) < 12:
+                        save_screen(frame, os.path.join(self.workdir, f"screen-{self.name}-{len(self.frames):03d}-{kind}.png"))
+                        self.saved.add(kind if ok else len(self.frames))
+            self.stop_flag.wait(max(0.0, 1.0 - (time.time() - t)))
+
+    def stop(self):
+        self.stop_flag.set()
+        self.thread.join(30)
+
+    def timeline(self, t0):
+        return "\n".join(f"  {t - t0:6.1f}s  {why}" for t, _, _, why in self.frames)
+
+    def check(self, t0, t_shell):
+        """From some frame on to the end the screen is the splash and
+        nothing else; that run began before the shell of the new system
+        answered; once the picture showed, it never faded back (nothing that
+        appears, goes and comes back); and it ends with the whole picture."""
+        frames = [f for f in self.frames if f[1] is not None]
+        if not frames:
+            raise TestFailure("no picture from the screen")
+        start = len(frames)
+        while start > 0 and frames[start - 1][1]:
+            start -= 1
+        if start == len(frames):
+            raise TestFailure(f"the screen does not show the splash at the end:\n{self.timeline(t0)}")
+        if frames[start][0] > t_shell:
+            raise TestFailure(f"something besides the splash on the screen after the root filesystem was "
+                              f"there ({t_shell - t0:.1f}s):\n{self.timeline(t0)}")
+        top = 0.0
+        for _, _, alpha, _ in frames[start:]:
+            if top >= 0.5 and alpha < top - 0.15:
+                raise TestFailure(f"the picture faded back after it showed:\n{self.timeline(t0)}")
+            top = max(top, alpha)
+        if frames[-1][2] < 0.97:
+            raise TestFailure(f"the picture is not whole at the end (alpha {frames[-1][2]:.2f}):\n{self.timeline(t0)}")
+
+
 TEST_OWNER = "ironflockostest"
 TEST_FLOCK_NAME = "ironflockos-ci"
 # The device the factory reset enrolls it as.
@@ -179,6 +455,25 @@ OTHER_OWNER = "ironflockosother"
 OTHER_FLOCK_NAME = "ironflockos-ci-other"
 # The static network profile the IRONFLOCKOS partition hands over (ADR-0016).
 STATIC_PROFILE = "ironflockos-ci-static"
+
+
+def test_picture():
+    """The device's own splash picture of the test: 200x120, opaque, a white
+    frame around two colours."""
+    width, height = 200, 120
+    px = bytearray()
+    for y in range(height):
+        for x in range(width):
+            if x < 8 or y < 8 or x >= width - 8 or y >= height - 8:
+                px += b"\xff\xff\xff"
+            else:
+                px += b"\xf0\x80\x10" if x < width // 2 else b"\x10\xc0\x40"
+    return png_encode(width, height, bytes(px))
+
+
+# KDGETMODE on the first virtual terminal: 0 text, 1 graphics. perl-base is
+# in every Debian image.
+KD_MODE = "perl -e 'open(my $t, \"<\", \"/dev/tty1\") or die $!; my $m = pack(\"L\", 0); ioctl($t, 0x4B3B, $m) or die $!; print unpack(\"L\", $m)'"
 
 
 def test_flock(name, owner, device_key):
@@ -229,9 +524,11 @@ class VM:
         # disk is an NVMe drive instead of virtio.
         self.stick, self.nvme = stick, nvme
         self.sock_path = os.path.join(workdir, "shell.sock")
+        self.qmp_path = os.path.join(workdir, "qmp.sock")
         self.console = os.path.join(workdir, "console.log")
         self.proc = None
         self.sock = None
+        self.qmp = None
         self.buf = b""
         self.transcript = open(os.path.join(workdir, "shell.log"), "ab")
 
@@ -276,6 +573,13 @@ class VM:
             "-netdev", "user,id=net0", "-device", "virtio-net-pci,netdev=net0,romfile=",
             "-serial", f"file:{self.console}",
             "-device", "virtio-rng-pci",
+            # A screen and what a panel PC has for input (docs/build.md, "The
+            # screen"): the firmware draws through it, the kernel takes it
+            # over from the firmware (bochs on amd64, virtio-gpu on arm64),
+            # and screendump reads it through QMP.
+            "-device", "VGA" if self.arch == "amd64" else "virtio-gpu-pci",
+            "-device", "virtio-keyboard-pci", "-device", "virtio-tablet-pci",
+            "-qmp", f"unix:{self.qmp_path},server=on,wait=off",
         ]
         if self.arch == "amd64":
             cmd += ["-serial", f"unix:{self.sock_path},server=on,wait=off"]
@@ -308,6 +612,12 @@ class VM:
                 time.sleep(0.2)
         self.sock.setblocking(False)
 
+    def screen_qmp(self):
+        """QMP for the screen, connected at the first use."""
+        if self.qmp is None:
+            self.qmp = QMP(self.qmp_path)
+        return self.qmp
+
     def wait_exit(self, timeout):
         """Wait for the guest to power off (QEMU exits)."""
         try:
@@ -316,6 +626,9 @@ class VM:
             raise TestFailure(f"the VM did not power off within {timeout}s") from None
 
     def stop(self):
+        if self.qmp:
+            self.qmp.close()
+            self.qmp = None
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
             try:
@@ -407,9 +720,12 @@ class VM:
             raise TestFailure(f"`{command}` exited {rc}:\n{out}")
         return out
 
-    def reboot(self, timeout):
+    def reboot(self, timeout, quiet=False):
+        """Restart and wait for the new system's shell. quiet: the kernel
+        writes no "Linux version" to the console (the splash), so the shell
+        is asked from the start; GRUB's hidden menu takes no key but Esc."""
         old = self.run("cat /proc/sys/kernel/random/boot_id").strip()
-        starts = self.kernel_starts()
+        starts = -1 if quiet else self.kernel_starts()
         self._send("systemctl reboot\r")
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -759,6 +1075,7 @@ class Runner:
         self.vm.run("echo ironflockos-test > /data/ironflockos-test-marker")
         # An app's data, which the reboot and the update into slot B keep.
         self.vm.run("mkdir -p /apps/prod/ironflockos-test && echo ironflockos-test > /apps/prod/ironflockos-test/data.txt")
+        self.text_screen()
 
     def explain(self, *units):
         """What a step prints when the units it waited for are not as it
@@ -836,6 +1153,187 @@ class Runner:
                                 timeout=120).strip()
             if label != "docker-default":
                 raise TestFailure(f"a container that is not privileged has the profile {label!r}")
+
+    # --- the screen (docs/build.md, "The screen") ----------------------------
+
+    GRUBENV = "/boot/efi/EFI/BOOT/grubenv"
+    ARCHIVE = "/boot/efi/EFI/BOOT/splash.cpio"
+    THEME = "/usr/share/plymouth/themes/ironflockos"
+
+    def text_screen(self):
+        """boot=text, which every step but the splash's boots with: no
+        Plymouth, the kernel's messages, a login prompt on tty1, as before
+        the splash."""
+        cmdline = self.vm.run("cat /proc/cmdline").split()
+        if "plymouth.enable=0" not in cmdline or "splash" in cmdline or "quiet" in cmdline:
+            raise TestFailure(f"not a text boot: {' '.join(cmdline)}")
+        self.vm.run("! pidof plymouthd")
+        self.vm.run("systemctl is-active getty@tty1.service")
+
+    def put_file(self, path, data):
+        """A file of the test's into the VM, as an app writes it: under a
+        temporary name, synced, renamed. The shell's line is short, so the
+        data goes in pieces."""
+        tmp = f"{os.path.dirname(path)}/.{os.path.basename(path)}.partial"
+        text = base64.b64encode(data).decode()
+        self.vm.run(f": > {tmp}.b64")
+        for i in range(0, len(text), 2000):
+            self.vm.run(f"printf %s {text[i:i + 2000]} >> {tmp}.b64")
+        self.vm.run(f"base64 -d {tmp}.b64 > {tmp} && rm {tmp}.b64 && sync {tmp} && mv {tmp} {path}")
+
+    def set_boot_cmdline(self, splash):
+        """The test's kernel parameters for the next boots, with the splash
+        or on text."""
+        self.vm.run(f"grub-editenv {self.GRUBENV} set 'IRONFLOCKOS_CMDLINE={debug_cmdline(self.vm.arch, splash)}'")
+
+    def splash_boot(self, expect, name):
+        """Restart with the splash; the screen is watched from the restart to
+        the end of the boot and must be the splash (expect) from before the
+        root filesystem on, faded in and never back; Plymouth ran from the
+        initramfs and is gone at the end."""
+        watch = ScreenWatch(self.vm.screen_qmp(), expect, self.vm.workdir, name)
+        t0 = time.time()
+        try:
+            self.vm.reboot(self.boot_timeout, quiet=True)
+            t_shell = time.time()
+            early = self.vm.run("pid=$(cat /run/plymouth/pid 2>/dev/null) && echo plymouthd=$(cut -d' ' -f22 /proc/$pid/stat) "
+                                "hz=$(getconf CLK_TCK); journalctl -b -o short-monotonic --no-pager _PID=1 | "
+                                "sed -n '1s/^\\[ *\\([0-9]*\\)\\.\\([0-9]*\\)\\].*/systemd=\\1.\\2/p'", check=False)
+            self.wait_running()
+            # Plymouth quits at the end of the boot; the frames after it count.
+            time.sleep(5)
+        finally:
+            watch.stop()
+        log(f"the screen from the restart ({name}):\n{watch.timeline(t0)}")
+        watch.check(t0, t_shell)
+        got = dict(word.split("=", 1) for word in early.split() if "=" in word)
+        try:
+            started = int(got["plymouthd"]) / int(got["hz"])
+            systemd = float(got["systemd"])
+        except (KeyError, ValueError):
+            raise TestFailure(f"Plymouth did not run when the root filesystem's system started:\n{early}") from None
+        if started >= systemd:
+            raise TestFailure(f"Plymouth started at {started:.2f}s, not in the initramfs (systemd at {systemd:.2f}s)")
+        cmdline = self.vm.run("cat /proc/cmdline").split()
+        for want in ("quiet", "splash", "plymouth.ignore-serial-consoles", "plymouth.force-frame-buffer-on-boot",
+                     "vt.global_cursor_default=0"):
+            if want not in cmdline:
+                raise TestFailure(f"{want} is not on the kernel command line: {' '.join(cmdline)}")
+        self.vm.run("! pidof plymouthd")
+
+    def splash(self):
+        """WP-8.1 (docs/kiosk-plan.md): the splash by default. The initramfs
+        carries Plymouth and the theme. A boot with the splash, and an
+        archive of random bytes next to grubenv (a damaged splash.cpio): it
+        boots, and the screen shows IronFlock's logo on black from before the
+        root filesystem to the end of the boot and 30 seconds later, with no
+        text; ironflockos-splash then removes the archive, as /data names no
+        picture. After the boot tty1 is in front, in graphics mode, without
+        a login prompt; an error on the kernel's log goes to the serial
+        console and leaves the screen as it is; every input device has its
+        ID_INPUT properties."""
+        self.vm.run("test ! -e /data/ironflockos/screen/splash.png && test -d /data/ironflockos/screen")
+        self.vm.run(f"test \"$(stat -c '%U %a' /data/ironflockos/screen)\" = 'root 755'")
+        initramfs = self.vm.run("lsinitramfs /initrd.img | grep -E 'plymouth|ironflockos'", timeout=300)
+        for want in (f"{self.THEME[1:]}/ironflockos.script", f"{self.THEME[1:]}/ironflock.png",
+                     "etc/plymouth/plymouthd.conf", "/plymouth/script.so", "/plymouth/renderers/frame-buffer.so",
+                     "/plymouth/label-pango.so", "usr/sbin/plymouthd"):
+            if want not in initramfs:
+                raise TestFailure(f"the initramfs has no {want}")
+        log("sizes: " + self.vm.run("du -h --apparent-size /boot/initrd.img-* | tr '\\t\\n' '  '; "
+                                    "df -h --output=used,size / | tail -n 1"))
+        self.vm.run(f"head -c 8192 /dev/urandom > {self.ARCHIVE} && sync")
+        self.set_boot_cmdline(splash=True)
+        with open(os.path.join(REPO, "docs", "assets", "ironflock-splash.png"), "rb") as fh:
+            logo = Splash(fh.read(), (0, 0, 0))
+        self.splash_boot(logo, "logo")
+        self.vm.run("journalctl -k -b --no-pager -o cat | grep -q 'Initramfs unpacking failed'")
+        self.wait_for(f"test ! -e {self.ARCHIVE}", 60, "ironflockos-splash to remove the damaged archive")
+        # The first virtual terminal belongs to the screen.
+        if self.vm.run("cat /sys/class/tty/tty0/active").strip() != "tty1":
+            raise TestFailure("tty1 is not the virtual terminal in front")
+        if self.vm.run(KD_MODE).strip() != "1":
+            raise TestFailure("tty1 is not in graphics mode after the boot")
+        self.vm.run("! systemctl -q is-active getty@tty1.service")
+        qmp = self.vm.screen_qmp()
+        shot = os.path.join(self.vm.workdir, "screendump.ppm")
+        before = qmp.screen(shot)
+        ok, _, why = logo.match(before)
+        if not ok:
+            save_screen(before, os.path.join(self.vm.workdir, "screen-logo-after-boot.png"))
+            raise TestFailure(f"after the boot the screen is not the splash: {why}")
+        mark = f"ironflockos-ci: an error on the kernel log {uuid.uuid4().hex[:8]}"
+        self.vm.run(f"echo '<3>{mark}' > /dev/kmsg")
+        time.sleep(3)
+        if qmp.screen(shot) != before:
+            raise TestFailure("an error on the kernel's log changed the screen")
+        with open(self.vm.console, "rb") as fh:
+            if mark.encode() not in fh.read():
+                raise TestFailure("an error on the kernel's log did not reach the serial console")
+        time.sleep(30)
+        after = qmp.screen(shot)
+        if after != before:
+            save_screen(after, os.path.join(self.vm.workdir, "screen-logo-30s.png"))
+            raise TestFailure(f"the screen changed within 30 seconds after the boot: {logo.match(after)[2]}")
+        # Every input device is named for what it is (the contract).
+        bad = self.vm.run("for d in /dev/input/event*; do udevadm info -q property -n \"$d\" | grep -qx ID_INPUT=1 "
+                          "|| echo \"$d\"; done").strip()
+        if bad:
+            raise TestFailure(f"input devices without ID_INPUT: {bad}")
+        self.vm.run("udevadm info -q property -n /dev/input/event0 >/dev/null && "
+                    "for d in /dev/input/event*; do udevadm info -q property -n \"$d\"; done | grep -qx ID_INPUT_KEYBOARD=1")
+
+    def own_splash(self):
+        """WP-8.4: the device's own picture. A screen app's temporary file
+        changes nothing; the renamed picture and splash.conf become
+        splash.cpio; a file that is no PNG, one too large, one with another
+        chunk and a splash.conf with an unknown key are refused, and the
+        splash stays; the theme for the shutdown has the picture. The next
+        boot shows the picture on its background, without a fade (animation
+        none), and the boot before it ended with Plymouth's shutdown splash."""
+        screen = "/data/ironflockos/screen"
+        picture = test_picture()
+        bg = (0x20, 0x40, 0x60)
+        journal = "journalctl -b --no-pager -o cat -u ironflockos-splash.service"
+        self.vm.run(f"printf x > {screen}/.splash.png.partial && sleep 3")
+        self.vm.run(f"test ! -e {self.ARCHIVE} && rm {screen}/.splash.png.partial")
+        self.put_file(f"{screen}/splash.conf", b"background=#204060\nanimation=none\n")
+        self.put_file(f"{screen}/splash.png", picture)
+        taken = "the splash from the next boot on: the device's picture, background #204060, animation none"
+        self.wait_for(f"{journal} | grep -qF \"{taken}\" && [ -s {self.ARCHIVE} ]", 60, "the picture to become splash.cpio")
+        good = self.vm.run(f"cksum < {self.ARCHIVE}").strip()
+        wrong = [
+            (b"no picture\n", "splash.png is not a PNG"),
+            (None, "splash.png is larger than 4 MiB"),
+            (picture[:33] + png_chunk(b"tEXt", b"Comment\0x") + picture[33:],
+             "splash.png has the chunk tEXt: only IHDR, PLTE, tRNS, IDAT and IEND are taken"),
+        ]
+        for data, reason in wrong:
+            if data is None:
+                self.vm.run(f"head -c 4194305 /dev/zero > {screen}/.big && sync && mv {screen}/.big {screen}/splash.png")
+            else:
+                self.put_file(f"{screen}/splash.png", data)
+            self.wait_for(f"{journal} | grep -qF 'refused: {reason}; the splash stays as it was'", 60,
+                          f"the refusal of {reason!r}")
+            if self.vm.run(f"cksum < {self.ARCHIVE}").strip() != good:
+                raise TestFailure(f"splash.cpio changed with {reason!r}")
+        self.put_file(f"{screen}/splash.png", picture)
+        self.put_file(f"{screen}/splash.conf", b"background=#204060\nfont=big\n")
+        self.wait_for(f"{journal} | grep -qF 'refused: splash.conf: line 2: unknown key font'", 60,
+                      "the refusal of an unknown key")
+        self.put_file(f"{screen}/splash.conf", b"background=#204060\nanimation=none\n")
+        self.wait_for(f"! systemctl -q is-failed ironflockos-splash.service && [ \"$(cksum < {self.ARCHIVE})\" = '{good}' ]",
+                      60, "the splash to be taken again")
+        # The running system's theme has the picture, for the shutdown.
+        self.vm.run(f"findmnt -n {self.THEME} >/dev/null && cmp {self.THEME}/splash.png {screen}/splash.png"
+                    f" && grep -qx 'animation = \"none\";' {self.THEME}/ironflockos.script")
+        self.splash_boot(Splash(picture, bg), "own")
+        self.vm.run("journalctl -b -1 --no-pager -o cat -u plymouth-reboot.service | grep -q '^Started '")
+        if self.vm.run(f"cksum < {self.ARCHIVE}").strip() != good:
+            raise TestFailure("the boot did not keep splash.cpio as it was")
+        self.splash_archive = good
+        # The steps after this one read the boot on the serial console.
+        self.set_boot_cmdline(splash=False)
 
     def fsck_repair(self):
         """A filesystem that a preen gives up on is repaired at boot
@@ -1287,6 +1785,12 @@ class Runner:
             raise TestFailure("the SSH host key changed with the update")
         self.mark_good("B", "rootfs.1")
         self.wait_for("test -e /var/lib/ironflockos/slot-proven", 60, "slot B to remember it was marked good")
+        # The device's own splash outlives the update: splash.cpio is on the
+        # IRONFLOCKOS partition, and slot B's ironflockos-splash makes the same.
+        if getattr(self, "splash_archive", None):
+            self.vm.run("! systemctl -q is-failed ironflockos-splash.service")
+            if self.vm.run(f"cksum < {self.ARCHIVE}").strip() != self.splash_archive:
+                raise TestFailure("the device's splash.cpio changed with the update")
         self.snapshot("updated")
 
     # --- ironflock os: update and rollback (WP-5.2, WP-5.3 of the CLI's plan) --
@@ -1793,6 +2297,10 @@ class Runner:
                            ("image", "hello-world")):
             self.vm.run(f"! docker {kind} inspect {name} >/dev/null 2>&1")
         self.vm.run("test ! -e /apps/prod/ironflockos-reset-test && test ! -e /data/ironflockos-test-marker")
+        # The device's own splash went with the old owner's data: IronFlock's
+        # logo from the restart on, and an empty screen folder.
+        self.vm.run(f"test ! -e {self.ARCHIVE} && test -d /data/ironflockos/screen"
+                    " && test -z \"$(ls -A /data/ironflockos/screen)\"")
         boots = self.vm.run("journalctl --list-boots --no-pager | grep -cE '^ *-?[0-9]+ '").strip()
         if boots != "1":
             raise TestFailure(f"the journal holds {boots} boots after the reset, expected only this one")
@@ -1986,6 +2494,8 @@ def install_test(args, conf, arch, version, accel, boot_timeout, port):
         set_test_cmdline(nvme, workdir, debug_cmdline(arch))
         if os.path.exists(vm.sock_path):
             os.remove(vm.sock_path)
+        if os.path.exists(vm.qmp_path):
+            os.remove(vm.qmp_path)
         vm2 = VM(arch, nvme, workdir, accel, nvme=True, secure_boot=args.secure_boot)
         runner = Runner(vm2, conf, base_id, port, None, boot_timeout, disk_dev="/dev/nvme0n1", flock=flock)
         try:
@@ -2101,6 +2611,10 @@ def main():
                     runner.network_profile)
         runner.step("reboot: machine-id, host key, journal persist, proxy.conf and the static profile from IRONFLOCKOS",
                     runner.reboot_persists)
+        runner.step("splash: Plymouth from the initramfs, IronFlock's logo to the end of the boot and after, "
+                    "a damaged splash.cpio, tty1 in graphics mode, input devices", runner.splash)
+        runner.step("own splash: a screen app's picture and splash.conf, refusals, the next boot shows it",
+                    runner.own_splash)
         if args.only != "boot":
             runner.step("update into slot B; ironflock os refuses while RAUC installs and while the update waits",
                         runner.update_to_b)

@@ -2,12 +2,14 @@
 # built: ci.yml calls it once per image, each after the image's own build
 # job, not after the whole build.
 #
-# An image (variant base or nvidia): first boot, reboot, update into slot B
-# with the bundle of the same build, `ironflock os rollback` back and forth
-# (under KVM), factory reset, fallback of an untested slot, crash; `ironflock
-# os update` and `os rollback` refusing along the way. What ironflock reads
-# and prints is uploaded with the logs (captured/, docs/testing.md). The
-# installer stick (variant installer, WP-3.2): it installs
+# An image (variant base or nvidia): first boot, reboot, the splash and the
+# device's own splash picture (the screen read through QMP), update into
+# slot B with the bundle of the same build, `ironflock os rollback` back and
+# forth (under KVM), factory reset, fallback of an untested slot, crash;
+# `ironflock os update` and `os rollback` refusing along the way. What
+# ironflock reads and prints is uploaded with the logs (captured/,
+# docs/testing.md), and so are the frames of the screen that were not the
+# splash. The installer stick (variant installer, WP-3.2): it installs
 # the base image (installer.conf payload=) to a blank NVMe unattended; the
 # NVMe then boots alone.
 name: qemu-test
@@ -110,5 +112,6 @@ jobs:
             /mnt/ironflockos-qemu/shell.log
             /mnt/ironflockos-qemu/ironflockos-installer.log
             /mnt/ironflockos-qemu/captured/
+            /mnt/ironflockos-qemu/screen-*.png
           if-no-files-found: ignore
           retention-days: 7
