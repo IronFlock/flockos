@@ -694,6 +694,48 @@ removes the archive and `IRONFLOCKOS_BOOT` with the old owner's data
 ([Factory reset](#factory-reset)). `/usr/lib/ironflockos/splash check-png FILE`
 and `check-conf FILE` tell whether a file would be taken.
 
+**Keys at the screen.** A person with a keyboard at the device has the keys
+of any PC:
+
+| Key | When | What |
+|-----|------|------|
+| the firmware's setup key | power-on | the firmware's setup, as the PC's maker set it |
+| Esc | GRUB's two seconds | the boot menu: the slot GRUB chose, the other slot as its fallback (once it has been marked good), "Start with messages" (this boot on text, `boot=` stays as it is), "Firmware setup" (`fwsetup`; also for the `-rt` images, whose kernel turns the EFI runtime services off) |
+| Esc | while Plymouth shows the splash | the boot messages; Esc again, the splash |
+| Ctrl+Alt+F2 to F6 | after the boot | a login prompt (logind starts it on the first switch) |
+| Ctrl+Alt+F1 | | back to the first terminal: the splash or the screen app; without a screen app, what the other terminal left there |
+| Ctrl+Alt+Del | | restart, as before |
+
+**The console password.** Nobody logs in at the console unless the device
+has a console password (D8 of [kiosk-plan.md](kiosk-plan.md)):
+`/data/ironflockos/console-password`, owned by root with mode 0600, written by
+the device-agent from Studio, one line with a crypt(3) hash, yescrypt (`$y$`)
+or SHA-512 (`$6$`). `ironflockos-console-password`
+(`/usr/lib/ironflockos/console-password`) makes it the password of the device's
+enrolled user, the account `ironflock enroll` makes from the `.flock`'s owner
+for SSH, with its sudo rule; it finds that user in `ironflock`'s record of the
+enrollment, `/opt/ironflock/device-init/installed.json` (`.user.name`), which
+`ironflock status --json` does not show, and takes it only as an account of a
+person (uid 1000 to 59999) with the rule `/etc/sudoers.d/ironflock-<name>`. It
+runs at every boot after `ironflockos-enroll`, which makes the user anew in a
+slot an update brought, before the login prompts (a drop-in orders
+`getty@.service` after it), and whenever the file changes
+(`ironflockos-console-password.path`). Without the file the password is locked,
+as enroll leaves it. Root and every other account are never touched; root
+stays locked. A file of another owner or mode, of more than one line, or with
+anything but one such hash is refused: the journal says why, the password is
+locked, the unit fails. SSH stays key-only (`PasswordAuthentication no`,
+`KbdInteractiveAuthentication no`, `PermitRootLogin no`). A factory reset
+removes the file with the rest of `/data`.
+
+**What a keyboard can do.** GRUB's editor stays open in this release (D9): a
+person at the boot menu can press `e` and change the kernel command line, and
+so start a root shell. With Secure Boot off, a USB stick with any system does
+the same. Whoever stands at the device with a keyboard gets root, as on any PC
+that is not locked down; Secure Boot here is no tamper protection
+(ADR-0011). A GRUB password, a firmware password and disk encryption are
+hardening for later.
+
 The splash comes with a new installation only: `grub.cfg` is on the
 IRONFLOCKOS partition, which an update does not write. A device installed
 with 0.16.0 or earlier keeps booting on text after an update to a release

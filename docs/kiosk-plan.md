@@ -33,6 +33,8 @@ Decided by Marko on 2026-11-12:
 | D5 | The kiosk app has no content of its own. It shows the UI of another app, and which one is a setting of the kiosk app. |
 | D6 | The kiosk app has a key that opens IronFlock Studio, at its login when nobody is signed in. |
 | D7 | The start is polished from the firmware's picture to the UI: no text, no black in between, and nothing that appears, goes and comes back. The background colour can be set, and the splash can have a small animation. |
+| D8 | O1: a console password per device, set in Studio later. The device-agent writes its hash to `/data/ironflockos/console-password` (root, 0600, one line, yescrypt `$y$` or SHA-512 `$6$`); the image makes it the password of the enrolled user, with its sudo rule, and of no other account. No file: the password stays locked. Root stays locked, SSH key-only. |
+| D9 | GRUB's editor stays open in this release; that a keyboard at the boot menu, or a USB stick with Secure Boot off, gives root is documented. A GRUB password, a firmware password and disk encryption are later hardening. |
 
 Proposed by this plan, to be confirmed with it:
 
@@ -45,11 +47,11 @@ Proposed by this plan, to be confirmed with it:
 | P4 | The kernel's `quiet` comes with the splash, also on the serial console. `boot=text` in `display.conf` turns both off for a device; the installer stick and the QEMU tests stay on text. The level is not lowered further (`loglevel=3`): errors stay on the serial console, and the kept splash is safe from them because its terminal is in graphics mode, which WP-8.1 tests. | The kernel has one log level for all consoles. The journal keeps every line. |
 | P5 | The EFI targets first (`amd64-efi`, `arm64-efi`). The Raspberry Pi and Jetson follow in work packages of their own. | Their boot files and graphics drivers differ. |
 
-Open, Marko's to decide:
+Decided since:
 
-| # | Question | Recommendation |
-|---|----------|----------------|
-| O1 | What does a person log in with at the console? Today no account has a password: `ironflock enroll` creates the device's user with a locked password and a key for SSH. A login prompt alone lets nobody in. | A console password as a device setting, off until someone sets it: its hash in `/data/ironflockos/console-login.conf`, applied to the device's user on every boot of a slot. SSH stays key-only. No default password, and no shell without a login. |
+| # | Question | Answer |
+|---|----------|--------|
+| O1 | What does a person log in with at the console? Today no account has a password: `ironflock enroll` creates the device's user with a locked password and a key for SSH. A login prompt alone lets nobody in. | D8 (Marko, 2026-11-12): a console password per device, applied to the enrolled user; the file is `/data/ironflockos/console-password`. |
 
 ## The contract between the image and a screen app
 
@@ -147,6 +149,15 @@ The app guarantees:
 - Acceptance: in QEMU, with keys sent through QMP: the menu and its firmware entry, the
   messages, the prompt on the second terminal and the way back; a login as O1 says; the
   firmware's own setup key on the first machine (WP-8.6).
+- As built (branch `splash`): the menu has "Start with messages" too (one boot on
+  text, the setting untouched). The enrolled user is the one in `ironflock`'s record
+  `/opt/ironflock/device-init/installed.json`: `ironflock status --json` does not name
+  it. The QEMU test sends Esc to a Plymouth started by hand on the running system (the
+  boot's own Plymouth is gone before the test's shell can time a key), switches to tty2
+  and back, and logs in there with a console password. The menu and its "Firmware
+  setup" are checked in the rendered `grub.cfg` only: a key sent during GRUB's two
+  seconds would have to miss the firmware's own Esc, which the test cannot tell apart.
+  They are WP-8.6's on the machine.
 
 ### WP-8.3 What the image has to say appears on the splash (1.5 days)
 
@@ -224,7 +235,7 @@ The app guarantees:
 | WP | Title | Repo | Days | Depends on | Status |
 |----|-------|------|------|------------|--------|
 | 8.1 | The splash by default on the EFI targets | ironflockos | 3 | | built on `splash`, proof in CI |
-| 8.2 | The usual keys | ironflockos | 2 | 8.1, O1 | blocked (O1) |
+| 8.2 | The usual keys | ironflockos | 2 | 8.1, O1 | built on `splash`, proof in CI |
 | 8.3 | Messages on the splash | ironflockos | 1.5 | 8.1 | open |
 | 8.4 | The device's own splash picture | ironflockos | 2.5 | 8.1 | built on `splash`, proof in CI |
 | 8.5 | The kiosk app | its own | own plan | the contract | open |

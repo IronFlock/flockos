@@ -179,7 +179,15 @@ Sequence:
    theme has the picture for the shutdown; the next boot shows the picture on
    `#204060` from before the root filesystem on, and Plymouth's shutdown splash
    ran at the restart. The update keeps the archive; the factory reset removes
-   it. Not tested in QEMU: whether the picture survives the moment a real
+   it. *Keys* (QMP `send-key`): Esc to a Plymouth started by hand shows the
+   messages and Esc again the splash; Ctrl+Alt+F2 switches to tty2, which gets
+   a login prompt, and Ctrl+Alt+F1 back to tty1. Enrolled, a SHA-512 hash in
+   `/data/ironflockos/console-password` becomes the enrolled user's password
+   and no other account's (root stays `*`), `sshd -T` still says no to
+   passwords for that user and root, the user logs in on tty2 with it
+   (`loginctl`), and without the file the password is locked again. The boot
+   menu and its "Firmware setup" are checked in the rendered `grub.cfg`
+   (`test/unit/screen.bats`), not in QEMU. Not tested in QEMU: whether the picture survives the moment a real
    graphics driver (Intel's) takes the screen from the firmware, the frames
    before the root filesystem's system (the initramfs's are not read one by
    one: the check there is that Plymouth started in it), and the shutdown
