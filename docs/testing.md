@@ -176,7 +176,8 @@ Sequence:
    boots with the splash, the kernel says `Initramfs unpacking failed`, and
    from before the root filesystem's system answered to the end of the boot
    the screen shows IronFlock's logo on black, faded in and never back;
-   Plymouth started in the initramfs (its start before systemd's
+   Plymouth started in the initramfs (its start, which keep-splash writes to
+   the journal when it ends Plymouth, before systemd's
    `UserspaceTimestampMonotonic`) and is gone at the end;
    `ironflockos-splash` removes the damaged archive; tty1 is in front, in
    graphics mode, without a login prompt; an error written to the kernel's log

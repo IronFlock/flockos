@@ -645,9 +645,15 @@ it too. So at the end of the boot `plymouth-quit.service` runs
 `/usr/lib/ironflockos/keep-splash`: Plymouth lets go of the screen
 (`plymouth deactivate`), the framebuffer device, which holds the same picture,
 is put on the screen in the same mode (a forced `FBIOPUT_VSCREENINFO`: no mode
-change, only the other picture), and then Plymouth quits keeping its splash
-(`plymouth quit --retain-splash`). The first virtual terminal stays in
-graphics mode, so nothing the kernel writes is drawn over it. Nothing of the
+change, only the other picture), the first virtual terminal is handed back
+as Plymouth leaves it when it quits without letting go first, and then
+Plymouth quits keeping its splash (`plymouth quit --retain-splash`). That
+terminal stays in graphics mode, so nothing the kernel writes is drawn over
+it; and it is switched by a process (`VT_PROCESS`) that is gone, so that
+Ctrl+Alt+F2 finds nobody to ask, resets it to text mode and switches.
+`plymouth deactivate` alone leaves it in graphics mode switched by nobody
+(`VT_AUTO`), where the kernel ignores every switch. keep-splash also writes
+to the journal when Plymouth started. Nothing of the
 image holds the graphics device after the boot; a screen app that opens it
 takes the screen, and when it closes it, the picture is back. A Plymouth
 that crashes leaves the device as it would be without a splash: a drop-in
